@@ -8,7 +8,7 @@ type Evidence struct {
 	Tag ReleaseTag
 	// AssetDigest is the verified local asset digest.
 	AssetDigest Digest
-	// ReleaseTagDigest is the digest of the Git tag commit resolved for the release.
+	// ReleaseTagDigest is the digest of the Git tag ref object resolved for the release.
 	ReleaseTagDigest Digest
 	// ReleaseAttestation records the accepted immutable release attestation.
 	ReleaseAttestation AttestationEvidence

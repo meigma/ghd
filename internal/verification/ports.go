@@ -2,15 +2,15 @@ package verification
 
 import "context"
 
-// ReleaseResolver resolves GitHub release tags to immutable commit digests.
+// ReleaseResolver resolves GitHub release tags to immutable tag ref object digests.
 type ReleaseResolver interface {
-	// ResolveReleaseTag resolves tag in repository to its commit digest.
+	// ResolveReleaseTag resolves tag in repository to its tag ref object digest.
 	ResolveReleaseTag(ctx context.Context, repository Repository, tag ReleaseTag) (Digest, error)
 }
 
 // AttestationSource loads attestations needed by core verification.
 type AttestationSource interface {
-	// FetchReleaseAttestations returns release attestations for a tag digest.
+	// FetchReleaseAttestations returns release attestations for a tag ref object digest.
 	FetchReleaseAttestations(ctx context.Context, repository Repository, tagDigest Digest) ([]Attestation, error)
 	// FetchProvenanceAttestations returns provenance attestations for an artifact digest.
 	FetchProvenanceAttestations(ctx context.Context, repository Repository, artifactDigest Digest) ([]Attestation, error)
