@@ -32,8 +32,8 @@ func runTestCommand() int {
 		Out:   os.Stdout,
 		Err:   os.Stderr,
 		Viper: vp,
-		RuntimeFactory: func(context.Context, config.Config) (DownloadUseCase, error) {
-			return testDownloader{}, nil
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
 		},
 	})
 	root.SetArgs(os.Args[1:])
@@ -44,9 +44,9 @@ func runTestCommand() int {
 	return 0
 }
 
-type testDownloader struct{}
+type testRuntime struct{}
 
-func (testDownloader) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
+func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
 	artifactPath := filepath.Join(request.OutputDir, "artifact.tar.gz")
 	evidencePath := filepath.Join(request.OutputDir, "verification.json")
 	if err := os.MkdirAll(request.OutputDir, 0o755); err != nil {
@@ -64,5 +64,26 @@ func (testDownloader) Download(_ context.Context, request app.VerifiedDownloadRe
 		Version:      request.Version,
 		ArtifactPath: artifactPath,
 		EvidencePath: evidencePath,
+	}, nil
+}
+
+func (testRuntime) Install(_ context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
+	if err := os.MkdirAll(request.BinDir, 0o755); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := os.MkdirAll(request.StoreDir, 0o755); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	linkPath := filepath.Join(request.BinDir, request.PackageName)
+	if err := os.WriteFile(linkPath, []byte("binary"), 0o755); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	return app.VerifiedInstallResult{
+		Repository:  request.Repository,
+		PackageName: request.PackageName,
+		Version:     request.Version,
+		Binaries: []app.InstalledBinary{
+			{Name: request.PackageName, LinkPath: linkPath, TargetPath: filepath.Join(request.StoreDir, "artifact")},
+		},
 	}, nil
 }

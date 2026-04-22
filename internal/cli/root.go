@@ -14,14 +14,16 @@ import (
 	appruntime "github.com/meigma/ghd/internal/runtime"
 )
 
-// DownloadUseCase is the app behavior consumed by the CLI.
-type DownloadUseCase interface {
+// Runtime is the app behavior consumed by the CLI.
+type Runtime interface {
 	// Download fetches, verifies, and records one release asset.
 	Download(ctx context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error)
+	// Install fetches, verifies, extracts, links, and records one package install.
+	Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error)
 }
 
 // RuntimeFactory constructs use cases from runtime configuration.
-type RuntimeFactory func(context.Context, config.Config) (DownloadUseCase, error)
+type RuntimeFactory func(context.Context, config.Config) (Runtime, error)
 
 // Options customizes root command construction.
 type Options struct {
@@ -47,8 +49,8 @@ func NewRootCommand(options Options) *cobra.Command {
 		options.Viper = viper.New()
 	}
 	if options.RuntimeFactory == nil {
-		options.RuntimeFactory = func(ctx context.Context, cfg config.Config) (DownloadUseCase, error) {
-			return appruntime.NewVerifiedDownloader(ctx, cfg)
+		options.RuntimeFactory = func(ctx context.Context, cfg config.Config) (Runtime, error) {
+			return appruntime.New(ctx, cfg)
 		}
 	}
 
@@ -66,6 +68,7 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.PersistentFlags().String("github-api-url", "", "GitHub REST API base URL")
 	root.PersistentFlags().String("trusted-root", "", "Sigstore trusted_root.json path")
 	root.AddCommand(newDownloadCommand(options))
+	root.AddCommand(newInstallCommand(options))
 	return root
 }
 
