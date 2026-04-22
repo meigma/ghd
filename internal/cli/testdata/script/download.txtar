@@ -15,3 +15,21 @@ exec ghd download --help
 stdout 'Usage:'
 stdout 'download owner/repo/package@version --output DIR'
 ! stderr .
+
+# Successful install command shape uses explicit safe roots.
+exec ghd install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+stdout 'binary bin/foo'
+stderr 'installed owner/repo/foo@1.2.3'
+exists bin/foo
+
+# Malformed install targets fail cleanly.
+! exec ghd install foo --store-dir store --bin-dir bin
+stderr 'install target must be owner/repo/package@version'
+
+# Install help is scriptable and quiet on stderr.
+exec ghd install --help
+stdout 'Usage:'
+stdout 'install owner/repo/package@version --store-dir DIR --bin-dir DIR'
+stdout '--store-dir'
+stdout '--bin-dir'
+! stderr .

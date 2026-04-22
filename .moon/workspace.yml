@@ -21,7 +21,7 @@ projects:
   # Uncomment if glob-discovered IDs are likely to collide.
   # globFormat: 'source-path'
 
-defaultProject: 'docs'
+defaultProject: 'root'
 
 vcs:
   defaultBranch: 'master'
