@@ -53,6 +53,17 @@ func TestVerifierVerifyReleaseAssetHonorsPinnedSignerWorkflowDigest(t *testing.T
 	require.NoError(t, err)
 }
 
+func TestVerifierVerifyReleaseAssetAcceptsCurrentReleasePredicate(t *testing.T) {
+	tc := newTestContext(t)
+	tc.updateResult("release-attestation", func(v *VerifiedAttestation) {
+		v.Statement.PredicateType = ReleasePredicateV02
+	})
+
+	_, err := tc.verifier.VerifyReleaseAsset(context.Background(), tc.request)
+
+	require.NoError(t, err)
+}
+
 func TestVerifierVerifyReleaseAssetFailsClosed(t *testing.T) {
 	tests := []struct {
 		name     string

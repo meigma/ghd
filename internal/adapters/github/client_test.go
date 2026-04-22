@@ -2,9 +2,12 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -14,6 +17,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/verification"
 )
 
@@ -113,6 +117,122 @@ func TestClientFetchProvenanceAttestationsUsesProvenancePredicate(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, attestations, 1)
 	assert.Contains(t, attestations[0].ID, "/bundle/provenance")
+}
+
+func TestClientFetchManifestUsesRawContentsAPI(t *testing.T) {
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		assert.Equal(t, "/repos/owner/repo/contents/ghd.toml", r.URL.Path)
+		fmt.Fprint(w, "version = 1\n")
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL, WithToken("token-123"))
+
+	data, err := client.FetchManifest(context.Background(), verification.Repository{Owner: "owner", Name: "repo"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "version = 1\n", string(data))
+	assert.Equal(t, "application/vnd.github.raw", gotHeader.Get("Accept"))
+	assert.Equal(t, "Bearer token-123", gotHeader.Get("Authorization"))
+}
+
+func TestClientFetchManifestAcceptsContentsJSON(t *testing.T) {
+	encoded := base64.StdEncoding.EncodeToString([]byte("version = 1\n"))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, `{"encoding":"base64","content":%q}`, encoded)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+
+	data, err := client.FetchManifest(context.Background(), verification.Repository{Owner: "owner", Name: "repo"})
+
+	require.NoError(t, err)
+	assert.Equal(t, "version = 1\n", string(data))
+}
+
+func TestClientResolveReleaseAssetSelectsExactName(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/repos/owner/repo/releases/tags/v1.2.3", r.URL.Path)
+		fmt.Fprintf(w, `{"assets":[{"name":"other.tar.gz","browser_download_url":"http://%s/other"},{"name":"foo.tar.gz","browser_download_url":"http://%s/foo"}]}`, r.Host, r.Host)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+
+	asset, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+
+	require.NoError(t, err)
+	assert.Equal(t, "foo.tar.gz", asset.Name)
+	assert.Equal(t, "http://"+server.Listener.Addr().String()+"/foo", asset.DownloadURL)
+}
+
+func TestClientDownloadReleaseAssetDoesNotSendGitHubTokenToAssetURL(t *testing.T) {
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		assert.Equal(t, "/asset/foo.tar.gz", r.URL.Path)
+		fmt.Fprint(w, "artifact bytes")
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL, WithToken("token-123"), WithUserAgent("ghd-test"))
+	outputDir := t.TempDir()
+
+	path, err := client.DownloadReleaseAsset(context.Background(), app.ReleaseAsset{
+		Name:        "foo.tar.gz",
+		DownloadURL: server.URL + "/asset/foo.tar.gz",
+	}, outputDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outputDir, "foo.tar.gz"), path)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "artifact bytes", string(data))
+	assert.Empty(t, gotHeader.Get("Authorization"), "asset URL requests must not receive the GitHub token")
+	assert.Equal(t, "ghd-test", gotHeader.Get("User-Agent"))
+}
+
+func TestClientReleaseAssetOperationsFailClosed(t *testing.T) {
+	t.Run("release asset API error", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "missing", http.StatusNotFound)
+		}))
+		t.Cleanup(server.Close)
+		client := newTestClient(t, server.URL)
+
+		_, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "HTTP 404")
+	})
+
+	t.Run("malformed release response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "{")
+		}))
+		t.Cleanup(server.Close)
+		client := newTestClient(t, server.URL)
+
+		_, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "decode GitHub response")
+	})
+
+	t.Run("download rejects unsafe asset name", func(t *testing.T) {
+		client := newTestClient(t, "https://api.github.test")
+
+		_, err := client.DownloadReleaseAsset(context.Background(), app.ReleaseAsset{
+			Name:        "../foo.tar.gz",
+			DownloadURL: "https://example.test/foo.tar.gz",
+		}, t.TempDir())
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "path separators")
+	})
 }
 
 func TestClientFetchAttestationsFollowsPagination(t *testing.T) {
