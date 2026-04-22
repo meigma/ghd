@@ -1,6 +1,6 @@
-# Active toolchains for the current template.
-# The docs project uses npm today, but this file is meant to be a starting
-# point for future repos that may choose different ecosystems.
+# Active toolchains for ghd.
+# The docs project uses npm today. Add Go tooling here when the CLI
+# implementation lands.
 
 javascript:
   packageManager: 'npm'
@@ -12,37 +12,32 @@ node:
   version: '22.22.2'
   syncVersionManagerConfig: 'nvm'
 
-# Configure npm directly when you want to pin the CLI or customize installs.
-# npm:
-#   version: 'REPLACE_ME_NPM_VERSION'
-#   installArgs: ['--include=dev']
-
-# Swap npm for pnpm, yarn, bun, or deno as needed.
+# Swap npm for pnpm, yarn, bun, or deno if the docs tooling changes.
 # javascript:
 #   packageManager: 'pnpm'
 #   inferTasksFromScripts: true
 #
 # pnpm:
-#   version: 'REPLACE_ME_PNPM_VERSION'
+#   version: '<version>'
 #
 # bun:
-#   version: 'REPLACE_ME_BUN_VERSION'
+#   version: '<version>'
 #
 # deno:
-#   version: 'REPLACE_ME_DENO_VERSION'
+#   version: '<version>'
 
-# Stable non-JavaScript toolchains in Moon v2.
+# Stable non-JavaScript toolchains in Moon v2. Enable Go when CLI code lands.
 # go:
-#   version: 'REPLACE_ME_GO_VERSION'
+#   version: '<version>'
 #
 # rust:
-#   version: 'REPLACE_ME_RUST_VERSION'
+#   version: '<version>'
 #   components: ['clippy', 'rustfmt']
 
 # Python remains unstable in Moon v2.
 # unstable_python:
-#   version: 'REPLACE_ME_PYTHON_VERSION'
+#   version: '<version>'
 #   packageManager: 'uv'
 #
 # unstable_uv:
-#   version: 'REPLACE_ME_UV_VERSION'
+#   version: '<version>'
