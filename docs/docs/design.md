@@ -14,6 +14,34 @@ GitHub release assets, use GitHub-native artifact attestations, and publish
 immutable releases. `ghd` should provide one verification path, not a menu of
 security modes.
 
+## Development Direction
+
+Security is paramount. `ghd` is a security tool, and users must be able to trust
+both its behavior and its failure modes. When security conflicts with
+convenience, compatibility, or implementation speed, security wins.
+
+Simplicity is a security property. Every line of code is another surface to
+understand, test, review, and maintain. Prefer small, proven, boring solutions
+over clever abstractions. Add code only when it earns its place in the verified
+install path or the user experience around that path.
+
+The type system is part of the security boundary. Use strong types to encode
+validated repository names, package names, versions, digests, paths, release
+tags, verification results, and policy decisions. Avoid passing raw strings or
+loosely shaped maps across package boundaries when a narrow type can prevent
+misuse.
+
+User experience matters. `ghd` is intended to make secure installation normal
+for real users, so confusing workflows or unpleasant output directly weaken the
+goal. The CLI should be understandable, scriptable, and pleasant to use, with
+clear errors and polished terminal output where that helps comprehension.
+
+Code hygiene matters. This is an open source project that should welcome human
+contributors. Code should be readable, discoverable, and right-sized: sensible
+package boundaries, clear function names, focused files, strong doc comments on
+exported APIs, and tests that explain behavior rather than implementation
+details.
+
 ## Goals
 
 - Install GitHub release binaries only after verification succeeds.
@@ -298,6 +326,76 @@ Likely Go dependencies:
 
 `ghd` should not import GitHub CLI internal packages directly. They are not a
 stable library boundary.
+
+## Go Module Shape
+
+The first implementation should be a root Go module for the CLI product:
+
+```text
+module github.com/meigma/ghd
+```
+
+The repository should not start with a public `pkg/` API. `ghd` is a command
+first, and the stable API surface should emerge from the verified install flow
+after the CLI has proved which abstractions are useful.
+
+Initial package layout:
+
+```text
+cmd/ghd/main.go
+
+internal/
+  cli/          # Cobra commands, flags, output, and terminal concerns.
+  config/       # Viper-backed runtime config, paths, auth, and environment.
+  runtime/      # Dependency wiring between use cases and adapters.
+  app/          # Use cases and the ports each use case consumes.
+  manifest/     # ghd.toml schema, validation, tag patterns, and asset matching.
+  catalog/      # Repository index, package resolution, and ambiguity handling.
+  verification/ # Release and provenance policy plus verification evidence.
+  state/        # Installed package metadata and managed store records.
+
+  adapters/
+    github/     # GitHub releases, repository content, and attestation lookup.
+    sigstore/   # Sigstore bundle and certificate verification.
+    filesystem/ # Local index, store, temporary downloads, and binary links.
+    archive/    # Archive extraction and path traversal defense.
+    toml/       # ghd.toml decoding and encoding.
+
+  version/
+```
+
+`cmd/ghd/main.go` should install a signal-aware context and execute the root
+command. The `internal/cli` package is an adapter: it owns Cobra command
+construction, flag definitions, user-facing output, and handoff into the
+application layer. It should not contain install, verification, indexing, or
+filesystem business logic.
+
+`internal/runtime` should wire the concrete adapters to the application use
+cases. Use Viper as an instance dependency loaded through `internal/config`;
+avoid package-global Viper state and avoid passing application services through
+`context.Context`.
+
+Core behavior should follow hexagonal boundaries:
+
+- use cases live in `internal/app`;
+- interfaces live near the use case that consumes them;
+- adapters implement those interfaces at the edge;
+- domain packages must not import Cobra, Viper, GitHub clients, terminal UI
+  packages, or concrete filesystem adapters;
+- adapters may depend on stable core types, but core packages must not depend on
+  adapter packages.
+
+For the first prototype, create only the packages needed to prove one vertical
+install path. That likely means `cmd/ghd`, `internal/cli/install`,
+`internal/config`, `internal/runtime`, `internal/app`, `internal/manifest`,
+`internal/verification`, and the concrete adapters needed for one real GitHub
+release. Add `catalog`, repository management commands, update flows, and richer
+state only after the first verified install works.
+
+Unit tests should live beside the packages they cover and focus on observable
+behavior. CLI behavior should be tested with filesystem-based test scripts once
+the first command flow exists. End-to-end functional testing should use
+`~/code/meigma/ghd-test` for real release/install exercises.
 
 ## Security Boundaries
 
