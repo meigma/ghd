@@ -1,75 +1,69 @@
-# PROJECT_NAME
+# ghd
 
-> Template note: replace every `ALL_CAPS` placeholder in this file before publishing or sharing the repository.
+`ghd` is an experimental CLI for installing GitHub release assets only after
+the selected artifact passes strict integrity and provenance checks.
 
-`PROJECT_NAME` is `PROJECT_SUMMARY`.
-It is intended for `PRIMARY_USE_CASE` and is maintained by `AUTHOR_NAME` or `ORGANIZATION_NAME`.
+The repository currently contains the initial product/security design and docs
+scaffolding. The CLI implementation is not present yet.
 
 ## Quick Start
 
-Replace this section with the shortest working path for a new user.
-
 ### Prerequisites
 
-- `REPLACE_ME_RUNTIME_OR_LANGUAGE`
-- `REPLACE_ME_REQUIRED_TOOLING`
-- `REPLACE_ME_EXTERNAL_DEPENDENCIES`
+- Node.js 20 or newer for the documentation site
+- npm
+- Moon, when running the same task graph used by CI
 
-### Install
+### Preview the docs
 
 ```sh
-REPLACE_ME_INSTALL_COMMAND
+cd docs
+npm ci
+npm run start
 ```
 
-### Run
+### Build the docs
 
 ```sh
-REPLACE_ME_START_COMMAND
+moon run docs:build
 ```
 
 ## Usage
 
-Replace this section with the most common workflow for the repository.
+There is no installable `ghd` binary yet. Start with the design document:
 
-```sh
-REPLACE_ME_PRIMARY_COMMAND_OR_ENTRYPOINT
-```
+- [Initial Design](docs/docs/design.md)
 
-Expected result:
-
-- `REPLACE_ME_EXPECTED_OUTPUT_OR_BEHAVIOR`
-
-## Configuration
-
-Document the minimum configuration needed to use the project.
-
-- `REPLACE_ME_ENV_VAR_NAME`: `REPLACE_ME_ENV_VAR_DESCRIPTION`
-- `REPLACE_ME_CONFIG_FILE`: `REPLACE_ME_CONFIG_FILE_PURPOSE`
+The proposed command shape includes repository indexing, package discovery,
+verified install, update, uninstall, and doctor flows.
 
 ## Documentation
 
-- Main docs: `REPLACE_ME_DOCS_URL_OR_PATH`
-- Examples: `REPLACE_ME_EXAMPLES_URL_OR_PATH`
-- Architecture notes: `REPLACE_ME_ARCHITECTURE_DOC_URL_OR_PATH`
+- Docs landing page: [docs/docs/index.md](docs/docs/index.md)
+- Initial architecture and security design: [docs/docs/design.md](docs/docs/design.md)
+- Project process and agent guidance: [AGENTS.md](AGENTS.md)
 
 ## Support
 
-Use `REPLACE_ME_SUPPORT_CHANNEL` for questions and general support.
-Use `REPLACE_ME_BUG_REPORT_CHANNEL` for non-security bug reports.
+Use [GitHub Discussions](https://github.com/meigma/ghd/discussions) for usage
+questions and design discussion.
+
+Use [GitHub Issues](https://github.com/meigma/ghd/issues) for non-security bug
+reports and implementation tasks.
+
 Do not report vulnerabilities in public channels. See [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, local setup expectations, and pull request workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, testing expectations,
+and pull request workflow.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for supported versions and the private vulnerability reporting path.
+See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability
+reporting.
 
 ## License
 
-Replace this section with the actual license name and add the corresponding `LICENSE` file to the repository.
-
-Example:
-
-`PROJECT_NAME` is licensed under the `REPLACE_ME_LICENSE_NAME`.
+No license has been declared yet. Unless a license file is added, all rights are
+reserved by the repository owner.

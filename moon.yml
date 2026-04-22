@@ -1,18 +1,17 @@
 layer: 'scaffolding'
 
 project:
-  title: 'Repository template'
-  description: 'Workspace-level configuration, shared automation, and template defaults.'
-  owner: 'REPLACE_ME_OWNER'
+  title: 'ghd'
+  description: 'Workspace-level configuration, documentation, and automation for GitHub Downloader.'
+  owner: 'meigma'
   maintainers:
-    - 'REPLACE_ME_MAINTAINER'
+    - 'meigma'
 
 workspace:
   inheritedTasks:
     include: []
 
-# Add repository-wide maintenance tasks here as the template grows.
-# Examples:
+# Add repository-wide maintenance tasks here as the project grows.
 #
 # tasks:
 #   format:

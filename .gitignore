@@ -1,3 +1,9 @@
+# Agent-local state
+.agent/
+.claude/
+.journal/
+.wt/
+
 # Moon
 .moon/cache/
 .moon/docker/
