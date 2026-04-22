@@ -2,6 +2,7 @@
 .agents/
 .claude/
 .journal/
+.upstream/gh/
 .wt/
 
 # Moon
