@@ -1,16 +1,15 @@
 ---
-title: PROJECT_NAME Docs
+title: GitHub Downloader Docs
 slug: /
-description: Starting point for PROJECT_NAME documentation.
+description: Starting point for GitHub Downloader documentation.
 ---
 
-# PROJECT_NAME Docs
+# GitHub Downloader Docs
 
-This site is the starting point for `PROJECT_NAME` documentation.
+GitHub Downloader (`ghd`) is an experimental CLI for installing GitHub release
+assets only after the selected artifact passes strict integrity and provenance
+checks.
 
-Replace this page with:
+## Design Notes
 
-- `PROJECT_SUMMARY`
-- `QUICKSTART_STEPS`
-- `GUIDES_AND_REFERENCE_LINKS`
-- `SUPPORT_AND_CONTACT_PATHS`
+- [Initial Design](design.md)
