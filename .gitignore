@@ -1,5 +1,5 @@
 # Agent-local state
-.agent/
+.agents/
 .claude/
 .journal/
 .wt/
