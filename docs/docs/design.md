@@ -275,8 +275,8 @@ attestation for the concrete tag.
 
 Native implementation shape:
 
-1. Resolve the release tag to its commit SHA.
-2. Fetch GitHub release attestations for that tag commit digest.
+1. Resolve the release tag to its tag ref object digest.
+2. Fetch GitHub release attestations for that tag ref object digest.
 3. Require GitHub's release predicate.
 4. Require the attestation tag to match the requested tag.
 5. Require the local asset digest to appear in the release attestation subjects.
