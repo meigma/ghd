@@ -2,11 +2,14 @@ package github
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -15,6 +18,7 @@ import (
 	sigbundle "github.com/sigstore/sigstore-go/pkg/bundle"
 	"google.golang.org/protobuf/encoding/protojson"
 
+	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/verification"
 )
 
@@ -153,6 +157,121 @@ func (c *Client) ResolveReleaseTag(ctx context.Context, repository verification.
 		return verification.Digest{}, fmt.Errorf("GitHub ref response did not include object SHA")
 	}
 	return verification.NewDigest("sha1", ref.Object.SHA)
+}
+
+// FetchManifest returns the root ghd.toml for repository.
+func (c *Client) FetchManifest(ctx context.Context, repository verification.Repository) ([]byte, error) {
+	req, err := c.newGitHubRequest(ctx, http.MethodGet, rawPath(fmt.Sprintf("repos/%s/%s/contents/ghd.toml", repository.Owner, repository.Name)), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", "application/vnd.github.raw")
+
+	resp, err := c.doRawResponse(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read ghd.toml response: %w", err)
+	}
+	return decodeManifestBody(body)
+}
+
+// ResolveReleaseAsset returns the exact matching asset for tag.
+func (c *Client) ResolveReleaseAsset(ctx context.Context, repository verification.Repository, tag verification.ReleaseTag, assetName string) (app.ReleaseAsset, error) {
+	req, err := c.newGitHubRequest(ctx, http.MethodGet, releaseByTagPath(repository, tag), nil)
+	if err != nil {
+		return app.ReleaseAsset{}, err
+	}
+
+	var release releaseResponse
+	if err := c.doJSON(req, &release); err != nil {
+		return app.ReleaseAsset{}, err
+	}
+
+	matches := make([]releaseAssetResponse, 0, 1)
+	for _, asset := range release.Assets {
+		if asset.Name == assetName {
+			matches = append(matches, asset)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return app.ReleaseAsset{}, fmt.Errorf("release %s has no asset named %q", tag, assetName)
+	case 1:
+		if matches[0].BrowserDownloadURL == "" {
+			return app.ReleaseAsset{}, fmt.Errorf("release asset %q has no browser_download_url", assetName)
+		}
+		return app.ReleaseAsset{Name: matches[0].Name, DownloadURL: matches[0].BrowserDownloadURL}, nil
+	default:
+		return app.ReleaseAsset{}, fmt.Errorf("release %s has multiple assets named %q", tag, assetName)
+	}
+}
+
+// DownloadReleaseAsset downloads asset into outputDir without setting executable bits.
+func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsset, outputDir string) (string, error) {
+	if asset.Name == "" {
+		return "", fmt.Errorf("release asset name must be set")
+	}
+	if asset.DownloadURL == "" {
+		return "", fmt.Errorf("release asset download URL must be set")
+	}
+	if outputDir == "" {
+		return "", fmt.Errorf("output directory must be set")
+	}
+	if err := validateAssetFilename(asset.Name); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, asset.DownloadURL, nil)
+	if err != nil {
+		return "", err
+	}
+	if c.userAgent != "" {
+		req.Header.Set("User-Agent", c.userAgent)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("download release asset: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return "", httpStatusError(resp)
+	}
+
+	temp, err := os.CreateTemp(outputDir, "."+asset.Name+".*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("create temporary artifact: %w", err)
+	}
+	tempPath := temp.Name()
+	removeTemp := true
+	defer func() {
+		if removeTemp {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	if _, err := io.Copy(temp, resp.Body); err != nil {
+		_ = temp.Close()
+		return "", fmt.Errorf("write temporary artifact: %w", err)
+	}
+	if err := temp.Close(); err != nil {
+		return "", fmt.Errorf("close temporary artifact: %w", err)
+	}
+
+	finalPath := filepath.Join(outputDir, asset.Name)
+	if err := os.Rename(tempPath, finalPath); err != nil {
+		return "", fmt.Errorf("commit artifact: %w", err)
+	}
+	removeTemp = false
+	return finalPath, nil
 }
 
 // FetchReleaseAttestations returns GitHub release attestations for a tag ref digest.
@@ -324,6 +443,18 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	return nil
 }
 
+func (c *Client) doRawResponse(req *http.Request) (*http.Response, error) {
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		defer resp.Body.Close()
+		return nil, httpStatusError(resp)
+	}
+	return resp, nil
+}
+
 func (c *Client) doJSONResponse(req *http.Request, target any) (*http.Response, error) {
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -380,6 +511,20 @@ func releaseTagPath(repository verification.Repository, tag verification.Release
 	return rawPath(fmt.Sprintf("repos/%s/%s/git/ref/tags/%s", repository.Owner, repository.Name, tag))
 }
 
+func releaseByTagPath(repository verification.Repository, tag verification.ReleaseTag) rawPath {
+	return rawPath(fmt.Sprintf("repos/%s/%s/releases/tags/%s", repository.Owner, repository.Name, tag))
+}
+
+func validateAssetFilename(name string) error {
+	if name == "." || name == ".." || strings.TrimSpace(name) == "" {
+		return fmt.Errorf("release asset name %q is not a safe filename", name)
+	}
+	if strings.Contains(name, "/") || strings.Contains(name, "\\") || filepath.Base(name) != name {
+		return fmt.Errorf("release asset name %q must not contain path separators", name)
+	}
+	return nil
+}
+
 func escapePathSegments(path string) string {
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
@@ -392,6 +537,35 @@ type gitRefResponse struct {
 	Object struct {
 		SHA string `json:"sha"`
 	} `json:"object"`
+}
+
+type contentResponse struct {
+	Encoding string `json:"encoding"`
+	Content  string `json:"content"`
+}
+
+func decodeManifestBody(body []byte) ([]byte, error) {
+	var content contentResponse
+	if err := json.Unmarshal(body, &content); err != nil {
+		return body, nil
+	}
+	if !strings.EqualFold(content.Encoding, "base64") || content.Content == "" {
+		return body, nil
+	}
+	decoded, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(content.Content, "\n", ""))
+	if err != nil {
+		return nil, fmt.Errorf("decode ghd.toml content: %w", err)
+	}
+	return decoded, nil
+}
+
+type releaseResponse struct {
+	Assets []releaseAssetResponse `json:"assets"`
+}
+
+type releaseAssetResponse struct {
+	Name               string `json:"name"`
+	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
 type attestationsResponse struct {

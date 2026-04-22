@@ -84,7 +84,7 @@ func (v *Verifier) verifyReleaseAttestation(ctx context.Context, attestations []
 			continue
 		}
 		// The release statement must use GitHub's immutable release predicate, not provenance or another claim type.
-		if verified.Statement.PredicateType != ReleasePredicateV01 {
+		if !verified.Statement.hasReleasePredicate() {
 			fallback = mismatch(KindReleasePredicateMismatch, "release attestation %s has predicate %q", attestation.ID, verified.Statement.PredicateType)
 			continue
 		}

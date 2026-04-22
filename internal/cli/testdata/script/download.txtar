@@ -1,0 +1,17 @@
+# Successful download command shape uses the app boundary without prompts.
+exec ghd download owner/repo/foo@1.2.3 --output out
+stdout 'artifact out/artifact.tar.gz'
+stdout 'verification out/verification.json'
+stderr 'verified owner/repo/foo@1.2.3'
+exists out/artifact.tar.gz
+exists out/verification.json
+
+# Malformed targets fail cleanly.
+! exec ghd download foo --output out
+stderr 'download target must be owner/repo/package@version'
+
+# Help is scriptable and quiet on stderr.
+exec ghd download --help
+stdout 'Usage:'
+stdout 'download owner/repo/package@version --output DIR'
+! stderr .

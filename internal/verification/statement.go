@@ -3,6 +3,8 @@ package verification
 const (
 	// ReleasePredicateV01 is the GitHub immutable release attestation predicate type.
 	ReleasePredicateV01 = "https://in-toto.io/attestation/release/v0.1"
+	// ReleasePredicateV02 is the current GitHub immutable release attestation predicate type.
+	ReleasePredicateV02 = "https://in-toto.io/attestation/release/v0.2"
 	// SLSAPredicateV1 is the SLSA provenance predicate type required for artifacts.
 	SLSAPredicateV1 = "https://slsa.dev/provenance/v1"
 )
@@ -42,4 +44,13 @@ func (s Statement) hasSubjectDigest(digest Digest) bool {
 		}
 	}
 	return false
+}
+
+func (s Statement) hasReleasePredicate() bool {
+	switch s.PredicateType {
+	case ReleasePredicateV01, ReleasePredicateV02:
+		return true
+	default:
+		return false
+	}
 }
