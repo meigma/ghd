@@ -304,5 +304,16 @@ into this project without an explicit user request and a license/attribution che
 
 - Prefer functional testing before calling any feature complete. Unit tests are useful, but they do not prove the tool works the way the design intends.
 - Use `~/code/meigma/ghd-test` for complex functional testing of `ghd`. It is explicitly available for creating as many releases as needed to test the tool end to end.
+- `ghd-test` is a real GitHub release fixture, not just a local scratch repo. The `meigma/ghd-test` repository has a published `v1.0.0` release with `ghd.toml`, release assets, immutable release attestations, and SLSA provenance attestations. Use it for live verification before calling download, verification, install, extraction, or state-management work complete.
+- For the current verified-download path, run from the `ghd` implementation worktree with a scratch output directory:
+
+  ```sh
+  out="$(mktemp -d /tmp/ghd-functional.XXXXXX)"
+  go run ./cmd/ghd download meigma/ghd-test/ghd-test@1.0.0 --output "$out"
+  jq '{repository, package, version, tag, asset, asset_digest: .evidence.AssetDigest, release_predicate: .evidence.ReleaseAttestation.PredicateType, provenance_predicate: .evidence.ProvenanceAttestation.PredicateType}' "$out/verification.json"
+  ```
+
+  A successful run should download the platform-specific `ghd-test_1.0.0_<os>_<arch>.tar.gz` asset, write `verification.json`, accept GitHub's immutable release predicate, and accept SLSA provenance. Keep the scratch directory path in notes when the exact evidence needs to be inspected.
+- When validating behavior that depends on new release contents, create a new `ghd-test` release instead of mutating or reusing assumptions from `v1.0.0`. Before relying on a fixture release, inspect it with `gh release view <tag> -R meigma/ghd-test --json tagName,assets,publishedAt,targetCommitish` and confirm the expected asset names match `ghd.toml`.
 - Take an agile approach to development. Waterfall is explicitly forbidden: underspecify when useful, prototype early, learn from the result, and refine from working behavior.
 <!-- END ai-protocol -->
