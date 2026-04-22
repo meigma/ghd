@@ -11,9 +11,17 @@ workspace:
   inheritedTasks:
     include: []
 
-# Add repository-wide maintenance tasks here as the project grows.
-#
-# tasks:
+tasks:
+  test:
+    command: 'go test ./...'
+    toolchains: ['go']
+    inputs:
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/**/*.go'
+    options:
+      cache: false
+
 #   format:
 #     command: 'prettier --check .'
 #     toolchains: ['javascript', 'node', 'npm']

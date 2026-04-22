@@ -276,6 +276,24 @@ Rules:
 
 ---
 
+## Upstream reference source
+
+This repository has a local ignored clone of the GitHub CLI source at `.upstream/gh/`.
+Use it as an implementation reference when learning from upstream `gh` behavior,
+especially for supply chain validation flows such as release artifact verification,
+signature or attestation handling, and related trust decisions.
+
+Good starting points include `.upstream/gh/pkg/cmd/release/verify-asset/`
+and `.upstream/gh/pkg/cmd/attestation/`.
+
+If `.upstream/gh/` is missing or stale, run `just prime-gh-source` from the
+repository root to clone or update it.
+
+Treat `.upstream/gh/` as read-only reference material. Do not vendor code from it
+into this project without an explicit user request and a license/attribution check.
+
+---
+
 ## Architecture
 
 - Use hexagonal architecture at all times. Keep business logic isolated from CLI, filesystem, network, storage, and other external adapters.

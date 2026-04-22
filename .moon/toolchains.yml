@@ -26,9 +26,8 @@ node:
 # deno:
 #   version: '<version>'
 
-# Stable non-JavaScript toolchains in Moon v2. Enable Go when CLI code lands.
-# go:
-#   version: '<version>'
+# Stable non-JavaScript toolchains in Moon v2.
+go: {}
 #
 # rust:
 #   version: '<version>'
