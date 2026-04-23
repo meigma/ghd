@@ -18,6 +18,8 @@ type InstalledStateRemoveStore interface {
 
 // UninstallFileSystem owns uninstall-time filesystem cleanup.
 type UninstallFileSystem interface {
+	// ValidateInstalledStore checks whether a recorded store path can be removed.
+	ValidateInstalledStore(ctx context.Context, request RemoveInstalledStoreRequest) error
 	// RemoveBinaryLinks removes managed binary links created by an install.
 	RemoveBinaryLinks(ctx context.Context, binaries []InstalledBinary) error
 	// RemoveInstalledStore removes one recorded store path under StoreRoot.
@@ -86,17 +88,23 @@ func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallReq
 	if err != nil {
 		return UninstallResult{}, err
 	}
-	links := installedBinaries(record.Binaries)
-	if err := u.files.RemoveBinaryLinks(ctx, links); err != nil {
+	if err := u.files.ValidateInstalledStore(ctx, RemoveInstalledStoreRequest{
+		StoreRoot: request.StoreDir,
+		StorePath: record.StorePath,
+	}); err != nil {
 		return UninstallResult{}, err
 	}
-	if _, err := u.state.RemoveInstalledRecord(ctx, request.StateDir, record.Repository, record.Package); err != nil {
+	links := installedBinaries(record.Binaries)
+	if err := u.files.RemoveBinaryLinks(ctx, links); err != nil {
 		return UninstallResult{}, err
 	}
 	if err := u.files.RemoveInstalledStore(ctx, RemoveInstalledStoreRequest{
 		StoreRoot: request.StoreDir,
 		StorePath: record.StorePath,
 	}); err != nil {
+		return UninstallResult{}, err
+	}
+	if _, err := u.state.RemoveInstalledRecord(ctx, request.StateDir, record.Repository, record.Package); err != nil {
 		return UninstallResult{}, err
 	}
 	return UninstallResult{Record: record}, nil

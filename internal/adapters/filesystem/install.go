@@ -41,8 +41,9 @@ func (Installer) CreateStoreLayout(ctx context.Context, request app.StoreLayoutR
 	if err := ctx.Err(); err != nil {
 		return app.StoreLayout{}, err
 	}
-	if strings.TrimSpace(request.StoreRoot) == "" {
-		return app.StoreLayout{}, fmt.Errorf("store root must be set")
+	storeRoot, err := cleanStoreRoot(request.StoreRoot)
+	if err != nil {
+		return app.StoreLayout{}, err
 	}
 	if err := validateStoreDigest(request.AssetDigest.Algorithm, request.AssetDigest.Hex); err != nil {
 		return app.StoreLayout{}, err
@@ -68,7 +69,7 @@ func (Installer) CreateStoreLayout(ctx context.Context, request app.StoreLayoutR
 	}
 
 	storePath := filepath.Join(
-		request.StoreRoot,
+		storeRoot,
 		"github.com",
 		owner,
 		repo,
@@ -127,38 +128,33 @@ func (Installer) RemoveStoreLayout(ctx context.Context, layout app.StoreLayout) 
 	return nil
 }
 
+// ValidateInstalledStore checks whether a recorded store path can be removed.
+func (Installer) ValidateInstalledStore(ctx context.Context, request app.RemoveInstalledStoreRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root, rel, err := openInstalledStoreRoot(request)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return rejectSymlinkComponents(root, rel)
+}
+
 // RemoveInstalledStore removes a recorded store path under the configured store root.
 func (Installer) RemoveInstalledStore(ctx context.Context, request app.RemoveInstalledStoreRequest) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	storeRoot := strings.TrimSpace(request.StoreRoot)
-	if storeRoot == "" {
-		return fmt.Errorf("store root must be set")
-	}
-	storePath := strings.TrimSpace(request.StorePath)
-	if storePath == "" {
-		return fmt.Errorf("store path must be set")
-	}
-	absRoot, err := filepath.Abs(filepath.Clean(storeRoot))
+	root, rel, err := openInstalledStoreRoot(request)
 	if err != nil {
-		return fmt.Errorf("resolve store root: %w", err)
+		return err
 	}
-	absStorePath, err := filepath.Abs(filepath.Clean(storePath))
-	if err != nil {
-		return fmt.Errorf("resolve store path: %w", err)
+	defer root.Close()
+	if err := rejectSymlinkComponents(root, rel); err != nil {
+		return err
 	}
-	if absRoot == string(os.PathSeparator) {
-		return fmt.Errorf("refusing to use unsafe store root %s", storeRoot)
-	}
-	rel, err := filepath.Rel(absRoot, absStorePath)
-	if err != nil {
-		return fmt.Errorf("compare store path to root: %w", err)
-	}
-	if rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." || filepath.IsAbs(rel) {
-		return fmt.Errorf("store path %s is not under store root %s", storePath, storeRoot)
-	}
-	if err := os.RemoveAll(absStorePath); err != nil {
+	if err := root.RemoveAll(rel); err != nil {
 		return fmt.Errorf("remove installed store path: %w", err)
 	}
 	return nil
@@ -301,6 +297,77 @@ func copyFileExclusive(source string, destination string, mode os.FileMode) erro
 		return fmt.Errorf("close store artifact: %w", err)
 	}
 	removeOutput = false
+	return nil
+}
+
+func openInstalledStoreRoot(request app.RemoveInstalledStoreRequest) (*os.Root, string, error) {
+	storeRoot, err := cleanStoreRoot(request.StoreRoot)
+	if err != nil {
+		return nil, "", err
+	}
+	rel, err := cleanStoreRelativePath(storeRoot, request.StorePath)
+	if err != nil {
+		return nil, "", err
+	}
+	root, err := os.OpenRoot(storeRoot)
+	if err != nil {
+		return nil, "", fmt.Errorf("open store root: %w", err)
+	}
+	return root, rel, nil
+}
+
+func cleanStoreRoot(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("store root must be set")
+	}
+	root, err := filepath.Abs(filepath.Clean(value))
+	if err != nil {
+		return "", fmt.Errorf("resolve store root: %w", err)
+	}
+	if root == string(os.PathSeparator) {
+		return "", fmt.Errorf("refusing to use unsafe store root %s", value)
+	}
+	return root, nil
+}
+
+func cleanStoreRelativePath(storeRoot string, storePath string) (string, error) {
+	storePath = strings.TrimSpace(storePath)
+	if storePath == "" {
+		return "", fmt.Errorf("store path must be set")
+	}
+	if !filepath.IsAbs(storePath) {
+		return "", fmt.Errorf("recorded store path %s must be absolute", storePath)
+	}
+	absStorePath := filepath.Clean(storePath)
+	rel, err := filepath.Rel(storeRoot, absStorePath)
+	if err != nil {
+		return "", fmt.Errorf("compare store path to root: %w", err)
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) || !filepath.IsLocal(rel) {
+		return "", fmt.Errorf("store path %s is not under store root %s", storePath, storeRoot)
+	}
+	return filepath.Clean(rel), nil
+}
+
+func rejectSymlinkComponents(root *os.Root, rel string) error {
+	current := ""
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		if part == "" || part == "." {
+			continue
+		}
+		current = filepath.Join(current, part)
+		info, err := root.Lstat(current)
+		if os.IsNotExist(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("inspect store path %s: %w", current, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refusing to remove store path through symlink component %s", current)
+		}
+	}
 	return nil
 }
 

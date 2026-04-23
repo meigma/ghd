@@ -193,8 +193,12 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	if err := os.MkdirAll(request.BinDir, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
+	storeRoot, err := filepath.Abs(filepath.Clean(request.StoreDir))
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
 	storePath := filepath.Join(
-		request.StoreDir,
+		storeRoot,
 		"github.com",
 		request.Repository.Owner,
 		request.Repository.Name,
@@ -208,10 +212,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	}
 	linkPath := filepath.Join(request.BinDir, request.PackageName)
 	targetPath := filepath.Join(extractedPath, request.PackageName)
-	linkTarget, err := filepath.Abs(targetPath)
-	if err != nil {
-		return app.VerifiedInstallResult{}, err
-	}
+	linkTarget := targetPath
 	artifactPath := filepath.Join(storePath, "artifact")
 	verificationPath := filepath.Join(storePath, "verification.json")
 	if err := os.WriteFile(targetPath, []byte("binary"), 0o755); err != nil {

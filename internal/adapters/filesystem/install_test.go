@@ -40,6 +40,35 @@ func TestInstallerCreatesDigestKeyedStoreLayout(t *testing.T) {
 	assert.Equal(t, "artifact", string(data))
 }
 
+func TestInstallerCreatesAbsoluteStoreLayoutFromRelativeStoreRoot(t *testing.T) {
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	workdir := t.TempDir()
+	require.NoError(t, os.Chdir(workdir))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(oldwd))
+	})
+	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
+	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem("aa", 32))
+	require.NoError(t, err)
+	storeRoot, err := filepath.Abs("store")
+	require.NoError(t, err)
+
+	layout, err := NewInstaller().CreateStoreLayout(context.Background(), app.StoreLayoutRequest{
+		StoreRoot:    "store",
+		Repository:   verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName:  "foo",
+		Version:      "1.2.3",
+		AssetDigest:  digest,
+		ArtifactPath: artifact,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-"+digest.Hex), layout.StorePath)
+	assert.FileExists(t, layout.ArtifactPath)
+}
+
 func TestInstallerRequiresFreshExtractionDirectory(t *testing.T) {
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
@@ -118,6 +147,12 @@ func TestInstallerRemoveInstalledStoreRejectsUnsafePaths(t *testing.T) {
 			want:      "store path must be set",
 		},
 		{
+			name:      "relative path",
+			storeRoot: storeRoot,
+			storePath: "store/github.com/owner/repo/foo",
+			want:      "must be absolute",
+		},
+		{
 			name:      "root path",
 			storeRoot: storeRoot,
 			storePath: storeRoot,
@@ -144,6 +179,25 @@ func TestInstallerRemoveInstalledStoreRejectsUnsafePaths(t *testing.T) {
 		})
 	}
 	assert.DirExists(t, outside)
+}
+
+func TestInstallerRemoveInstalledStoreRejectsSymlinkedPathComponents(t *testing.T) {
+	storeRoot := t.TempDir()
+	outside := t.TempDir()
+	outsideStorePath := filepath.Join(outside, "repo", "foo")
+	require.NoError(t, os.MkdirAll(outsideStorePath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideStorePath, "keep"), []byte("outside"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(storeRoot, "github.com"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(storeRoot, "github.com", "owner")))
+
+	err := NewInstaller().RemoveInstalledStore(context.Background(), app.RemoveInstalledStoreRequest{
+		StoreRoot: storeRoot,
+		StorePath: filepath.Join(storeRoot, "github.com", "owner", "repo", "foo"),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink component")
+	assert.FileExists(t, filepath.Join(outsideStorePath, "keep"))
 }
 
 func TestInstallerLinksBinariesAndFailsClosedOnCollision(t *testing.T) {
