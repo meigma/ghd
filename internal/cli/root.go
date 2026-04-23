@@ -31,6 +31,8 @@ type Runtime interface {
 	RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error)
 	// ResolvePackage resolves an unqualified package through the local index.
 	ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error)
+	// ListInstalled returns active installed packages.
+	ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error)
 }
 
 // RuntimeFactory constructs use cases from runtime configuration.
@@ -79,8 +81,10 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.PersistentFlags().String("github-api-url", "", "GitHub REST API base URL")
 	root.PersistentFlags().String("trusted-root", "", "Sigstore trusted_root.json path")
 	root.PersistentFlags().String("index-dir", "", "local repository index directory")
+	root.PersistentFlags().String("state-dir", "", "local installed package state directory")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
+	root.AddCommand(newInstalledCommand(options))
 	root.AddCommand(newRepositoryCommand(options))
 	return root
 }

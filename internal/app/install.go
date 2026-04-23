@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/meigma/ghd/internal/manifest"
+	"github.com/meigma/ghd/internal/state"
 	"github.com/meigma/ghd/internal/verification"
 )
 
@@ -33,6 +35,14 @@ type InstallFileSystem interface {
 	WriteInstallMetadata(ctx context.Context, storePath string, record InstallRecord) (string, error)
 }
 
+// InstalledStateStore persists active installed package state.
+type InstalledStateStore interface {
+	// LoadInstalledState reads active installed package state from stateDir.
+	LoadInstalledState(ctx context.Context, stateDir string) (state.Index, error)
+	// AddInstalledRecord adds an active installed package record to stateDir.
+	AddInstalledRecord(ctx context.Context, stateDir string, record state.Record) (state.Index, error)
+}
+
 // VerifiedInstallDependencies contains the ports needed by VerifiedInstaller.
 type VerifiedInstallDependencies struct {
 	// Manifests fetches repository manifest bytes.
@@ -49,6 +59,10 @@ type VerifiedInstallDependencies struct {
 	Archives ArchiveExtractor
 	// FileSystem owns install store and binary exposure behavior.
 	FileSystem InstallFileSystem
+	// StateStore persists active installed package records.
+	StateStore InstalledStateStore
+	// Now returns the current time for installed records.
+	Now func() time.Time
 }
 
 // VerifiedInstaller implements the verified install use case.
@@ -60,6 +74,8 @@ type VerifiedInstaller struct {
 	evidence  EvidenceWriter
 	archives  ArchiveExtractor
 	files     InstallFileSystem
+	state     InstalledStateStore
+	now       func() time.Time
 }
 
 // VerifiedInstallRequest describes one verified install.
@@ -74,6 +90,8 @@ type VerifiedInstallRequest struct {
 	StoreDir string
 	// BinDir receives links to installed binaries.
 	BinDir string
+	// StateDir stores active installed package state.
+	StateDir string
 	// Platform optionally overrides the current OS/architecture.
 	Platform manifest.Platform
 }
@@ -229,6 +247,13 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 	if deps.FileSystem == nil {
 		return nil, fmt.Errorf("install filesystem must be set")
 	}
+	if deps.StateStore == nil {
+		return nil, fmt.Errorf("installed state store must be set")
+	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
 	return &VerifiedInstaller{
 		manifests: deps.Manifests,
 		assets:    deps.Assets,
@@ -237,6 +262,8 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 		evidence:  deps.EvidenceWriter,
 		archives:  deps.Archives,
 		files:     deps.FileSystem,
+		state:     deps.StateStore,
+		now:       now,
 	}, nil
 }
 
@@ -246,6 +273,13 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, err
 	}
 	platform := request.Platform.WithDefaults()
+	installedState, err := i.state.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return VerifiedInstallResult{}, err
+	}
+	if _, ok := installedState.Record(request.Repository.String(), request.PackageName); ok {
+		return VerifiedInstallResult{}, state.DuplicateInstallError{Repository: request.Repository.String(), Package: request.PackageName}
+	}
 
 	manifestBytes, err := i.manifests.FetchManifest(ctx, request.Repository)
 	if err != nil {
@@ -356,6 +390,23 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("write install metadata: %w", err))
 	}
+	record := state.Record{
+		Repository:       installRecord.Repository,
+		Package:          installRecord.Package,
+		Version:          installRecord.Version,
+		Tag:              installRecord.Tag,
+		Asset:            installRecord.Asset,
+		AssetDigest:      installRecord.AssetDigest,
+		StorePath:        installRecord.StorePath,
+		ArtifactPath:     installRecord.ArtifactPath,
+		ExtractedPath:    installRecord.ExtractedPath,
+		VerificationPath: installRecord.VerificationPath,
+		Binaries:         stateBinaries(links),
+		InstalledAt:      i.now().UTC(),
+	}
+	if _, err := i.state.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
+		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("record installed state: %w", err))
+	}
 
 	return VerifiedInstallResult{
 		Repository:    request.Repository,
@@ -414,5 +465,20 @@ func (r VerifiedInstallRequest) validate() error {
 	if strings.TrimSpace(r.BinDir) == "" {
 		return fmt.Errorf("bin directory must be set")
 	}
+	if strings.TrimSpace(r.StateDir) == "" {
+		return fmt.Errorf("state directory must be set")
+	}
 	return nil
+}
+
+func stateBinaries(binaries []InstalledBinary) []state.Binary {
+	records := make([]state.Binary, 0, len(binaries))
+	for _, binary := range binaries {
+		records = append(records, state.Binary{
+			Name:       binary.Name,
+			LinkPath:   binary.LinkPath,
+			TargetPath: binary.TargetPath,
+		})
+	}
+	return records
 }

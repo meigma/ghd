@@ -9,10 +9,12 @@ exec ghd --index-dir index repo refresh owner/repo
 stderr 'refreshed owner/repo'
 
 # Unqualified install resolves through the local index.
-exec ghd --index-dir index install foo@1.2.3 --store-dir store --bin-dir bin
+exec ghd --index-dir index --state-dir state install foo@1.2.3 --store-dir store --bin-dir bin
 stdout 'binary bin/foo'
 stderr 'installed owner/repo/foo@1.2.3'
 exists bin/foo
+exec ghd --state-dir state installed
+stdout 'owner/repo/foo 1.2.3 foo'
 
 # Remove only updates the local index.
 exec ghd --index-dir index repo remove owner/repo
@@ -23,7 +25,7 @@ exec ghd --index-dir index repo list
 # Ambiguous unqualified installs require repository qualification.
 exec ghd --index-dir ambiguous repo add owner/one
 exec ghd --index-dir ambiguous repo add owner/two
-! exec ghd --index-dir ambiguous install foo@1.2.3 --store-dir other-store --bin-dir other-bin
+! exec ghd --index-dir ambiguous --state-dir ambiguous-state install foo@1.2.3 --store-dir other-store --bin-dir other-bin
 stderr 'package "foo" is ambiguous'
 stderr 'owner/one'
 stderr 'owner/two'
@@ -31,7 +33,7 @@ stderr 'owner/two'
 # Package names are ambiguous with exposed binary names too.
 exec ghd --index-dir binary-ambiguous repo add owner/repo
 exec ghd --index-dir binary-ambiguous repo add owner/binary
-! exec ghd --index-dir binary-ambiguous install foo@1.2.3 --store-dir binary-store --bin-dir binary-bin
+! exec ghd --index-dir binary-ambiguous --state-dir binary-state install foo@1.2.3 --store-dir binary-store --bin-dir binary-bin
 stderr 'package "foo" is ambiguous'
 stderr 'owner/repo/foo'
 stderr 'owner/binary/bar'
@@ -39,7 +41,7 @@ stderr 'owner/binary/bar'
 # Unqualified install refreshes indexed repositories before resolution.
 mkdir stale-ambiguous
 cp stale-ambiguous-index.json stale-ambiguous/repositories.json
-! exec ghd --index-dir stale-ambiguous install foo@1.2.3 --store-dir stale-store --bin-dir stale-bin
+! exec ghd --index-dir stale-ambiguous --state-dir stale-state install foo@1.2.3 --store-dir stale-store --bin-dir stale-bin
 stderr 'package "foo" is ambiguous'
 stderr 'owner/one/foo'
 stderr 'owner/two/foo'
