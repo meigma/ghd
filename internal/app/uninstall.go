@@ -18,12 +18,8 @@ type InstalledStateRemoveStore interface {
 
 // UninstallFileSystem owns uninstall-time filesystem cleanup.
 type UninstallFileSystem interface {
-	// ValidateInstalledStore checks whether a recorded store path can be removed.
-	ValidateInstalledStore(ctx context.Context, request RemoveInstalledStoreRequest) error
-	// RemoveBinaryLinks removes managed binary links created by an install.
-	RemoveBinaryLinks(ctx context.Context, binaries []InstalledBinary) error
-	// RemoveInstalledStore removes one recorded store path under StoreRoot.
-	RemoveInstalledStore(ctx context.Context, request RemoveInstalledStoreRequest) error
+	// RemoveManagedInstall removes managed binaries and store contents for one install.
+	RemoveManagedInstall(ctx context.Context, request RemoveManagedInstallRequest) error
 }
 
 // PackageUninstallerDependencies contains the ports needed by PackageUninstaller.
@@ -46,22 +42,10 @@ type UninstallRequest struct {
 	Target string
 	// StoreDir is the root of ghd's managed package store.
 	StoreDir string
+	// BinDir is the managed binary link directory.
+	BinDir string
 	// StateDir stores active installed package state.
 	StateDir string
-}
-
-// UninstallResult describes a completed uninstall.
-type UninstallResult struct {
-	// Record is the removed active install record.
-	Record state.Record
-}
-
-// RemoveInstalledStoreRequest describes one recorded store path to remove.
-type RemoveInstalledStoreRequest struct {
-	// StoreRoot is the configured managed store root.
-	StoreRoot string
-	// StorePath is the recorded digest-keyed store directory.
-	StorePath string
 }
 
 // NewPackageUninstaller creates an uninstall use case.
@@ -76,38 +60,30 @@ func NewPackageUninstaller(deps PackageUninstallerDependencies) (*PackageUninsta
 }
 
 // Uninstall removes one active package install.
-func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallRequest) (UninstallResult, error) {
+func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallRequest) (state.Record, error) {
 	if err := request.validate(); err != nil {
-		return UninstallResult{}, err
+		return state.Record{}, err
 	}
 	index, err := u.state.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
-		return UninstallResult{}, err
+		return state.Record{}, err
 	}
 	record, err := index.ResolveTarget(request.Target)
 	if err != nil {
-		return UninstallResult{}, err
+		return state.Record{}, err
 	}
-	if err := u.files.ValidateInstalledStore(ctx, RemoveInstalledStoreRequest{
+	if err := u.files.RemoveManagedInstall(ctx, RemoveManagedInstallRequest{
 		StoreRoot: request.StoreDir,
+		BinRoot:   request.BinDir,
 		StorePath: record.StorePath,
+		Binaries:  installedBinaries(record.Binaries),
 	}); err != nil {
-		return UninstallResult{}, err
-	}
-	links := installedBinaries(record.Binaries)
-	if err := u.files.RemoveBinaryLinks(ctx, links); err != nil {
-		return UninstallResult{}, err
-	}
-	if err := u.files.RemoveInstalledStore(ctx, RemoveInstalledStoreRequest{
-		StoreRoot: request.StoreDir,
-		StorePath: record.StorePath,
-	}); err != nil {
-		return UninstallResult{}, err
+		return state.Record{}, err
 	}
 	if _, err := u.state.RemoveInstalledRecord(ctx, request.StateDir, record.Repository, record.Package); err != nil {
-		return UninstallResult{}, err
+		return state.Record{}, err
 	}
-	return UninstallResult{Record: record}, nil
+	return record, nil
 }
 
 func (r UninstallRequest) validate() error {
@@ -116,6 +92,9 @@ func (r UninstallRequest) validate() error {
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
 		return fmt.Errorf("store directory must be set")
+	}
+	if strings.TrimSpace(r.BinDir) == "" {
+		return fmt.Errorf("bin directory must be set")
 	}
 	if strings.TrimSpace(r.StateDir) == "" {
 		return fmt.Errorf("state directory must be set")

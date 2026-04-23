@@ -10,7 +10,7 @@ stderr 'refreshed owner/repo'
 
 # Unqualified install resolves through the local index.
 exec ghd --index-dir index --state-dir state install foo@1.2.3 --store-dir store --bin-dir bin
-stdout 'binary bin/foo'
+stdout 'binary .*/bin/foo'
 stderr 'installed owner/repo/foo@1.2.3'
 exists bin/foo
 exec ghd --state-dir state installed

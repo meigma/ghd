@@ -63,11 +63,11 @@ func newRepositoryListCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := runtime.ListRepositories(cmd.Context(), app.RepositoryListRequest{IndexDir: cfg.IndexDir})
+			repositories, err := runtime.ListRepositories(cmd.Context(), cfg.IndexDir)
 			if err != nil {
 				return err
 			}
-			writeRepositoryList(options, result.Repositories)
+			writeRepositoryList(options, repositories)
 			return nil
 		},
 	}
@@ -123,7 +123,7 @@ func newRepositoryRefreshCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
+			repositories, err := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
 				Repository: repository,
 				All:        all || len(args) == 0,
 				IndexDir:   cfg.IndexDir,
@@ -135,7 +135,7 @@ func newRepositoryRefreshCommand(options Options) *cobra.Command {
 				fmt.Fprintf(options.Err, "refreshed %s\n", repository)
 				return nil
 			}
-			fmt.Fprintf(options.Err, "refreshed %d repositories\n", len(result.Repositories))
+			fmt.Fprintf(options.Err, "refreshed %d repositories\n", len(repositories))
 			return nil
 		},
 	}

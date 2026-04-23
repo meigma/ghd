@@ -13,6 +13,7 @@ import (
 	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/config"
+	"github.com/meigma/ghd/internal/state"
 	"github.com/meigma/ghd/internal/verification"
 )
 
@@ -105,8 +106,8 @@ func (r *Runtime) AddRepository(ctx context.Context, request app.RepositoryAddRe
 }
 
 // ListRepositories returns indexed repositories.
-func (r *Runtime) ListRepositories(ctx context.Context, request app.RepositoryListRequest) (app.RepositoryListResult, error) {
-	return r.catalog.ListRepositories(ctx, request)
+func (r *Runtime) ListRepositories(ctx context.Context, indexDir string) ([]catalog.RepositoryRecord, error) {
+	return r.catalog.ListRepositories(ctx, indexDir)
 }
 
 // RemoveRepository removes a repository from the local index.
@@ -115,7 +116,7 @@ func (r *Runtime) RemoveRepository(ctx context.Context, request app.RepositoryRe
 }
 
 // RefreshRepositories refreshes indexed repository manifests.
-func (r *Runtime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error) {
+func (r *Runtime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error) {
 	return r.catalog.RefreshRepositories(ctx, request)
 }
 
@@ -125,12 +126,15 @@ func (r *Runtime) ResolvePackage(ctx context.Context, request app.ResolvePackage
 }
 
 // ListInstalled returns active installed packages.
-func (r *Runtime) ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error) {
-	return r.installed.ListInstalled(ctx, request)
+func (r *Runtime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
+	return r.installed.ListInstalled(ctx, stateDir)
 }
 
 // Uninstall removes one active installed package.
-func (r *Runtime) Uninstall(ctx context.Context, request app.UninstallRequest) (app.UninstallResult, error) {
+func (r *Runtime) Uninstall(ctx context.Context, request app.UninstallRequest) (state.Record, error) {
+	if request.BinDir == "" {
+		request.BinDir = r.cfg.BinDir
+	}
 	return r.uninstaller.Uninstall(ctx, request)
 }
 

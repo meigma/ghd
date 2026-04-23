@@ -19,18 +19,6 @@ type InstalledPackages struct {
 	state InstalledStateStore
 }
 
-// InstalledListRequest describes an installed package list request.
-type InstalledListRequest struct {
-	// StateDir stores active installed package state.
-	StateDir string
-}
-
-// InstalledListResult contains active installed package records.
-type InstalledListResult struct {
-	// Records are active installed package records.
-	Records []state.Record
-}
-
 // NewInstalledPackages creates an installed package query use case.
 func NewInstalledPackages(deps InstalledPackagesDependencies) (*InstalledPackages, error) {
 	if deps.StateStore == nil {
@@ -40,13 +28,13 @@ func NewInstalledPackages(deps InstalledPackagesDependencies) (*InstalledPackage
 }
 
 // ListInstalled returns active installed package records.
-func (p *InstalledPackages) ListInstalled(ctx context.Context, request InstalledListRequest) (InstalledListResult, error) {
-	if strings.TrimSpace(request.StateDir) == "" {
-		return InstalledListResult{}, fmt.Errorf("state directory must be set")
+func (p *InstalledPackages) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
+	if strings.TrimSpace(stateDir) == "" {
+		return nil, fmt.Errorf("state directory must be set")
 	}
-	index, err := p.state.LoadInstalledState(ctx, request.StateDir)
+	index, err := p.state.LoadInstalledState(ctx, stateDir)
 	if err != nil {
-		return InstalledListResult{}, err
+		return nil, err
 	}
-	return InstalledListResult{Records: index.Normalize().Records}, nil
+	return index.Normalize().Records, nil
 }

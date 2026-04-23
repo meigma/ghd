@@ -11,6 +11,7 @@ import (
 
 type uninstallOptions struct {
 	storeDir string
+	binDir   string
 }
 
 func newUninstallCommand(options Options) *cobra.Command {
@@ -32,15 +33,17 @@ func newUninstallCommand(options Options) *cobra.Command {
 			result, err := runtime.Uninstall(cmd.Context(), app.UninstallRequest{
 				Target:   target,
 				StoreDir: cfg.StoreDir,
+				BinDir:   cfg.BinDir,
 				StateDir: cfg.StateDir,
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(options.Err, "uninstalled %s/%s@%s\n", result.Record.Repository, result.Record.Package, result.Record.Version)
+			fmt.Fprintf(options.Err, "uninstalled %s/%s@%s\n", result.Repository, result.Package, result.Version)
 			return nil
 		},
 	}
 	cmd.Flags().StringVar(&uninstall.storeDir, "store-dir", "", "managed store directory")
+	cmd.Flags().StringVar(&uninstall.binDir, "bin-dir", "", "managed binary link directory")
 	return cmd
 }

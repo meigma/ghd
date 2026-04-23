@@ -15,8 +15,12 @@ import (
 type CatalogStore interface {
 	// LoadCatalog reads the catalog index from indexDir.
 	LoadCatalog(ctx context.Context, indexDir string) (catalog.Index, error)
-	// SaveCatalog writes the catalog index to indexDir.
-	SaveCatalog(ctx context.Context, indexDir string, index catalog.Index) error
+	// UpsertRepository adds or replaces one indexed repository.
+	UpsertRepository(ctx context.Context, indexDir string, record catalog.RepositoryRecord) (catalog.Index, error)
+	// UpsertRepositories adds or replaces indexed repositories in one update.
+	UpsertRepositories(ctx context.Context, indexDir string, records []catalog.RepositoryRecord) (catalog.Index, error)
+	// RemoveRepository removes one indexed repository.
+	RemoveRepository(ctx context.Context, indexDir string, repository verification.Repository) (catalog.Index, error)
 }
 
 // RepositoryCatalogDependencies contains the ports needed by RepositoryCatalog.
@@ -44,18 +48,6 @@ type RepositoryAddRequest struct {
 	IndexDir string
 }
 
-// RepositoryListRequest describes a repository list request.
-type RepositoryListRequest struct {
-	// IndexDir is the local catalog directory.
-	IndexDir string
-}
-
-// RepositoryListResult contains indexed repository records.
-type RepositoryListResult struct {
-	// Repositories are the indexed repositories.
-	Repositories []catalog.RepositoryRecord
-}
-
 // RepositoryRemoveRequest describes one repository to remove from the catalog.
 type RepositoryRemoveRequest struct {
 	// Repository is the GitHub repository to remove.
@@ -72,12 +64,6 @@ type RepositoryRefreshRequest struct {
 	All bool
 	// IndexDir is the local catalog directory.
 	IndexDir string
-}
-
-// RepositoryRefreshResult describes refreshed repository records.
-type RepositoryRefreshResult struct {
-	// Repositories are the refreshed repositories.
-	Repositories []catalog.RepositoryRecord
 }
 
 // ResolvePackageRequest describes an unqualified package lookup.
@@ -120,30 +106,22 @@ func (c *RepositoryCatalog) AddRepository(ctx context.Context, request Repositor
 	if err != nil {
 		return catalog.RepositoryRecord{}, err
 	}
-	index, err := c.store.LoadCatalog(ctx, request.IndexDir)
-	if err != nil {
-		return catalog.RepositoryRecord{}, err
-	}
-	index, err = index.UpsertRepository(record)
-	if err != nil {
-		return catalog.RepositoryRecord{}, err
-	}
-	if err := c.store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
+	if _, err := c.store.UpsertRepository(ctx, request.IndexDir, record); err != nil {
 		return catalog.RepositoryRecord{}, err
 	}
 	return record, nil
 }
 
 // ListRepositories returns indexed repository records.
-func (c *RepositoryCatalog) ListRepositories(ctx context.Context, request RepositoryListRequest) (RepositoryListResult, error) {
-	if strings.TrimSpace(request.IndexDir) == "" {
-		return RepositoryListResult{}, fmt.Errorf("index directory must be set")
+func (c *RepositoryCatalog) ListRepositories(ctx context.Context, indexDir string) ([]catalog.RepositoryRecord, error) {
+	if strings.TrimSpace(indexDir) == "" {
+		return nil, fmt.Errorf("index directory must be set")
 	}
-	index, err := c.store.LoadCatalog(ctx, request.IndexDir)
+	index, err := c.store.LoadCatalog(ctx, indexDir)
 	if err != nil {
-		return RepositoryListResult{}, err
+		return nil, err
 	}
-	return RepositoryListResult{Repositories: index.Normalize().Repositories}, nil
+	return index.Normalize().Repositories, nil
 }
 
 // RemoveRepository removes a repository from the local catalog.
@@ -151,34 +129,27 @@ func (c *RepositoryCatalog) RemoveRepository(ctx context.Context, request Reposi
 	if err := validateRepositoryRequest(request.Repository, request.IndexDir); err != nil {
 		return err
 	}
-	index, err := c.store.LoadCatalog(ctx, request.IndexDir)
-	if err != nil {
-		return err
-	}
-	index, removed := index.RemoveRepository(request.Repository)
-	if !removed {
-		return fmt.Errorf("repository %s is not indexed", request.Repository)
-	}
-	return c.store.SaveCatalog(ctx, request.IndexDir, index)
+	_, err := c.store.RemoveRepository(ctx, request.IndexDir, request.Repository)
+	return err
 }
 
 // RefreshRepositories refreshes one repository or every indexed repository.
-func (c *RepositoryCatalog) RefreshRepositories(ctx context.Context, request RepositoryRefreshRequest) (RepositoryRefreshResult, error) {
+func (c *RepositoryCatalog) RefreshRepositories(ctx context.Context, request RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error) {
 	if strings.TrimSpace(request.IndexDir) == "" {
-		return RepositoryRefreshResult{}, fmt.Errorf("index directory must be set")
+		return nil, fmt.Errorf("index directory must be set")
 	}
 	index, err := c.store.LoadCatalog(ctx, request.IndexDir)
 	if err != nil {
-		return RepositoryRefreshResult{}, err
+		return nil, err
 	}
 	if request.Repository.IsZero() && !request.All {
-		return RepositoryRefreshResult{}, fmt.Errorf("refresh target must be owner/repo or --all")
+		return nil, fmt.Errorf("refresh target must be owner/repo or --all")
 	}
 
 	var repositories []verification.Repository
 	if !request.Repository.IsZero() {
 		if _, ok := index.Repository(request.Repository); !ok {
-			return RepositoryRefreshResult{}, fmt.Errorf("repository %s is not indexed", request.Repository)
+			return nil, fmt.Errorf("repository %s is not indexed", request.Repository)
 		}
 		repositories = append(repositories, request.Repository)
 	} else {
@@ -187,22 +158,17 @@ func (c *RepositoryCatalog) RefreshRepositories(ctx context.Context, request Rep
 		}
 	}
 	refreshed := make([]catalog.RepositoryRecord, 0, len(repositories))
-	next := index
 	for _, repository := range repositories {
 		record, err := c.fetchRecord(ctx, repository)
 		if err != nil {
-			return RepositoryRefreshResult{}, err
-		}
-		next, err = next.UpsertRepository(record)
-		if err != nil {
-			return RepositoryRefreshResult{}, err
+			return nil, err
 		}
 		refreshed = append(refreshed, record)
 	}
-	if err := c.store.SaveCatalog(ctx, request.IndexDir, next); err != nil {
-		return RepositoryRefreshResult{}, err
+	if _, err := c.store.UpsertRepositories(ctx, request.IndexDir, refreshed); err != nil {
+		return nil, err
 	}
-	return RepositoryRefreshResult{Repositories: refreshed}, nil
+	return refreshed, nil
 }
 
 // ResolvePackage resolves an unqualified package name through the local catalog.

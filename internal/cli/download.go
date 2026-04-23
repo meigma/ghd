@@ -10,12 +10,8 @@ import (
 	"github.com/meigma/ghd/internal/config"
 )
 
-type downloadOptions struct {
-	outputDir string
-}
-
 func newDownloadCommand(options Options) *cobra.Command {
-	var download downloadOptions
+	var outputDir string
 	cmd := &cobra.Command{
 		Use:   "download owner/repo/package@version --output DIR",
 		Short: "Download and verify one GitHub release asset",
@@ -25,7 +21,7 @@ func newDownloadCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if strings.TrimSpace(download.outputDir) == "" {
+			if strings.TrimSpace(outputDir) == "" {
 				return fmt.Errorf("--output must be set")
 			}
 
@@ -37,7 +33,7 @@ func newDownloadCommand(options Options) *cobra.Command {
 				Repository:  target.repository,
 				PackageName: target.packageName,
 				Version:     target.version,
-				OutputDir:   download.outputDir,
+				OutputDir:   outputDir,
 			})
 			if err != nil {
 				return err
@@ -49,6 +45,6 @@ func newDownloadCommand(options Options) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&download.outputDir, "output", "o", "", "directory for the downloaded artifact and verification evidence")
+	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "directory for the downloaded artifact and verification evidence")
 	return cmd
 }
