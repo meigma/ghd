@@ -33,6 +33,8 @@ type Runtime interface {
 	ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error)
 	// ListInstalled returns active installed packages.
 	ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error)
+	// Uninstall removes one active installed package.
+	Uninstall(ctx context.Context, request app.UninstallRequest) (app.UninstallResult, error)
 }
 
 // RuntimeFactory constructs use cases from runtime configuration.
@@ -85,6 +87,7 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
 	root.AddCommand(newInstalledCommand(options))
+	root.AddCommand(newUninstallCommand(options))
 	root.AddCommand(newRepositoryCommand(options))
 	return root
 }

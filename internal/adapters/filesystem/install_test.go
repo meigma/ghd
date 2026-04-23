@@ -40,6 +40,35 @@ func TestInstallerCreatesDigestKeyedStoreLayout(t *testing.T) {
 	assert.Equal(t, "artifact", string(data))
 }
 
+func TestInstallerCreatesAbsoluteStoreLayoutFromRelativeStoreRoot(t *testing.T) {
+	oldwd, err := os.Getwd()
+	require.NoError(t, err)
+	workdir := t.TempDir()
+	require.NoError(t, os.Chdir(workdir))
+	t.Cleanup(func() {
+		require.NoError(t, os.Chdir(oldwd))
+	})
+	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
+	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem("aa", 32))
+	require.NoError(t, err)
+	storeRoot, err := filepath.Abs("store")
+	require.NoError(t, err)
+
+	layout, err := NewInstaller().CreateStoreLayout(context.Background(), app.StoreLayoutRequest{
+		StoreRoot:    "store",
+		Repository:   verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName:  "foo",
+		Version:      "1.2.3",
+		AssetDigest:  digest,
+		ArtifactPath: artifact,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-"+digest.Hex), layout.StorePath)
+	assert.FileExists(t, layout.ArtifactPath)
+}
+
 func TestInstallerRequiresFreshExtractionDirectory(t *testing.T) {
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
@@ -76,6 +105,99 @@ func TestInstallerRemovesStoreLayout(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NoDirExists(t, storePath)
+}
+
+func TestInstallerRemoveInstalledStoreRemovesStorePathUnderRoot(t *testing.T) {
+	storeRoot := t.TempDir()
+	storePath := filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123")
+	require.NoError(t, os.MkdirAll(filepath.Join(storePath, "extracted"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storePath, "artifact"), []byte("artifact"), 0o600))
+	untouched := filepath.Join(storeRoot, "github.com", "owner", "repo", "bar")
+	require.NoError(t, os.MkdirAll(untouched, 0o755))
+
+	err := NewInstaller().RemoveInstalledStore(context.Background(), app.RemoveInstalledStoreRequest{
+		StoreRoot: storeRoot,
+		StorePath: storePath,
+	})
+
+	require.NoError(t, err)
+	assert.NoDirExists(t, storePath)
+	assert.DirExists(t, untouched)
+}
+
+func TestInstallerRemoveInstalledStoreRejectsUnsafePaths(t *testing.T) {
+	storeRoot := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside")
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+
+	tests := []struct {
+		name      string
+		storeRoot string
+		storePath string
+		want      string
+	}{
+		{
+			name:      "empty root",
+			storePath: filepath.Join(storeRoot, "pkg"),
+			want:      "store root must be set",
+		},
+		{
+			name:      "empty path",
+			storeRoot: storeRoot,
+			want:      "store path must be set",
+		},
+		{
+			name:      "relative path",
+			storeRoot: storeRoot,
+			storePath: "store/github.com/owner/repo/foo",
+			want:      "must be absolute",
+		},
+		{
+			name:      "root path",
+			storeRoot: storeRoot,
+			storePath: storeRoot,
+			want:      "not under store root",
+		},
+		{
+			name:      "outside root",
+			storeRoot: storeRoot,
+			storePath: outside,
+			want:      "not under store root",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewInstaller().RemoveInstalledStore(context.Background(), app.RemoveInstalledStoreRequest{
+				StoreRoot: tt.storeRoot,
+				StorePath: tt.storePath,
+			})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+	assert.DirExists(t, outside)
+}
+
+func TestInstallerRemoveInstalledStoreRejectsSymlinkedPathComponents(t *testing.T) {
+	storeRoot := t.TempDir()
+	outside := t.TempDir()
+	outsideStorePath := filepath.Join(outside, "repo", "foo")
+	require.NoError(t, os.MkdirAll(outsideStorePath, 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outsideStorePath, "keep"), []byte("outside"), 0o644))
+	require.NoError(t, os.MkdirAll(filepath.Join(storeRoot, "github.com"), 0o755))
+	require.NoError(t, os.Symlink(outside, filepath.Join(storeRoot, "github.com", "owner")))
+
+	err := NewInstaller().RemoveInstalledStore(context.Background(), app.RemoveInstalledStoreRequest{
+		StoreRoot: storeRoot,
+		StorePath: filepath.Join(storeRoot, "github.com", "owner", "repo", "foo"),
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "symlink component")
+	assert.FileExists(t, filepath.Join(outsideStorePath, "keep"))
 }
 
 func TestInstallerLinksBinariesAndFailsClosedOnCollision(t *testing.T) {
@@ -134,6 +256,11 @@ func TestInstallerRemovesOnlyExpectedBinaryLinks(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NoFileExists(t, linkPath)
+
+	err = installer.RemoveBinaryLinks(context.Background(), []app.InstalledBinary{
+		{Name: "missing", LinkPath: filepath.Join(binDir, "missing"), TargetPath: target},
+	})
+	require.NoError(t, err)
 
 	unsafePath := filepath.Join(binDir, "unsafe")
 	require.NoError(t, os.WriteFile(unsafePath, []byte("not a symlink"), 0o644))

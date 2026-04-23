@@ -63,9 +63,38 @@ type DuplicateInstallError struct {
 	Package string
 }
 
+// NotInstalledError reports a target with no active install.
+type NotInstalledError struct {
+	// Target is the requested uninstall target.
+	Target string
+}
+
+// AmbiguousInstallError reports an unqualified target with multiple active installs.
+type AmbiguousInstallError struct {
+	// Target is the requested uninstall target.
+	Target string
+	// Matches are active installs matching Target.
+	Matches []Record
+}
+
 // Error describes the duplicate active install.
 func (e DuplicateInstallError) Error() string {
 	return fmt.Sprintf("package %s/%s is already installed", e.Repository, e.Package)
+}
+
+// Error describes the missing active install.
+func (e NotInstalledError) Error() string {
+	return fmt.Sprintf("package %q is not installed", e.Target)
+}
+
+// Error describes the ambiguous active install lookup.
+func (e AmbiguousInstallError) Error() string {
+	matches := make([]string, 0, len(e.Matches))
+	for _, match := range e.Matches {
+		matches = append(matches, match.Repository+"/"+match.Package)
+	}
+	sort.Strings(matches)
+	return fmt.Sprintf("installed package %q is ambiguous; qualify one of: %s", e.Target, strings.Join(matches, ", "))
 }
 
 // NewIndex returns an empty installed-state index.
@@ -129,6 +158,33 @@ func (i Index) AddRecord(record Record) (Index, error) {
 	return i, nil
 }
 
+// RemoveRecord returns an index with one active installed package removed.
+func (i Index) RemoveRecord(repository string, packageName string) (Index, Record, error) {
+	target := strings.TrimSpace(repository) + "/" + strings.TrimSpace(packageName)
+	i = i.Normalize()
+	next := i.Records[:0]
+	var removed Record
+	found := false
+	key := recordKey(repository, packageName)
+	for _, record := range i.Records {
+		if recordKey(record.Repository, record.Package) == key {
+			removed = record
+			found = true
+			continue
+		}
+		next = append(next, record)
+	}
+	if !found {
+		return Index{}, Record{}, NotInstalledError{Target: target}
+	}
+	i.Records = next
+	i = i.Normalize()
+	if err := i.Validate(); err != nil {
+		return Index{}, Record{}, err
+	}
+	return i, removed, nil
+}
+
 // Record returns one active installed package.
 func (i Index) Record(repository string, packageName string) (Record, bool) {
 	key := recordKey(repository, packageName)
@@ -138,6 +194,49 @@ func (i Index) Record(repository string, packageName string) (Record, bool) {
 		}
 	}
 	return Record{}, false
+}
+
+// ResolveTarget resolves a user-facing uninstall target to one active install.
+func (i Index) ResolveTarget(target string) (Record, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return Record{}, fmt.Errorf("uninstall target must be set")
+	}
+	if strings.Contains(target, "/") {
+		repository, packageName, err := splitQualifiedTarget(target)
+		if err != nil {
+			return Record{}, err
+		}
+		record, ok := i.Record(repository, packageName)
+		if !ok {
+			return Record{}, NotInstalledError{Target: target}
+		}
+		return record, nil
+	}
+
+	matchesByKey := map[string]Record{}
+	for _, record := range i.Normalize().Records {
+		if record.Package == target || record.exposesBinary(target) {
+			matchesByKey[recordKey(record.Repository, record.Package)] = record
+		}
+	}
+	matches := make([]Record, 0, len(matchesByKey))
+	for _, record := range matchesByKey {
+		matches = append(matches, record)
+	}
+	sort.Slice(matches, func(a, b int) bool {
+		left := recordKey(matches[a].Repository, matches[a].Package)
+		right := recordKey(matches[b].Repository, matches[b].Package)
+		return left < right
+	})
+	switch len(matches) {
+	case 0:
+		return Record{}, NotInstalledError{Target: target}
+	case 1:
+		return matches[0], nil
+	default:
+		return Record{}, AmbiguousInstallError{Target: target, Matches: matches}
+	}
 }
 
 // Validate checks one installed package record.
@@ -200,6 +299,15 @@ func (b Binary) Validate() error {
 	return nil
 }
 
+func (r Record) exposesBinary(name string) bool {
+	for _, binary := range r.Binaries {
+		if binary.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func validateRepository(repository string) error {
 	repository = strings.TrimSpace(repository)
 	if repository == "" {
@@ -210,6 +318,14 @@ func validateRepository(repository string) error {
 		return fmt.Errorf("installed repository must be owner/repo")
 	}
 	return nil
+}
+
+func splitQualifiedTarget(target string) (string, string, error) {
+	parts := strings.Split(target, "/")
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
+		return "", "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+	}
+	return strings.TrimSpace(parts[0]) + "/" + strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]), nil
 }
 
 func recordKey(repository string, packageName string) string {

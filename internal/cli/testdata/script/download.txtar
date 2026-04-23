@@ -23,6 +23,19 @@ stderr 'installed owner/repo/foo@1.2.3'
 exists bin/foo
 exec ghd --state-dir state installed
 stdout 'owner/repo/foo 1.2.3 foo'
+exec ghd --state-dir state uninstall foo --store-dir store
+stderr 'uninstalled owner/repo/foo@1.2.3'
+! stdout .
+! exists bin/foo
+! exists store/github.com/owner/repo/foo/1.2.3/sha256-abc123
+exec ghd --state-dir state installed
+! stdout .
+exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+stdout 'binary bin/foo'
+stderr 'installed owner/repo/foo@1.2.3'
+exec ghd --state-dir state uninstall owner/repo/foo --store-dir store
+stderr 'uninstalled owner/repo/foo@1.2.3'
+! stdout .
 
 # Malformed install targets fail cleanly.
 ! exec ghd --state-dir malformed-state install foo --store-dir store --bin-dir bin
@@ -31,6 +44,18 @@ stderr 'install target must be package@version or owner/repo/package@version'
 # Empty installed state is quiet and successful.
 exec ghd --state-dir empty-state installed
 ! stdout .
+! exec ghd --state-dir empty-state uninstall missing --store-dir store
+stderr 'package "missing" is not installed'
+
+# Ambiguous uninstall targets require qualification.
+! exec ghd --state-dir ambiguous-state uninstall foo --store-dir store
+stderr 'installed package "foo" is ambiguous'
+stderr 'owner/one/foo'
+stderr 'owner/two/bar'
+
+# Malformed uninstall targets fail cleanly.
+! exec ghd uninstall owner/repo --store-dir store
+stderr 'uninstall target must be name or owner/repo/package'
 
 # Install help is scriptable and quiet on stderr.
 exec ghd install --help
@@ -45,3 +70,57 @@ exec ghd installed --help
 stdout 'Usage:'
 stdout 'installed'
 ! stderr .
+
+# Uninstall help is scriptable and quiet on stderr.
+exec ghd uninstall --help
+stdout 'Usage:'
+stdout 'uninstall name|owner/repo/package'
+stdout '--store-dir'
+! stderr .
+
+-- ambiguous-state/installed.json --
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "repository": "owner/one",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/one",
+      "artifact_path": "/store/one/artifact",
+      "extracted_path": "/store/one/extracted",
+      "verification_path": "/store/one/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo",
+          "target_path": "/store/one/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": "owner/two",
+      "package": "bar",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "bar.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/two",
+      "artifact_path": "/store/two/artifact",
+      "extracted_path": "/store/two/extracted",
+      "verification_path": "/store/two/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo-two",
+          "target_path": "/store/two/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}
