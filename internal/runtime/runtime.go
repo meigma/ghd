@@ -11,6 +11,7 @@ import (
 	"github.com/meigma/ghd/internal/adapters/github"
 	"github.com/meigma/ghd/internal/adapters/sigstore"
 	"github.com/meigma/ghd/internal/app"
+	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/config"
 	"github.com/meigma/ghd/internal/verification"
 )
@@ -19,6 +20,9 @@ const userAgent = "ghd"
 
 // Runtime contains the application use cases wired to concrete adapters.
 type Runtime struct {
+	cfg        config.Config
+	components components
+	catalog    *app.RepositoryCatalog
 	downloader *app.VerifiedDownloader
 	installer  *app.VerifiedInstaller
 }
@@ -29,31 +33,17 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	downloader, err := app.NewVerifiedDownloader(app.VerifiedDownloadDependencies{
-		Manifests:      components.githubClient,
-		Assets:         components.githubClient,
-		Downloader:     components.githubClient,
-		Verifier:       components.coreVerifier,
-		EvidenceWriter: components.evidenceWriter,
-	})
-	if err != nil {
-		return nil, err
-	}
-	installer, err := app.NewVerifiedInstaller(app.VerifiedInstallDependencies{
-		Manifests:      components.githubClient,
-		Assets:         components.githubClient,
-		Downloader:     components.githubClient,
-		Verifier:       components.coreVerifier,
-		EvidenceWriter: components.evidenceWriter,
-		Archives:       archive.NewTarGzipExtractor(),
-		FileSystem:     filesystem.NewInstaller(),
+	repositoryCatalog, err := app.NewRepositoryCatalog(app.RepositoryCatalogDependencies{
+		Manifests: components.githubClient,
+		Store:     components.catalogStore,
 	})
 	if err != nil {
 		return nil, err
 	}
 	return &Runtime{
-		downloader: downloader,
-		installer:  installer,
+		cfg:        cfg,
+		components: components,
+		catalog:    repositoryCatalog,
 	}, nil
 }
 
@@ -63,29 +53,64 @@ func NewVerifiedDownloader(ctx context.Context, cfg config.Config) (*app.Verifie
 	if err != nil {
 		return nil, err
 	}
+	coreVerifier, err := newCoreVerifier(ctx, cfg, components.githubClient)
+	if err != nil {
+		return nil, err
+	}
 	return app.NewVerifiedDownloader(app.VerifiedDownloadDependencies{
 		Manifests:      components.githubClient,
 		Assets:         components.githubClient,
 		Downloader:     components.githubClient,
-		Verifier:       components.coreVerifier,
+		Verifier:       coreVerifier,
 		EvidenceWriter: components.evidenceWriter,
 	})
 }
 
 // Download fetches, verifies, and records one release asset.
 func (r *Runtime) Download(ctx context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
+	if err := r.ensureVerifiedUseCases(ctx); err != nil {
+		return app.VerifiedDownloadResult{}, err
+	}
 	return r.downloader.Download(ctx, request)
 }
 
 // Install fetches, verifies, extracts, links, and records one package install.
 func (r *Runtime) Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
+	if err := r.ensureVerifiedUseCases(ctx); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
 	return r.installer.Install(ctx, request)
+}
+
+// AddRepository fetches and indexes a repository manifest.
+func (r *Runtime) AddRepository(ctx context.Context, request app.RepositoryAddRequest) (catalog.RepositoryRecord, error) {
+	return r.catalog.AddRepository(ctx, request)
+}
+
+// ListRepositories returns indexed repositories.
+func (r *Runtime) ListRepositories(ctx context.Context, request app.RepositoryListRequest) (app.RepositoryListResult, error) {
+	return r.catalog.ListRepositories(ctx, request)
+}
+
+// RemoveRepository removes a repository from the local index.
+func (r *Runtime) RemoveRepository(ctx context.Context, request app.RepositoryRemoveRequest) error {
+	return r.catalog.RemoveRepository(ctx, request)
+}
+
+// RefreshRepositories refreshes indexed repository manifests.
+func (r *Runtime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error) {
+	return r.catalog.RefreshRepositories(ctx, request)
+}
+
+// ResolvePackage resolves an unqualified package through the local index.
+func (r *Runtime) ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error) {
+	return r.catalog.ResolvePackage(ctx, request)
 }
 
 type components struct {
 	githubClient   *github.Client
-	coreVerifier   *verification.Verifier
 	evidenceWriter filesystem.EvidenceWriter
+	catalogStore   filesystem.CatalogStore
 }
 
 func newComponents(ctx context.Context, cfg config.Config) (components, error) {
@@ -105,17 +130,63 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 		return components{}, err
 	}
 
+	return components{
+		githubClient:   githubClient,
+		evidenceWriter: filesystem.NewEvidenceWriter(),
+		catalogStore:   filesystem.NewCatalogStore(),
+	}, nil
+}
+
+func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
+	if r.downloader != nil && r.installer != nil {
+		return nil
+	}
+	coreVerifier, err := newCoreVerifier(ctx, r.cfg, r.components.githubClient)
+	if err != nil {
+		return err
+	}
+	downloader, err := app.NewVerifiedDownloader(app.VerifiedDownloadDependencies{
+		Manifests:      r.components.githubClient,
+		Assets:         r.components.githubClient,
+		Downloader:     r.components.githubClient,
+		Verifier:       coreVerifier,
+		EvidenceWriter: r.components.evidenceWriter,
+	})
+	if err != nil {
+		return err
+	}
+	installer, err := app.NewVerifiedInstaller(app.VerifiedInstallDependencies{
+		Manifests:      r.components.githubClient,
+		Assets:         r.components.githubClient,
+		Downloader:     r.components.githubClient,
+		Verifier:       coreVerifier,
+		EvidenceWriter: r.components.evidenceWriter,
+		Archives:       archive.NewTarGzipExtractor(),
+		FileSystem:     filesystem.NewInstaller(),
+	})
+	if err != nil {
+		return err
+	}
+	r.downloader = downloader
+	r.installer = installer
+	return nil
+}
+
+func newCoreVerifier(ctx context.Context, cfg config.Config, githubClient *github.Client) (*verification.Verifier, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	sigstoreOptions := []sigstore.Option{}
 	if cfg.TrustedRootPath != "" {
 		sigstoreOptions = append(sigstoreOptions, sigstore.WithTrustedRootPath(cfg.TrustedRootPath))
 	} else {
 		trustedRoot, err := sigroot.FetchTrustedRoot()
 		if err != nil {
-			return components{}, fmt.Errorf("fetch Sigstore trusted root: %w", err)
+			return nil, fmt.Errorf("fetch Sigstore trusted root: %w", err)
 		}
 		githubTrustedRoot, err := sigstore.FetchGitHubTrustedRoot()
 		if err != nil {
-			return components{}, err
+			return nil, err
 		}
 		sigstoreOptions = append(sigstoreOptions,
 			sigstore.WithPublicGoodTrustedMaterial(trustedRoot),
@@ -124,21 +195,11 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 	}
 	bundleVerifier, err := sigstore.NewVerifier(sigstoreOptions...)
 	if err != nil {
-		return components{}, err
+		return nil, err
 	}
-
-	coreVerifier, err := verification.NewVerifier(verification.Dependencies{
+	return verification.NewVerifier(verification.Dependencies{
 		ReleaseResolver:   githubClient,
 		AttestationSource: githubClient,
 		BundleVerifier:    bundleVerifier,
 	})
-	if err != nil {
-		return components{}, err
-	}
-
-	return components{
-		githubClient:   githubClient,
-		coreVerifier:   coreVerifier,
-		evidenceWriter: filesystem.NewEvidenceWriter(),
-	}, nil
 }

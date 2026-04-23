@@ -24,12 +24,12 @@ exists bin/foo
 
 # Malformed install targets fail cleanly.
 ! exec ghd install foo --store-dir store --bin-dir bin
-stderr 'install target must be owner/repo/package@version'
+stderr 'install target must be package@version or owner/repo/package@version'
 
 # Install help is scriptable and quiet on stderr.
 exec ghd install --help
 stdout 'Usage:'
-stdout 'install owner/repo/package@version --store-dir DIR --bin-dir DIR'
+stdout 'install package@version|owner/repo/package@version --store-dir DIR --bin-dir DIR'
 stdout '--store-dir'
 stdout '--bin-dir'
 ! stderr .

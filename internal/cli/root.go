@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/viper"
 
 	"github.com/meigma/ghd/internal/app"
+	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/config"
 	appruntime "github.com/meigma/ghd/internal/runtime"
 )
@@ -20,6 +21,16 @@ type Runtime interface {
 	Download(ctx context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error)
 	// Install fetches, verifies, extracts, links, and records one package install.
 	Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error)
+	// AddRepository fetches and indexes a repository manifest.
+	AddRepository(ctx context.Context, request app.RepositoryAddRequest) (catalog.RepositoryRecord, error)
+	// ListRepositories returns indexed repositories.
+	ListRepositories(ctx context.Context, request app.RepositoryListRequest) (app.RepositoryListResult, error)
+	// RemoveRepository removes a repository from the local index.
+	RemoveRepository(ctx context.Context, request app.RepositoryRemoveRequest) error
+	// RefreshRepositories refreshes indexed repository manifests.
+	RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error)
+	// ResolvePackage resolves an unqualified package through the local index.
+	ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error)
 }
 
 // RuntimeFactory constructs use cases from runtime configuration.
@@ -67,8 +78,10 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.SetErr(options.Err)
 	root.PersistentFlags().String("github-api-url", "", "GitHub REST API base URL")
 	root.PersistentFlags().String("trusted-root", "", "Sigstore trusted_root.json path")
+	root.PersistentFlags().String("index-dir", "", "local repository index directory")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
+	root.AddCommand(newRepositoryCommand(options))
 	return root
 }
 

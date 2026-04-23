@@ -30,20 +30,23 @@ moon run docs:build
 
 ## Usage
 
-The prototype command surface currently supports direct verified downloads and
-one-off verified installs:
+The prototype command surface currently supports direct verified downloads,
+repository indexing, and one-off verified installs:
 
 ```sh
 go run ./cmd/ghd download owner/repo/package@version --output ./out
+go run ./cmd/ghd repo add owner/repo --index-dir ./index
+go run ./cmd/ghd repo list --index-dir ./index
 go run ./cmd/ghd install owner/repo/package@version --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd install package@version --index-dir ./index --store-dir ./store --bin-dir ./bin
 ```
 
 Start with the design document for the intended full product shape:
 
 - [Initial Design](docs/docs/design.md)
 
-The proposed command shape includes repository indexing, package discovery,
-verified install, update, uninstall, and doctor flows.
+The broader command shape still includes package discovery, update, uninstall,
+and doctor flows.
 
 ## Documentation
 

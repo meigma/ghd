@@ -1,0 +1,85 @@
+# Repository commands persist a local index.
+exec ghd --index-dir index repo add owner/repo
+stderr 'indexed owner/repo'
+exec ghd --index-dir index repo list
+stdout 'owner/repo foo'
+
+# Refresh can target one repository.
+exec ghd --index-dir index repo refresh owner/repo
+stderr 'refreshed owner/repo'
+
+# Unqualified install resolves through the local index.
+exec ghd --index-dir index install foo@1.2.3 --store-dir store --bin-dir bin
+stdout 'binary bin/foo'
+stderr 'installed owner/repo/foo@1.2.3'
+exists bin/foo
+
+# Remove only updates the local index.
+exec ghd --index-dir index repo remove owner/repo
+stderr 'removed owner/repo'
+exec ghd --index-dir index repo list
+! stdout 'owner/repo'
+
+# Ambiguous unqualified installs require repository qualification.
+exec ghd --index-dir ambiguous repo add owner/one
+exec ghd --index-dir ambiguous repo add owner/two
+! exec ghd --index-dir ambiguous install foo@1.2.3 --store-dir other-store --bin-dir other-bin
+stderr 'package "foo" is ambiguous'
+stderr 'owner/one'
+stderr 'owner/two'
+
+# Package names are ambiguous with exposed binary names too.
+exec ghd --index-dir binary-ambiguous repo add owner/repo
+exec ghd --index-dir binary-ambiguous repo add owner/binary
+! exec ghd --index-dir binary-ambiguous install foo@1.2.3 --store-dir binary-store --bin-dir binary-bin
+stderr 'package "foo" is ambiguous'
+stderr 'owner/repo/foo'
+stderr 'owner/binary/bar'
+
+# Unqualified install refreshes indexed repositories before resolution.
+mkdir stale-ambiguous
+cp stale-ambiguous-index.json stale-ambiguous/repositories.json
+! exec ghd --index-dir stale-ambiguous install foo@1.2.3 --store-dir stale-store --bin-dir stale-bin
+stderr 'package "foo" is ambiguous'
+stderr 'owner/one/foo'
+stderr 'owner/two/foo'
+
+# Repo help is scriptable and quiet on stderr.
+exec ghd repo --help
+stdout 'Available Commands:'
+stdout 'add'
+stdout 'list'
+stdout 'remove'
+stdout 'refresh'
+! stderr .
+
+-- stale-ambiguous-index.json --
+{
+  "schema_version": 1,
+  "repositories": [
+    {
+      "repository": {
+        "Owner": "owner",
+        "Name": "one"
+      },
+      "packages": [
+        {
+          "name": "foo"
+        }
+      ],
+      "refreshed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": {
+        "Owner": "owner",
+        "Name": "two"
+      },
+      "packages": [
+        {
+          "name": "bar"
+        }
+      ],
+      "refreshed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}

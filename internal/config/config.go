@@ -16,6 +16,8 @@ type Config struct {
 	GitHubToken string
 	// TrustedRootPath optionally points at a Sigstore trusted_root.json file.
 	TrustedRootPath string
+	// IndexDir is the local repository catalog directory.
+	IndexDir string
 	// StoreDir is the root of ghd's managed package store.
 	StoreDir string
 	// BinDir receives links to installed binaries.
@@ -33,7 +35,11 @@ func Load(vp *viper.Viper) Config {
 	}
 	storeDir := strings.TrimSpace(vp.GetString("store-dir"))
 	binDir := strings.TrimSpace(vp.GetString("bin-dir"))
+	indexDir := strings.TrimSpace(vp.GetString("index-dir"))
 	home, _ := os.UserHomeDir()
+	if indexDir == "" && home != "" {
+		indexDir = filepath.Join(home, ".local", "share", "ghd", "index")
+	}
 	if storeDir == "" && home != "" {
 		storeDir = filepath.Join(home, ".local", "share", "ghd", "store")
 	}
@@ -44,6 +50,7 @@ func Load(vp *viper.Viper) Config {
 		GitHubBaseURL:   strings.TrimSpace(vp.GetString("github-api-url")),
 		GitHubToken:     token,
 		TrustedRootPath: strings.TrimSpace(vp.GetString("trusted-root")),
+		IndexDir:        indexDir,
 		StoreDir:        storeDir,
 		BinDir:          binDir,
 	}

@@ -17,11 +17,11 @@ type installOptions struct {
 func newInstallCommand(options Options) *cobra.Command {
 	var install installOptions
 	cmd := &cobra.Command{
-		Use:   "install owner/repo/package@version --store-dir DIR --bin-dir DIR",
+		Use:   "install package@version|owner/repo/package@version --store-dir DIR --bin-dir DIR",
 		Short: "Install and verify one GitHub release package",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, err := parsePackageVersionTarget("install", args[0])
+			target, err := parseInstallTarget(args[0])
 			if err != nil {
 				return err
 			}
@@ -30,6 +30,23 @@ func newInstallCommand(options Options) *cobra.Command {
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
+			}
+			if !target.qualified {
+				if _, err := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
+					All:      true,
+					IndexDir: cfg.IndexDir,
+				}); err != nil {
+					return err
+				}
+				resolved, err := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
+					PackageName: target.packageName,
+					IndexDir:    cfg.IndexDir,
+				})
+				if err != nil {
+					return err
+				}
+				target.repository = resolved.Repository
+				target.packageName = resolved.PackageName
 			}
 			result, err := runtime.Install(cmd.Context(), app.VerifiedInstallRequest{
 				Repository:  target.repository,
