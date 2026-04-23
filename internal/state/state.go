@@ -185,6 +185,31 @@ func (i Index) RemoveRecord(repository string, packageName string) (Index, Recor
 	return i, removed, nil
 }
 
+// ReplaceRecord returns an index with one active installed package replaced.
+func (i Index) ReplaceRecord(record Record) (Index, error) {
+	if err := record.Validate(); err != nil {
+		return Index{}, err
+	}
+	i = i.Normalize()
+	key := recordKey(record.Repository, record.Package)
+	found := false
+	for idx, existing := range i.Records {
+		if recordKey(existing.Repository, existing.Package) == key {
+			i.Records[idx] = record
+			found = true
+			break
+		}
+	}
+	if !found {
+		return Index{}, NotInstalledError{Target: strings.TrimSpace(record.Repository) + "/" + strings.TrimSpace(record.Package)}
+	}
+	i = i.Normalize()
+	if err := i.Validate(); err != nil {
+		return Index{}, err
+	}
+	return i, nil
+}
+
 // Record returns one active installed package.
 func (i Index) Record(repository string, packageName string) (Record, bool) {
 	key := recordKey(repository, packageName)

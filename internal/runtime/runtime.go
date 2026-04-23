@@ -25,6 +25,7 @@ type Runtime struct {
 	components  components
 	catalog     *app.RepositoryCatalog
 	checker     *app.InstalledPackageChecker
+	updater     *app.PackageUpdater
 	installed   *app.InstalledPackages
 	uninstaller *app.PackageUninstaller
 	downloader  *app.VerifiedDownloader
@@ -145,6 +146,20 @@ func (r *Runtime) CheckInstalled(ctx context.Context, request app.CheckRequest) 
 	return r.checker.Check(ctx, request)
 }
 
+// Update upgrades one active installed package when a newer eligible version exists.
+func (r *Runtime) Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error) {
+	if err := r.ensureVerifiedUseCases(ctx); err != nil {
+		return app.UpdateResult{}, err
+	}
+	if request.StoreDir == "" {
+		request.StoreDir = r.cfg.StoreDir
+	}
+	if request.BinDir == "" {
+		request.BinDir = r.cfg.BinDir
+	}
+	return r.updater.Update(ctx, request)
+}
+
 // Uninstall removes one active installed package.
 func (r *Runtime) Uninstall(ctx context.Context, request app.UninstallRequest) (state.Record, error) {
 	if request.BinDir == "" {
@@ -186,7 +201,7 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 }
 
 func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
-	if r.downloader != nil && r.installer != nil {
+	if r.downloader != nil && r.installer != nil && r.updater != nil {
 		return nil
 	}
 	coreVerifier, err := newCoreVerifier(ctx, r.cfg, r.components.githubClient)
@@ -216,8 +231,23 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	updater, err := app.NewPackageUpdater(app.PackageUpdaterDependencies{
+		Manifests:      r.components.githubClient,
+		Releases:       r.components.githubClient,
+		Assets:         r.components.githubClient,
+		Downloader:     r.components.githubClient,
+		Verifier:       coreVerifier,
+		EvidenceWriter: r.components.evidenceWriter,
+		Archives:       archive.NewTarGzipExtractor(),
+		FileSystem:     filesystem.NewInstaller(),
+		StateStore:     r.components.installedStore,
+	})
+	if err != nil {
+		return err
+	}
 	r.downloader = downloader
 	r.installer = installer
+	r.updater = updater
 	return nil
 }
 

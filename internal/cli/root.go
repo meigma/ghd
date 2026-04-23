@@ -34,6 +34,8 @@ type Runtime interface {
 	ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error)
 	// CheckInstalled reports update availability for installed packages.
 	CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error)
+	// Update upgrades one active installed package when a newer eligible version exists.
+	Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error)
 	// ListInstalled returns active installed packages.
 	ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error)
 	// Uninstall removes one active installed package.
@@ -90,6 +92,7 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
 	root.AddCommand(newCheckCommand(options))
+	root.AddCommand(newUpdateCommand(options))
 	root.AddCommand(newInstalledCommand(options))
 	root.AddCommand(newUninstallCommand(options))
 	root.AddCommand(newRepositoryCommand(options))

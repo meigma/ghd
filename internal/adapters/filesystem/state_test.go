@@ -103,6 +103,32 @@ func TestInstalledStoreRemoveInstalledRecord(t *testing.T) {
 	assert.Contains(t, err.Error(), "not installed")
 }
 
+func TestInstalledStoreReplaceInstalledRecord(t *testing.T) {
+	store := NewInstalledStore()
+	stateDir := t.TempDir()
+	_, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+
+	replacement := installedStateRecord("owner/repo", "foo")
+	replacement.Version = "1.3.0"
+	replacement.Tag = "v1.3.0"
+	replacement.Asset = "foo_1.3.0_darwin_arm64.tar.gz"
+	replacement.StorePath = "/store/foo-new"
+	replacement.ArtifactPath = "/store/foo-new/artifact"
+	replacement.ExtractedPath = "/store/foo-new/extracted"
+	replacement.VerificationPath = "/store/foo-new/verification.json"
+	index, err := store.ReplaceInstalledRecord(context.Background(), stateDir, replacement)
+
+	require.NoError(t, err)
+	require.Len(t, index.Records, 1)
+	assert.Equal(t, "1.3.0", index.Records[0].Version)
+	assert.Equal(t, "/store/foo-new", index.Records[0].StorePath)
+
+	_, err = store.ReplaceInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "missing"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not installed")
+}
+
 func TestInstalledStoreRejectsMalformedState(t *testing.T) {
 	stateDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "installed.json"), []byte("{"), 0o644))

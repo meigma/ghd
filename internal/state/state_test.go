@@ -120,6 +120,36 @@ func TestIndexRemoveRecordRemovesActiveInstall(t *testing.T) {
 	require.ErrorAs(t, err, &notInstalled)
 }
 
+func TestIndexReplaceRecordReplacesActiveInstall(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(installedRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+
+	replacement := installedRecord("owner/repo", "foo")
+	replacement.Version = "1.3.0"
+	replacement.Tag = "v1.3.0"
+	replacement.Asset = "foo_1.3.0_darwin_arm64.tar.gz"
+	replacement.StorePath = "/store/foo-new"
+	replacement.ArtifactPath = "/store/foo-new/artifact"
+	replacement.ExtractedPath = "/store/foo-new/extracted"
+	replacement.VerificationPath = "/store/foo-new/verification.json"
+
+	index, err = index.ReplaceRecord(replacement)
+
+	require.NoError(t, err)
+	record, ok := index.Record("owner/repo", "foo")
+	require.True(t, ok)
+	assert.Equal(t, "1.3.0", record.Version)
+	assert.Equal(t, "/store/foo-new", record.StorePath)
+
+	_, err = index.ReplaceRecord(installedRecord("owner/repo", "missing"))
+	require.Error(t, err)
+	var notInstalled NotInstalledError
+	require.ErrorAs(t, err, &notInstalled)
+	assert.Equal(t, "owner/repo/missing", notInstalled.Target)
+}
+
 func TestIndexNormalizeSortsRecordsAndBinaries(t *testing.T) {
 	index := Index{
 		Records: []Record{
