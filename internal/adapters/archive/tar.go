@@ -33,58 +33,58 @@ func NewTarGzipExtractor() TarGzipExtractor {
 }
 
 // ExtractArchive extracts a verified tar.gz archive.
-func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveExtractionRequest) (app.ArchiveExtractionResult, error) {
+func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveExtractionRequest) ([]app.ExtractedBinary, error) {
 	if err := ctx.Err(); err != nil {
-		return app.ArchiveExtractionResult{}, err
+		return nil, err
 	}
 	archiveName := request.ArchiveName
 	if archiveName == "" {
 		archiveName = request.ArchivePath
 	}
 	if !strings.HasSuffix(archiveName, ".tar.gz") {
-		return app.ArchiveExtractionResult{}, fmt.Errorf("unsupported archive type for %s", archiveName)
+		return nil, fmt.Errorf("unsupported archive type for %s", archiveName)
 	}
 	if strings.TrimSpace(request.DestinationDir) == "" {
-		return app.ArchiveExtractionResult{}, fmt.Errorf("extraction destination must be set")
+		return nil, fmt.Errorf("extraction destination must be set")
 	}
 	if len(request.Binaries) == 0 {
-		return app.ArchiveExtractionResult{}, fmt.Errorf("at least one binary must be configured")
+		return nil, fmt.Errorf("at least one binary must be configured")
 	}
 	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
-		return app.ArchiveExtractionResult{}, fmt.Errorf("create extraction destination: %w", err)
+		return nil, fmt.Errorf("create extraction destination: %w", err)
 	}
 
 	file, err := os.Open(request.ArchivePath)
 	if err != nil {
-		return app.ArchiveExtractionResult{}, fmt.Errorf("open archive: %w", err)
+		return nil, fmt.Errorf("open archive: %w", err)
 	}
 	defer file.Close()
 	buffered := bufio.NewReader(file)
 	gzipReader, err := gzip.NewReader(buffered)
 	if err != nil {
-		return app.ArchiveExtractionResult{}, fmt.Errorf("open gzip stream: %w", err)
+		return nil, fmt.Errorf("open gzip stream: %w", err)
 	}
 	gzipReader.Multistream(false)
 
 	root, err := os.OpenRoot(request.DestinationDir)
 	if err != nil {
 		_ = gzipReader.Close()
-		return app.ArchiveExtractionResult{}, fmt.Errorf("open extraction root: %w", err)
+		return nil, fmt.Errorf("open extraction root: %w", err)
 	}
 	defer root.Close()
 
 	if err := extractTar(ctx, root, tar.NewReader(gzipReader)); err != nil {
 		_ = gzipReader.Close()
-		return app.ArchiveExtractionResult{}, err
+		return nil, err
 	}
 	if err := verifyGzipStream(gzipReader, buffered); err != nil {
-		return app.ArchiveExtractionResult{}, err
+		return nil, err
 	}
 	binaries, err := validateBinaries(root, request.DestinationDir, request.Binaries)
 	if err != nil {
-		return app.ArchiveExtractionResult{}, err
+		return nil, err
 	}
-	return app.ArchiveExtractionResult{Binaries: binaries}, nil
+	return binaries, nil
 }
 
 func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader) error {

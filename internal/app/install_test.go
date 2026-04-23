@@ -41,9 +41,7 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = ArchiveExtractionResult{
-		Binaries: []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}},
-	}
+	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 
 	result, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
@@ -142,17 +140,17 @@ func TestVerifiedInstallerDoesNotWriteMetadataWhenLinkingFails(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = ArchiveExtractionResult{
-		Binaries: []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}},
-	}
+	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.linkErr = errors.New("binary link already exists")
+	storeDir := filepath.Join(t.TempDir(), "store-root")
+	binDir := filepath.Join(t.TempDir(), "bin")
 
 	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
 		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
 		PackageName: "foo",
 		Version:     "1.2.3",
-		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
-		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StoreDir:    storeDir,
+		BinDir:      binDir,
 		StateDir:    filepath.Join(t.TempDir(), "state"),
 		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
 	})
@@ -161,8 +159,12 @@ func TestVerifiedInstallerDoesNotWriteMetadataWhenLinkingFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "binary link already exists")
 	assert.NotNil(t, tc.evidence.record)
 	assert.Nil(t, tc.files.metadata)
-	assert.Equal(t, tc.files.layout, tc.files.removedLayout)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "remove-store", "cleanup"}, tc.events)
+	require.NotNil(t, tc.files.removedManaged)
+	assert.Equal(t, storeDir, tc.files.removedManaged.StoreRoot)
+	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
+	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
+	assert.Empty(t, tc.files.removedManaged.Binaries)
+	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "remove-managed", "cleanup"}, tc.events)
 }
 
 func TestVerifiedInstallerRollsBackLinksWhenMetadataFails(t *testing.T) {
@@ -179,18 +181,18 @@ func TestVerifiedInstallerRollsBackLinksWhenMetadataFails(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = ArchiveExtractionResult{
-		Binaries: []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}},
-	}
+	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 	tc.files.metadataErr = errors.New("disk full")
+	storeDir := filepath.Join(t.TempDir(), "store-root")
+	binDir := filepath.Join(t.TempDir(), "bin")
 
 	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
 		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
 		PackageName: "foo",
 		Version:     "1.2.3",
-		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
-		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StoreDir:    storeDir,
+		BinDir:      binDir,
 		StateDir:    filepath.Join(t.TempDir(), "state"),
 		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
 	})
@@ -198,9 +200,12 @@ func TestVerifiedInstallerRollsBackLinksWhenMetadataFails(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write install metadata")
 	assert.Nil(t, tc.files.metadata)
-	assert.Equal(t, tc.files.links, tc.files.removedLinks)
-	assert.Equal(t, tc.files.layout, tc.files.removedLayout)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "remove-links", "remove-store", "cleanup"}, tc.events)
+	require.NotNil(t, tc.files.removedManaged)
+	assert.Equal(t, storeDir, tc.files.removedManaged.StoreRoot)
+	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
+	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
+	assert.Equal(t, tc.files.links, tc.files.removedManaged.Binaries)
+	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "remove-managed", "cleanup"}, tc.events)
 }
 
 func TestVerifiedInstallerRollsBackLinksWhenInstalledStateFails(t *testing.T) {
@@ -217,27 +222,30 @@ func TestVerifiedInstallerRollsBackLinksWhenInstalledStateFails(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = ArchiveExtractionResult{
-		Binaries: []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}},
-	}
+	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 	tc.state.saveErr = errors.New("disk full")
+	storeDir := filepath.Join(t.TempDir(), "store-root")
+	binDir := filepath.Join(t.TempDir(), "bin")
 
 	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
 		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
 		PackageName: "foo",
 		Version:     "1.2.3",
-		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
-		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StoreDir:    storeDir,
+		BinDir:      binDir,
 		StateDir:    filepath.Join(t.TempDir(), "state"),
 		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "record installed state")
-	assert.Equal(t, tc.files.links, tc.files.removedLinks)
-	assert.Equal(t, tc.files.layout, tc.files.removedLayout)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "remove-links", "remove-store", "cleanup"}, tc.events)
+	require.NotNil(t, tc.files.removedManaged)
+	assert.Equal(t, storeDir, tc.files.removedManaged.StoreRoot)
+	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
+	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
+	assert.Equal(t, tc.files.links, tc.files.removedManaged.Binaries)
+	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "remove-managed", "cleanup"}, tc.events)
 }
 
 func TestVerifiedInstallerRemovesStoreWhenExtractionFails(t *testing.T) {
@@ -255,21 +263,27 @@ func TestVerifiedInstallerRemovesStoreWhenExtractionFails(t *testing.T) {
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
 	tc.archives.err = errors.New("malformed archive")
+	storeDir := filepath.Join(t.TempDir(), "store-root")
+	binDir := filepath.Join(t.TempDir(), "bin")
 
 	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
 		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
 		PackageName: "foo",
 		Version:     "1.2.3",
-		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
-		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StoreDir:    storeDir,
+		BinDir:      binDir,
 		StateDir:    filepath.Join(t.TempDir(), "state"),
 		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "malformed archive")
-	assert.Equal(t, tc.files.layout, tc.files.removedLayout)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "remove-store", "cleanup"}, tc.events)
+	require.NotNil(t, tc.files.removedManaged)
+	assert.Equal(t, storeDir, tc.files.removedManaged.StoreRoot)
+	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
+	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
+	assert.Empty(t, tc.files.removedManaged.Binaries)
+	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "remove-managed", "cleanup"}, tc.events)
 }
 
 type installTestContext struct {
@@ -332,33 +346,32 @@ func (f *eventEvidenceWriter) WriteVerificationEvidence(_ context.Context, _ str
 type fakeArchiveExtractor struct {
 	events  *[]string
 	request ArchiveExtractionRequest
-	result  ArchiveExtractionResult
+	result  []ExtractedBinary
 	err     error
 	called  bool
 }
 
-func (f *fakeArchiveExtractor) ExtractArchive(_ context.Context, request ArchiveExtractionRequest) (ArchiveExtractionResult, error) {
+func (f *fakeArchiveExtractor) ExtractArchive(_ context.Context, request ArchiveExtractionRequest) ([]ExtractedBinary, error) {
 	*f.events = append(*f.events, "extract")
 	f.called = true
 	f.request = request
 	if f.err != nil {
-		return ArchiveExtractionResult{}, f.err
+		return nil, f.err
 	}
 	return f.result, nil
 }
 
 type fakeInstallFileSystem struct {
-	events        *[]string
-	downloadDir   string
-	storeRequest  StoreLayoutRequest
-	layout        StoreLayout
-	links         []InstalledBinary
-	metadata      *InstallRecord
-	metadataErr   error
-	storeCalled   bool
-	linkErr       error
-	removedLinks  []InstalledBinary
-	removedLayout StoreLayout
+	events         *[]string
+	downloadDir    string
+	storeRequest   StoreLayoutRequest
+	layout         StoreLayout
+	links          []InstalledBinary
+	metadata       *InstallRecord
+	metadataErr    error
+	storeCalled    bool
+	linkErr        error
+	removedManaged *RemoveManagedInstallRequest
 }
 
 func (f *fakeInstallFileSystem) CreateDownloadDir(context.Context) (string, func(), error) {
@@ -376,12 +389,6 @@ func (f *fakeInstallFileSystem) CreateStoreLayout(_ context.Context, request Sto
 	return f.layout, nil
 }
 
-func (f *fakeInstallFileSystem) RemoveStoreLayout(_ context.Context, layout StoreLayout) error {
-	*f.events = append(*f.events, "remove-store")
-	f.removedLayout = layout
-	return nil
-}
-
 func (f *fakeInstallFileSystem) LinkBinaries(_ context.Context, _ LinkBinariesRequest) ([]InstalledBinary, error) {
 	*f.events = append(*f.events, "link")
 	if f.linkErr != nil {
@@ -390,9 +397,11 @@ func (f *fakeInstallFileSystem) LinkBinaries(_ context.Context, _ LinkBinariesRe
 	return f.links, nil
 }
 
-func (f *fakeInstallFileSystem) RemoveBinaryLinks(_ context.Context, binaries []InstalledBinary) error {
-	*f.events = append(*f.events, "remove-links")
-	f.removedLinks = append(f.removedLinks, binaries...)
+func (f *fakeInstallFileSystem) RemoveManagedInstall(_ context.Context, request RemoveManagedInstallRequest) error {
+	*f.events = append(*f.events, "remove-managed")
+	copied := request
+	copied.Binaries = append([]InstalledBinary(nil), request.Binaries...)
+	f.removedManaged = &copied
 	return nil
 }
 

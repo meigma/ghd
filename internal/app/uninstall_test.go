@@ -17,21 +17,27 @@ func TestPackageUninstallerRemovesLinksStateAndStore(t *testing.T) {
 	var err error
 	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
 	require.NoError(t, err)
+	storeDir := filepath.Join(t.TempDir(), "store-root")
+	binDir := filepath.Join(t.TempDir(), "bin")
 
 	result, err := tc.subject.Uninstall(context.Background(), UninstallRequest{
 		Target:   "foo",
-		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		StoreDir: storeDir,
+		BinDir:   binDir,
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "owner/repo", result.Record.Repository)
-	assert.Equal(t, "foo", result.Record.Package)
-	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/foo/extracted/foo"}}, tc.files.removedLinks)
+	assert.Equal(t, "owner/repo", result.Repository)
+	assert.Equal(t, "foo", result.Package)
+	require.NotNil(t, tc.files.removedManaged)
+	assert.Equal(t, storeDir, tc.files.removedManaged.StoreRoot)
+	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
+	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/foo/extracted/foo"}}, tc.files.removedManaged.Binaries)
 	assert.Equal(t, "owner/repo", tc.state.removedRepository)
 	assert.Equal(t, "foo", tc.state.removedPackage)
-	assert.Equal(t, result.Record.StorePath, tc.files.removedStore.StorePath)
-	assert.Equal(t, []string{"state-load", "validate-store", "remove-links", "remove-store", "state-remove"}, tc.events)
+	assert.Equal(t, result.StorePath, tc.files.removedManaged.StorePath)
+	assert.Equal(t, []string{"state-load", "remove-managed", "state-remove"}, tc.events)
 }
 
 func TestPackageUninstallerRejectsAmbiguousTargetsBeforeRemovingLinks(t *testing.T) {
@@ -47,12 +53,13 @@ func TestPackageUninstallerRejectsAmbiguousTargetsBeforeRemovingLinks(t *testing
 	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "ambiguous")
-	assert.Empty(t, tc.files.removedLinks)
+	assert.Nil(t, tc.files.removedManaged)
 	assert.Empty(t, tc.state.removedRepository)
 	assert.Equal(t, []string{"state-load"}, tc.events)
 }
@@ -62,19 +69,20 @@ func TestPackageUninstallerDoesNotRemoveLinksWhenStoreValidationFails(t *testing
 	var err error
 	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
 	require.NoError(t, err)
-	tc.files.validateErr = errors.New("store path is not under store root")
+	tc.files.removeErr = errors.New("store path is not under store root")
 
 	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "store path is not under store root")
-	assert.Empty(t, tc.files.removedLinks)
+	assert.Nil(t, tc.files.removedManaged)
 	assert.Empty(t, tc.state.removedRepository)
-	assert.Equal(t, []string{"state-load", "validate-store"}, tc.events)
+	assert.Equal(t, []string{"state-load", "remove-managed"}, tc.events)
 }
 
 func TestPackageUninstallerDoesNotRemoveStateWhenLinkCleanupFails(t *testing.T) {
@@ -82,19 +90,20 @@ func TestPackageUninstallerDoesNotRemoveStateWhenLinkCleanupFails(t *testing.T) 
 	var err error
 	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
 	require.NoError(t, err)
-	tc.files.linkErr = errors.New("unexpected link target")
+	tc.files.removeErr = errors.New("unexpected link target")
 
 	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
 		Target:   "owner/repo/foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected link target")
 	assert.Empty(t, tc.state.removedRepository)
-	assert.Empty(t, tc.files.removedStore.StorePath)
-	assert.Equal(t, []string{"state-load", "validate-store", "remove-links"}, tc.events)
+	assert.Nil(t, tc.files.removedManaged)
+	assert.Equal(t, []string{"state-load", "remove-managed"}, tc.events)
 }
 
 func TestPackageUninstallerReportsStateRemovalFailureAfterStoreCleanup(t *testing.T) {
@@ -107,14 +116,16 @@ func TestPackageUninstallerReportsStateRemovalFailureAfterStoreCleanup(t *testin
 	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "write installed state")
-	assert.Equal(t, "/store/foo", tc.files.removedStore.StorePath)
+	require.NotNil(t, tc.files.removedManaged)
+	assert.Equal(t, "/store/foo", tc.files.removedManaged.StorePath)
 	assert.Equal(t, "owner/repo", tc.state.removedRepository)
-	assert.Equal(t, []string{"state-load", "validate-store", "remove-links", "remove-store", "state-remove"}, tc.events)
+	assert.Equal(t, []string{"state-load", "remove-managed", "state-remove"}, tc.events)
 }
 
 func TestPackageUninstallerKeepsStateWhenStoreCleanupFails(t *testing.T) {
@@ -122,18 +133,19 @@ func TestPackageUninstallerKeepsStateWhenStoreCleanupFails(t *testing.T) {
 	var err error
 	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
 	require.NoError(t, err)
-	tc.files.storeErr = errors.New("permission denied")
+	tc.files.removeErr = errors.New("permission denied")
 
 	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "permission denied")
 	assert.Empty(t, tc.state.removedRepository)
-	assert.Equal(t, []string{"state-load", "validate-store", "remove-links", "remove-store"}, tc.events)
+	assert.Equal(t, []string{"state-load", "remove-managed"}, tc.events)
 }
 
 type uninstallTestContext struct {
@@ -192,29 +204,20 @@ func (f *fakeUninstallStateStore) RemoveInstalledRecord(_ context.Context, _ str
 }
 
 type fakeUninstallFileSystem struct {
-	events       *[]string
-	removedLinks []InstalledBinary
-	removedStore RemoveInstalledStoreRequest
-	validateErr  error
-	linkErr      error
-	storeErr     error
+	events         *[]string
+	removedManaged *RemoveManagedInstallRequest
+	removeErr      error
 }
 
-func (f *fakeUninstallFileSystem) ValidateInstalledStore(_ context.Context, _ RemoveInstalledStoreRequest) error {
-	*f.events = append(*f.events, "validate-store")
-	return f.validateErr
-}
-
-func (f *fakeUninstallFileSystem) RemoveBinaryLinks(_ context.Context, binaries []InstalledBinary) error {
-	*f.events = append(*f.events, "remove-links")
-	f.removedLinks = append(f.removedLinks, binaries...)
-	return f.linkErr
-}
-
-func (f *fakeUninstallFileSystem) RemoveInstalledStore(_ context.Context, request RemoveInstalledStoreRequest) error {
-	*f.events = append(*f.events, "remove-store")
-	f.removedStore = request
-	return f.storeErr
+func (f *fakeUninstallFileSystem) RemoveManagedInstall(_ context.Context, request RemoveManagedInstallRequest) error {
+	*f.events = append(*f.events, "remove-managed")
+	if f.removeErr != nil {
+		return f.removeErr
+	}
+	copied := request
+	copied.Binaries = append([]InstalledBinary(nil), request.Binaries...)
+	f.removedManaged = &copied
+	return nil
 }
 
 func withInstalledBinaries(record state.Record, binaries []state.Binary) state.Record {

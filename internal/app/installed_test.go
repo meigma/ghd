@@ -20,17 +20,17 @@ func TestInstalledPackagesListInstalledReturnsActiveRecords(t *testing.T) {
 	subject, err := NewInstalledPackages(InstalledPackagesDependencies{StateStore: store})
 	require.NoError(t, err)
 
-	result, err := subject.ListInstalled(context.Background(), InstalledListRequest{StateDir: filepath.Join(t.TempDir(), "state")})
+	result, err := subject.ListInstalled(context.Background(), filepath.Join(t.TempDir(), "state"))
 
 	require.NoError(t, err)
-	assert.Equal(t, store.index.Records, result.Records)
+	assert.Equal(t, store.index.Records, result)
 }
 
 func TestInstalledPackagesListInstalledRequiresStateDir(t *testing.T) {
 	subject, err := NewInstalledPackages(InstalledPackagesDependencies{StateStore: &fakeInstalledStateStore{}})
 	require.NoError(t, err)
 
-	_, err = subject.ListInstalled(context.Background(), InstalledListRequest{})
+	_, err = subject.ListInstalled(context.Background(), "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "state directory")

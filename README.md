@@ -40,7 +40,7 @@ go run ./cmd/ghd repo list --index-dir ./index
 go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd installed --state-dir ./state
-go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store
+go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
 ```
 
 Start with the design document for the intended full product shape:

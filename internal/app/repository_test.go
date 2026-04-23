@@ -61,8 +61,8 @@ func TestRepositoryCatalogRefreshesOneRepository(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	require.Len(t, result.Repositories, 1)
-	assert.Equal(t, "foo", result.Repositories[0].Packages[0].Name)
+	require.Len(t, result, 1)
+	assert.Equal(t, "foo", result[0].Packages[0].Name)
 	assert.Equal(t, "foo", tc.store.saved.Repositories[0].Packages[0].Name)
 }
 
@@ -136,14 +136,51 @@ func (f *fakeCatalogStore) LoadCatalog(context.Context, string) (catalog.Index, 
 	return f.index, nil
 }
 
-func (f *fakeCatalogStore) SaveCatalog(_ context.Context, _ string, index catalog.Index) error {
+func (f *fakeCatalogStore) UpsertRepository(_ context.Context, _ string, record catalog.RepositoryRecord) (catalog.Index, error) {
 	if f.err != nil {
-		return f.err
+		return catalog.Index{}, f.err
+	}
+	index, err := f.index.UpsertRepository(record)
+	if err != nil {
+		return catalog.Index{}, err
+	}
+	return f.save(index)
+}
+
+func (f *fakeCatalogStore) UpsertRepositories(_ context.Context, _ string, records []catalog.RepositoryRecord) (catalog.Index, error) {
+	if f.err != nil {
+		return catalog.Index{}, f.err
+	}
+	index := f.index
+	var err error
+	for _, record := range records {
+		index, err = index.UpsertRepository(record)
+		if err != nil {
+			return catalog.Index{}, err
+		}
+	}
+	return f.save(index)
+}
+
+func (f *fakeCatalogStore) RemoveRepository(_ context.Context, _ string, repository verification.Repository) (catalog.Index, error) {
+	if f.err != nil {
+		return catalog.Index{}, f.err
+	}
+	index, removed := f.index.RemoveRepository(repository)
+	if !removed {
+		return catalog.Index{}, errors.New("repository is not indexed")
+	}
+	return f.save(index)
+}
+
+func (f *fakeCatalogStore) save(index catalog.Index) (catalog.Index, error) {
+	if f.err != nil {
+		return catalog.Index{}, f.err
 	}
 	f.saveCalled = true
 	f.saved = index
 	f.index = index
-	return nil
+	return index, nil
 }
 
 func repositoryRecord(t *testing.T, repository verification.Repository, packageName string) catalog.RepositoryRecord {

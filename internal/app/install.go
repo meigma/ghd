@@ -16,7 +16,7 @@ import (
 // ArchiveExtractor extracts verified archives and returns configured binaries.
 type ArchiveExtractor interface {
 	// ExtractArchive extracts request.ArchivePath into request.DestinationDir.
-	ExtractArchive(ctx context.Context, request ArchiveExtractionRequest) (ArchiveExtractionResult, error)
+	ExtractArchive(ctx context.Context, request ArchiveExtractionRequest) ([]ExtractedBinary, error)
 }
 
 // InstallFileSystem owns install-time filesystem state and links.
@@ -25,12 +25,10 @@ type InstallFileSystem interface {
 	CreateDownloadDir(ctx context.Context) (string, func(), error)
 	// CreateStoreLayout creates the digest-keyed store layout and copies the artifact.
 	CreateStoreLayout(ctx context.Context, request StoreLayoutRequest) (StoreLayout, error)
-	// RemoveStoreLayout removes a store layout created for an incomplete install.
-	RemoveStoreLayout(ctx context.Context, layout StoreLayout) error
 	// LinkBinaries links extracted binaries into the managed bin directory.
 	LinkBinaries(ctx context.Context, request LinkBinariesRequest) ([]InstalledBinary, error)
-	// RemoveBinaryLinks removes managed binary links created for an incomplete install.
-	RemoveBinaryLinks(ctx context.Context, binaries []InstalledBinary) error
+	// RemoveManagedInstall removes managed binaries and store contents for one install.
+	RemoveManagedInstall(ctx context.Context, request RemoveManagedInstallRequest) error
 	// WriteInstallMetadata writes install metadata into storePath.
 	WriteInstallMetadata(ctx context.Context, storePath string, record InstallRecord) (string, error)
 }
@@ -136,12 +134,6 @@ type ArchiveExtractionRequest struct {
 	Binaries []manifest.Binary
 }
 
-// ArchiveExtractionResult describes extracted configured binaries.
-type ArchiveExtractionResult struct {
-	// Binaries are the configured binaries found in the extracted archive.
-	Binaries []ExtractedBinary
-}
-
 // ExtractedBinary describes a configured executable inside an extracted archive.
 type ExtractedBinary struct {
 	// Name is the exposed command name.
@@ -184,6 +176,18 @@ type LinkBinariesRequest struct {
 	BinDir string
 	// Binaries are the extracted binaries to expose.
 	Binaries []ExtractedBinary
+}
+
+// RemoveManagedInstallRequest describes managed filesystem state to remove.
+type RemoveManagedInstallRequest struct {
+	// StoreRoot is the managed package store root.
+	StoreRoot string
+	// BinRoot is the managed binary link directory.
+	BinRoot string
+	// StorePath is the managed digest-keyed store directory.
+	StorePath string
+	// Binaries are the recorded binary links to remove.
+	Binaries []InstalledBinary
 }
 
 // InstalledBinary describes one exposed binary link.
@@ -347,7 +351,11 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		Binaries:       pkg.Binaries,
 	})
 	if err != nil {
-		return VerifiedInstallResult{}, i.removeIncompleteStore(ctx, layout, err)
+		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
+			StoreRoot: request.StoreDir,
+			BinRoot:   request.BinDir,
+			StorePath: layout.StorePath,
+		}, err)
 	}
 
 	verificationRecord := VerificationRecord{
@@ -361,15 +369,23 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}
 	evidencePath, err := i.evidence.WriteVerificationEvidence(ctx, layout.StorePath, verificationRecord)
 	if err != nil {
-		return VerifiedInstallResult{}, i.removeIncompleteStore(ctx, layout, fmt.Errorf("write verification evidence: %w", err))
+		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
+			StoreRoot: request.StoreDir,
+			BinRoot:   request.BinDir,
+			StorePath: layout.StorePath,
+		}, fmt.Errorf("write verification evidence: %w", err))
 	}
 
 	links, err := i.files.LinkBinaries(ctx, LinkBinariesRequest{
 		BinDir:   request.BinDir,
-		Binaries: extracted.Binaries,
+		Binaries: extracted,
 	})
 	if err != nil {
-		return VerifiedInstallResult{}, i.removeIncompleteStore(ctx, layout, err)
+		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
+			StoreRoot: request.StoreDir,
+			BinRoot:   request.BinDir,
+			StorePath: layout.StorePath,
+		}, err)
 	}
 
 	installRecord := InstallRecord{
@@ -388,7 +404,12 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}
 	metadataPath, err := i.files.WriteInstallMetadata(ctx, layout.StorePath, installRecord)
 	if err != nil {
-		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("write install metadata: %w", err))
+		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
+			StoreRoot: request.StoreDir,
+			BinRoot:   request.BinDir,
+			StorePath: layout.StorePath,
+			Binaries:  links,
+		}, fmt.Errorf("write install metadata: %w", err))
 	}
 	record := state.Record{
 		Repository:       installRecord.Repository,
@@ -405,7 +426,12 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		InstalledAt:      i.now().UTC(),
 	}
 	if _, err := i.state.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
-		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("record installed state: %w", err))
+		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
+			StoreRoot: request.StoreDir,
+			BinRoot:   request.BinDir,
+			StorePath: layout.StorePath,
+			Binaries:  links,
+		}, fmt.Errorf("record installed state: %w", err))
 	}
 
 	return VerifiedInstallResult{
@@ -424,23 +450,11 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}, nil
 }
 
-func (i *VerifiedInstaller) removeIncompleteStore(ctx context.Context, layout StoreLayout, err error) error {
-	if cleanupErr := i.files.RemoveStoreLayout(context.WithoutCancel(ctx), layout); cleanupErr != nil {
-		return errors.Join(err, fmt.Errorf("cleanup incomplete store: %w", cleanupErr))
+func (i *VerifiedInstaller) cleanupManagedInstall(ctx context.Context, request RemoveManagedInstallRequest, err error) error {
+	if cleanupErr := i.files.RemoveManagedInstall(context.WithoutCancel(ctx), request); cleanupErr != nil {
+		return errors.Join(err, fmt.Errorf("cleanup managed install: %w", cleanupErr))
 	}
 	return err
-}
-
-func (i *VerifiedInstaller) rollbackLinkedInstall(ctx context.Context, layout StoreLayout, links []InstalledBinary, err error) error {
-	var errs []error
-	errs = append(errs, err)
-	if rollbackErr := i.files.RemoveBinaryLinks(context.WithoutCancel(ctx), links); rollbackErr != nil {
-		errs = append(errs, fmt.Errorf("rollback binary links: %w", rollbackErr))
-	}
-	if cleanupErr := i.files.RemoveStoreLayout(context.WithoutCancel(ctx), layout); cleanupErr != nil {
-		errs = append(errs, fmt.Errorf("cleanup incomplete store: %w", cleanupErr))
-	}
-	return errors.Join(errs...)
 }
 
 func (r VerifiedInstallRequest) validate() error {

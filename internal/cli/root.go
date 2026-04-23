@@ -13,6 +13,7 @@ import (
 	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/config"
 	appruntime "github.com/meigma/ghd/internal/runtime"
+	"github.com/meigma/ghd/internal/state"
 )
 
 // Runtime is the app behavior consumed by the CLI.
@@ -24,17 +25,17 @@ type Runtime interface {
 	// AddRepository fetches and indexes a repository manifest.
 	AddRepository(ctx context.Context, request app.RepositoryAddRequest) (catalog.RepositoryRecord, error)
 	// ListRepositories returns indexed repositories.
-	ListRepositories(ctx context.Context, request app.RepositoryListRequest) (app.RepositoryListResult, error)
+	ListRepositories(ctx context.Context, indexDir string) ([]catalog.RepositoryRecord, error)
 	// RemoveRepository removes a repository from the local index.
 	RemoveRepository(ctx context.Context, request app.RepositoryRemoveRequest) error
 	// RefreshRepositories refreshes indexed repository manifests.
-	RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error)
+	RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error)
 	// ResolvePackage resolves an unqualified package through the local index.
 	ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error)
 	// ListInstalled returns active installed packages.
-	ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error)
+	ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error)
 	// Uninstall removes one active installed package.
-	Uninstall(ctx context.Context, request app.UninstallRequest) (app.UninstallResult, error)
+	Uninstall(ctx context.Context, request app.UninstallRequest) (state.Record, error)
 }
 
 // RuntimeFactory constructs use cases from runtime configuration.

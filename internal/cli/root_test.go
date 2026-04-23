@@ -58,81 +58,58 @@ func (testRuntime) AddRepository(ctx context.Context, request app.RepositoryAddR
 		return catalog.RepositoryRecord{}, err
 	}
 	store := filesystem.NewCatalogStore()
-	index, err := store.LoadCatalog(ctx, request.IndexDir)
-	if err != nil {
-		return catalog.RepositoryRecord{}, err
-	}
-	index, err = index.UpsertRepository(record)
-	if err != nil {
-		return catalog.RepositoryRecord{}, err
-	}
-	if err := store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
+	if _, err := store.UpsertRepository(ctx, request.IndexDir, record); err != nil {
 		return catalog.RepositoryRecord{}, err
 	}
 	return record, nil
 }
 
-func (testRuntime) ListRepositories(ctx context.Context, request app.RepositoryListRequest) (app.RepositoryListResult, error) {
+func (testRuntime) ListRepositories(ctx context.Context, indexDir string) ([]catalog.RepositoryRecord, error) {
 	store := filesystem.NewCatalogStore()
-	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	index, err := store.LoadCatalog(ctx, indexDir)
 	if err != nil {
-		return app.RepositoryListResult{}, err
+		return nil, err
 	}
-	return app.RepositoryListResult{Repositories: index.Normalize().Repositories}, nil
+	return index.Normalize().Repositories, nil
 }
 
 func (testRuntime) RemoveRepository(ctx context.Context, request app.RepositoryRemoveRequest) error {
 	store := filesystem.NewCatalogStore()
-	index, err := store.LoadCatalog(ctx, request.IndexDir)
-	if err != nil {
-		return err
-	}
-	index, removed := index.RemoveRepository(request.Repository)
-	if !removed {
-		return fmt.Errorf("repository %s is not indexed", request.Repository)
-	}
-	return store.SaveCatalog(ctx, request.IndexDir, index)
+	_, err := store.RemoveRepository(ctx, request.IndexDir, request.Repository)
+	return err
 }
 
-func (testRuntime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error) {
+func (testRuntime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error) {
 	store := filesystem.NewCatalogStore()
 	index, err := store.LoadCatalog(ctx, request.IndexDir)
 	if err != nil {
-		return app.RepositoryRefreshResult{}, err
+		return nil, err
 	}
 	if !request.Repository.IsZero() {
 		if _, ok := index.Repository(request.Repository); !ok {
-			return app.RepositoryRefreshResult{}, fmt.Errorf("repository %s is not indexed", request.Repository)
+			return nil, fmt.Errorf("repository %s is not indexed", request.Repository)
 		}
 		record, err := testRepositoryRecord(request.Repository)
 		if err != nil {
-			return app.RepositoryRefreshResult{}, err
+			return nil, err
 		}
-		index, err = index.UpsertRepository(record)
-		if err != nil {
-			return app.RepositoryRefreshResult{}, err
+		if _, err := store.UpsertRepository(ctx, request.IndexDir, record); err != nil {
+			return nil, err
 		}
-		if err := store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
-			return app.RepositoryRefreshResult{}, err
-		}
-		return app.RepositoryRefreshResult{Repositories: []catalog.RepositoryRecord{record}}, nil
+		return []catalog.RepositoryRecord{record}, nil
 	}
 	refreshed := make([]catalog.RepositoryRecord, 0, len(index.Repositories))
 	for _, existing := range index.Normalize().Repositories {
 		record, err := testRepositoryRecord(existing.Repository)
 		if err != nil {
-			return app.RepositoryRefreshResult{}, err
-		}
-		index, err = index.UpsertRepository(record)
-		if err != nil {
-			return app.RepositoryRefreshResult{}, err
+			return nil, err
 		}
 		refreshed = append(refreshed, record)
 	}
-	if err := store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
-		return app.RepositoryRefreshResult{}, err
+	if _, err := store.UpsertRepositories(ctx, request.IndexDir, refreshed); err != nil {
+		return nil, err
 	}
-	return app.RepositoryRefreshResult{Repositories: refreshed}, nil
+	return refreshed, nil
 }
 
 func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error) {
@@ -148,22 +125,22 @@ func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackag
 	return app.ResolvePackageResult{Repository: resolved.Repository, PackageName: resolved.PackageName}, nil
 }
 
-func (testRuntime) ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error) {
+func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
 	store := filesystem.NewInstalledStore()
-	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	index, err := store.LoadInstalledState(ctx, stateDir)
 	if err != nil {
-		return app.InstalledListResult{}, err
+		return nil, err
 	}
-	return app.InstalledListResult{Records: index.Normalize().Records}, nil
+	return index.Normalize().Records, nil
 }
 
-func (testRuntime) Uninstall(ctx context.Context, request app.UninstallRequest) (app.UninstallResult, error) {
+func (testRuntime) Uninstall(ctx context.Context, request app.UninstallRequest) (state.Record, error) {
 	subject, err := app.NewPackageUninstaller(app.PackageUninstallerDependencies{
 		StateStore: filesystem.NewInstalledStore(),
 		FileSystem: filesystem.NewInstaller(),
 	})
 	if err != nil {
-		return app.UninstallResult{}, err
+		return state.Record{}, err
 	}
 	return subject.Uninstall(ctx, request)
 }
@@ -190,7 +167,11 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 }
 
 func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
-	if err := os.MkdirAll(request.BinDir, 0o755); err != nil {
+	binDir, err := filepath.Abs(filepath.Clean(request.BinDir))
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	storeRoot, err := filepath.Abs(filepath.Clean(request.StoreDir))
@@ -210,7 +191,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	if err := os.MkdirAll(extractedPath, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	linkPath := filepath.Join(request.BinDir, request.PackageName)
+	linkPath := filepath.Join(binDir, request.PackageName)
 	targetPath := filepath.Join(extractedPath, request.PackageName)
 	linkTarget := targetPath
 	artifactPath := filepath.Join(storePath, "artifact")

@@ -6,7 +6,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/config"
 	"github.com/meigma/ghd/internal/state"
 )
@@ -22,13 +21,11 @@ func newInstalledCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := runtime.ListInstalled(cmd.Context(), app.InstalledListRequest{
-				StateDir: cfg.StateDir,
-			})
+			records, err := runtime.ListInstalled(cmd.Context(), cfg.StateDir)
 			if err != nil {
 				return err
 			}
-			writeInstalledList(options, result.Records)
+			writeInstalledList(options, records)
 			return nil
 		},
 	}
