@@ -79,3 +79,25 @@ func parseRepositoryTarget(value string) (verification.Repository, error) {
 	}
 	return verification.Repository{Owner: parts[0], Name: parts[1]}, nil
 }
+
+func parseUninstallTarget(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+	}
+	parts := strings.Split(value, "/")
+	switch len(parts) {
+	case 1:
+		if strings.TrimSpace(parts[0]) == "" {
+			return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+		}
+		return parts[0], nil
+	case 3:
+		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+		}
+		return value, nil
+	default:
+		return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+	}
+}

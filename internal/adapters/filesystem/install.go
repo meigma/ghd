@@ -127,6 +127,43 @@ func (Installer) RemoveStoreLayout(ctx context.Context, layout app.StoreLayout) 
 	return nil
 }
 
+// RemoveInstalledStore removes a recorded store path under the configured store root.
+func (Installer) RemoveInstalledStore(ctx context.Context, request app.RemoveInstalledStoreRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	storeRoot := strings.TrimSpace(request.StoreRoot)
+	if storeRoot == "" {
+		return fmt.Errorf("store root must be set")
+	}
+	storePath := strings.TrimSpace(request.StorePath)
+	if storePath == "" {
+		return fmt.Errorf("store path must be set")
+	}
+	absRoot, err := filepath.Abs(filepath.Clean(storeRoot))
+	if err != nil {
+		return fmt.Errorf("resolve store root: %w", err)
+	}
+	absStorePath, err := filepath.Abs(filepath.Clean(storePath))
+	if err != nil {
+		return fmt.Errorf("resolve store path: %w", err)
+	}
+	if absRoot == string(os.PathSeparator) {
+		return fmt.Errorf("refusing to use unsafe store root %s", storeRoot)
+	}
+	rel, err := filepath.Rel(absRoot, absStorePath)
+	if err != nil {
+		return fmt.Errorf("compare store path to root: %w", err)
+	}
+	if rel == "." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || rel == ".." || filepath.IsAbs(rel) {
+		return fmt.Errorf("store path %s is not under store root %s", storePath, storeRoot)
+	}
+	if err := os.RemoveAll(absStorePath); err != nil {
+		return fmt.Errorf("remove installed store path: %w", err)
+	}
+	return nil
+}
+
 // LinkBinaries links extracted binaries into the managed bin directory.
 func (Installer) LinkBinaries(ctx context.Context, request app.LinkBinariesRequest) ([]app.InstalledBinary, error) {
 	if err := ctx.Err(); err != nil {

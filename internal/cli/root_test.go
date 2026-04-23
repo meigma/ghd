@@ -157,6 +157,17 @@ func (testRuntime) ListInstalled(ctx context.Context, request app.InstalledListR
 	return app.InstalledListResult{Records: index.Normalize().Records}, nil
 }
 
+func (testRuntime) Uninstall(ctx context.Context, request app.UninstallRequest) (app.UninstallResult, error) {
+	subject, err := app.NewPackageUninstaller(app.PackageUninstallerDependencies{
+		StateStore: filesystem.NewInstalledStore(),
+		FileSystem: filesystem.NewInstaller(),
+	})
+	if err != nil {
+		return app.UninstallResult{}, err
+	}
+	return subject.Uninstall(ctx, request)
+}
+
 func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
 	artifactPath := filepath.Join(request.OutputDir, "artifact.tar.gz")
 	evidencePath := filepath.Join(request.OutputDir, "verification.json")
@@ -182,11 +193,37 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	if err := os.MkdirAll(request.BinDir, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	if err := os.MkdirAll(request.StoreDir, 0o755); err != nil {
+	storePath := filepath.Join(
+		request.StoreDir,
+		"github.com",
+		request.Repository.Owner,
+		request.Repository.Name,
+		request.PackageName,
+		request.Version,
+		"sha256-abc123",
+	)
+	extractedPath := filepath.Join(storePath, "extracted")
+	if err := os.MkdirAll(extractedPath, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	linkPath := filepath.Join(request.BinDir, request.PackageName)
-	if err := os.WriteFile(linkPath, []byte("binary"), 0o755); err != nil {
+	targetPath := filepath.Join(extractedPath, request.PackageName)
+	linkTarget, err := filepath.Abs(targetPath)
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	artifactPath := filepath.Join(storePath, "artifact")
+	verificationPath := filepath.Join(storePath, "verification.json")
+	if err := os.WriteFile(targetPath, []byte("binary"), 0o755); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := os.WriteFile(artifactPath, []byte("artifact"), 0o600); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := os.WriteFile(verificationPath, []byte("{}\n"), 0o600); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := os.Symlink(linkTarget, linkPath); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	record := state.Record{
@@ -196,11 +233,11 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		Tag:              "v" + request.Version,
 		Asset:            request.PackageName + ".tar.gz",
 		AssetDigest:      "sha256:abc123",
-		StorePath:        request.StoreDir,
-		ArtifactPath:     filepath.Join(request.StoreDir, "artifact"),
-		ExtractedPath:    filepath.Join(request.StoreDir, "extracted"),
-		VerificationPath: filepath.Join(request.StoreDir, "verification.json"),
-		Binaries:         []state.Binary{{Name: request.PackageName, LinkPath: linkPath, TargetPath: filepath.Join(request.StoreDir, "artifact")}},
+		StorePath:        storePath,
+		ArtifactPath:     artifactPath,
+		ExtractedPath:    extractedPath,
+		VerificationPath: verificationPath,
+		Binaries:         []state.Binary{{Name: request.PackageName, LinkPath: linkPath, TargetPath: linkTarget}},
 		InstalledAt:      time.Unix(1700000000, 0).UTC(),
 	}
 	store := filesystem.NewInstalledStore()
@@ -212,7 +249,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		PackageName: request.PackageName,
 		Version:     request.Version,
 		Binaries: []app.InstalledBinary{
-			{Name: request.PackageName, LinkPath: linkPath, TargetPath: filepath.Join(request.StoreDir, "artifact")},
+			{Name: request.PackageName, LinkPath: linkPath, TargetPath: linkTarget},
 		},
 	}, nil
 }

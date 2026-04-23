@@ -20,12 +20,13 @@ const userAgent = "ghd"
 
 // Runtime contains the application use cases wired to concrete adapters.
 type Runtime struct {
-	cfg        config.Config
-	components components
-	catalog    *app.RepositoryCatalog
-	installed  *app.InstalledPackages
-	downloader *app.VerifiedDownloader
-	installer  *app.VerifiedInstaller
+	cfg         config.Config
+	components  components
+	catalog     *app.RepositoryCatalog
+	installed   *app.InstalledPackages
+	uninstaller *app.PackageUninstaller
+	downloader  *app.VerifiedDownloader
+	installer   *app.VerifiedInstaller
 }
 
 // New wires the application runtime.
@@ -47,11 +48,19 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	uninstaller, err := app.NewPackageUninstaller(app.PackageUninstallerDependencies{
+		StateStore: components.installedStore,
+		FileSystem: filesystem.NewInstaller(),
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &Runtime{
-		cfg:        cfg,
-		components: components,
-		catalog:    repositoryCatalog,
-		installed:  installedPackages,
+		cfg:         cfg,
+		components:  components,
+		catalog:     repositoryCatalog,
+		installed:   installedPackages,
+		uninstaller: uninstaller,
 	}, nil
 }
 
@@ -118,6 +127,11 @@ func (r *Runtime) ResolvePackage(ctx context.Context, request app.ResolvePackage
 // ListInstalled returns active installed packages.
 func (r *Runtime) ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error) {
 	return r.installed.ListInstalled(ctx, request)
+}
+
+// Uninstall removes one active installed package.
+func (r *Runtime) Uninstall(ctx context.Context, request app.UninstallRequest) (app.UninstallResult, error) {
+	return r.uninstaller.Uninstall(ctx, request)
 }
 
 type components struct {

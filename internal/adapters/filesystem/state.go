@@ -64,6 +64,34 @@ func (InstalledStore) AddInstalledRecord(ctx context.Context, stateDir string, r
 	return index.Normalize(), nil
 }
 
+// RemoveInstalledRecord removes an active installed package record under a state lock.
+func (InstalledStore) RemoveInstalledRecord(ctx context.Context, stateDir string, repository string, packageName string) (state.Index, error) {
+	if err := ctx.Err(); err != nil {
+		return state.Index{}, err
+	}
+	if strings.TrimSpace(stateDir) == "" {
+		return state.Index{}, fmt.Errorf("state directory must be set")
+	}
+	unlock, err := acquireInstalledStateLock(ctx, stateDir)
+	if err != nil {
+		return state.Index{}, err
+	}
+	defer unlock()
+
+	index, err := loadInstalledStateFile(stateDir)
+	if err != nil {
+		return state.Index{}, err
+	}
+	index, _, err = index.RemoveRecord(repository, packageName)
+	if err != nil {
+		return state.Index{}, err
+	}
+	if err := saveInstalledStateFile(stateDir, index); err != nil {
+		return state.Index{}, err
+	}
+	return index.Normalize(), nil
+}
+
 func loadInstalledStateFile(stateDir string) (state.Index, error) {
 	data, err := os.ReadFile(filepath.Join(stateDir, installedStateFile))
 	if os.IsNotExist(err) {

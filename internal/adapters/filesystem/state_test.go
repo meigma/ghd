@@ -81,6 +81,28 @@ func TestInstalledStoreAddInstalledRecordIgnoresStaleLockFile(t *testing.T) {
 	assert.Len(t, loaded.Records, 1)
 }
 
+func TestInstalledStoreRemoveInstalledRecord(t *testing.T) {
+	store := NewInstalledStore()
+	stateDir := t.TempDir()
+	_, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+	_, err = store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "bar"))
+	require.NoError(t, err)
+
+	index, err := store.RemoveInstalledRecord(context.Background(), stateDir, "owner/repo", "foo")
+
+	require.NoError(t, err)
+	assert.Len(t, index.Records, 1)
+	assert.Equal(t, "bar", index.Records[0].Package)
+	loaded, err := store.LoadInstalledState(context.Background(), stateDir)
+	require.NoError(t, err)
+	assert.Equal(t, index, loaded)
+
+	_, err = store.RemoveInstalledRecord(context.Background(), stateDir, "owner/repo", "missing")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not installed")
+}
+
 func TestInstalledStoreRejectsMalformedState(t *testing.T) {
 	stateDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "installed.json"), []byte("{"), 0o644))

@@ -78,6 +78,74 @@ func TestInstallerRemovesStoreLayout(t *testing.T) {
 	assert.NoDirExists(t, storePath)
 }
 
+func TestInstallerRemoveInstalledStoreRemovesStorePathUnderRoot(t *testing.T) {
+	storeRoot := t.TempDir()
+	storePath := filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123")
+	require.NoError(t, os.MkdirAll(filepath.Join(storePath, "extracted"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storePath, "artifact"), []byte("artifact"), 0o600))
+	untouched := filepath.Join(storeRoot, "github.com", "owner", "repo", "bar")
+	require.NoError(t, os.MkdirAll(untouched, 0o755))
+
+	err := NewInstaller().RemoveInstalledStore(context.Background(), app.RemoveInstalledStoreRequest{
+		StoreRoot: storeRoot,
+		StorePath: storePath,
+	})
+
+	require.NoError(t, err)
+	assert.NoDirExists(t, storePath)
+	assert.DirExists(t, untouched)
+}
+
+func TestInstallerRemoveInstalledStoreRejectsUnsafePaths(t *testing.T) {
+	storeRoot := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "outside")
+	require.NoError(t, os.MkdirAll(outside, 0o755))
+
+	tests := []struct {
+		name      string
+		storeRoot string
+		storePath string
+		want      string
+	}{
+		{
+			name:      "empty root",
+			storePath: filepath.Join(storeRoot, "pkg"),
+			want:      "store root must be set",
+		},
+		{
+			name:      "empty path",
+			storeRoot: storeRoot,
+			want:      "store path must be set",
+		},
+		{
+			name:      "root path",
+			storeRoot: storeRoot,
+			storePath: storeRoot,
+			want:      "not under store root",
+		},
+		{
+			name:      "outside root",
+			storeRoot: storeRoot,
+			storePath: outside,
+			want:      "not under store root",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			err := NewInstaller().RemoveInstalledStore(context.Background(), app.RemoveInstalledStoreRequest{
+				StoreRoot: tt.storeRoot,
+				StorePath: tt.storePath,
+			})
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+		})
+	}
+	assert.DirExists(t, outside)
+}
+
 func TestInstallerLinksBinariesAndFailsClosedOnCollision(t *testing.T) {
 	installer := NewInstaller()
 	binDir := t.TempDir()
@@ -134,6 +202,11 @@ func TestInstallerRemovesOnlyExpectedBinaryLinks(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NoFileExists(t, linkPath)
+
+	err = installer.RemoveBinaryLinks(context.Background(), []app.InstalledBinary{
+		{Name: "missing", LinkPath: filepath.Join(binDir, "missing"), TargetPath: target},
+	})
+	require.NoError(t, err)
 
 	unsafePath := filepath.Join(binDir, "unsafe")
 	require.NoError(t, os.WriteFile(unsafePath, []byte("not a symlink"), 0o644))

@@ -24,6 +24,102 @@ func TestIndexAddRecordRejectsDuplicateActiveInstall(t *testing.T) {
 	assert.Equal(t, "foo", duplicate.Package)
 }
 
+func TestIndexResolveTarget(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(installedRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/other", "bar"), []Binary{
+		{Name: "baz", LinkPath: "/bin/baz", TargetPath: "/store/bar/extracted/baz"},
+	}))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name        string
+		target      string
+		wantRepo    string
+		wantPackage string
+	}{
+		{
+			name:        "package name",
+			target:      "foo",
+			wantRepo:    "owner/repo",
+			wantPackage: "foo",
+		},
+		{
+			name:        "binary name",
+			target:      "baz",
+			wantRepo:    "owner/other",
+			wantPackage: "bar",
+		},
+		{
+			name:        "qualified package",
+			target:      "owner/repo/foo",
+			wantRepo:    "owner/repo",
+			wantPackage: "foo",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			record, err := index.ResolveTarget(tt.target)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantRepo, record.Repository)
+			assert.Equal(t, tt.wantPackage, record.Package)
+		})
+	}
+}
+
+func TestIndexResolveTargetReportsAmbiguousAndMissingInstalls(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(installedRecord("owner/one", "foo"))
+	require.NoError(t, err)
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/two", "bar"), []Binary{
+		{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
+	}))
+	require.NoError(t, err)
+
+	_, err = index.ResolveTarget("foo")
+	require.Error(t, err)
+	var ambiguous AmbiguousInstallError
+	require.ErrorAs(t, err, &ambiguous)
+	assert.Equal(t, "foo", ambiguous.Target)
+	require.Len(t, ambiguous.Matches, 2)
+
+	_, err = index.ResolveTarget("missing")
+	require.Error(t, err)
+	var notInstalled NotInstalledError
+	require.ErrorAs(t, err, &notInstalled)
+	assert.Equal(t, "missing", notInstalled.Target)
+}
+
+func TestIndexRemoveRecordRemovesActiveInstall(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(installedRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+	index, err = index.AddRecord(installedRecord("owner/other", "bar"))
+	require.NoError(t, err)
+
+	next, removed, err := index.RemoveRecord("owner/repo", "foo")
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/repo", removed.Repository)
+	assert.Equal(t, "foo", removed.Package)
+	_, ok := next.Record("owner/repo", "foo")
+	assert.False(t, ok)
+	_, ok = next.Record("owner/other", "bar")
+	assert.True(t, ok)
+
+	_, _, err = next.RemoveRecord("owner/repo", "foo")
+	require.Error(t, err)
+	var notInstalled NotInstalledError
+	require.ErrorAs(t, err, &notInstalled)
+}
+
 func TestIndexNormalizeSortsRecordsAndBinaries(t *testing.T) {
 	index := Index{
 		Records: []Record{
