@@ -3,15 +3,18 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/meigma/ghd/internal/state"
 )
 
 const installedStateFile = "installed.json"
+const installedStateLockFile = ".installed.lock"
 
 // InstalledStore persists active installed package state as JSON.
 type InstalledStore struct{}
@@ -29,6 +32,38 @@ func (InstalledStore) LoadInstalledState(ctx context.Context, stateDir string) (
 	if strings.TrimSpace(stateDir) == "" {
 		return state.Index{}, fmt.Errorf("state directory must be set")
 	}
+	return loadInstalledStateFile(stateDir)
+}
+
+// AddInstalledRecord adds an active installed package record under a state lock.
+func (InstalledStore) AddInstalledRecord(ctx context.Context, stateDir string, record state.Record) (state.Index, error) {
+	if err := ctx.Err(); err != nil {
+		return state.Index{}, err
+	}
+	if strings.TrimSpace(stateDir) == "" {
+		return state.Index{}, fmt.Errorf("state directory must be set")
+	}
+	unlock, err := acquireInstalledStateLock(ctx, stateDir)
+	if err != nil {
+		return state.Index{}, err
+	}
+	defer unlock()
+
+	index, err := loadInstalledStateFile(stateDir)
+	if err != nil {
+		return state.Index{}, err
+	}
+	index, err = index.AddRecord(record)
+	if err != nil {
+		return state.Index{}, err
+	}
+	if err := saveInstalledStateFile(stateDir, index); err != nil {
+		return state.Index{}, err
+	}
+	return index.Normalize(), nil
+}
+
+func loadInstalledStateFile(stateDir string) (state.Index, error) {
 	data, err := os.ReadFile(filepath.Join(stateDir, installedStateFile))
 	if os.IsNotExist(err) {
 		return state.NewIndex(), nil
@@ -47,14 +82,7 @@ func (InstalledStore) LoadInstalledState(ctx context.Context, stateDir string) (
 	return index, nil
 }
 
-// SaveInstalledState writes active installed package state to stateDir.
-func (InstalledStore) SaveInstalledState(ctx context.Context, stateDir string, index state.Index) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(stateDir) == "" {
-		return fmt.Errorf("state directory must be set")
-	}
+func saveInstalledStateFile(stateDir string, index state.Index) error {
 	index = index.Normalize()
 	if err := index.Validate(); err != nil {
 		return err
@@ -66,4 +94,31 @@ func (InstalledStore) SaveInstalledState(ctx context.Context, stateDir string, i
 	data = append(data, '\n')
 	_, err = writeFileAtomic(stateDir, installedStateFile, data, 0o644)
 	return err
+}
+
+func acquireInstalledStateLock(ctx context.Context, stateDir string) (func(), error) {
+	if err := os.MkdirAll(stateDir, 0o755); err != nil {
+		return nil, fmt.Errorf("create state directory: %w", err)
+	}
+	lockPath := filepath.Join(stateDir, installedStateLockFile)
+	for {
+		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			unlock := func() {
+				_ = file.Close()
+				_ = os.Remove(lockPath)
+			}
+			return unlock, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, fmt.Errorf("create installed state lock: %w", err)
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }

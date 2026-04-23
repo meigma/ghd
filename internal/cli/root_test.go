@@ -204,15 +204,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		InstalledAt:      time.Unix(1700000000, 0).UTC(),
 	}
 	store := filesystem.NewInstalledStore()
-	index, err := store.LoadInstalledState(ctx, request.StateDir)
-	if err != nil {
-		return app.VerifiedInstallResult{}, err
-	}
-	index, err = index.AddRecord(record)
-	if err != nil {
-		return app.VerifiedInstallResult{}, err
-	}
-	if err := store.SaveInstalledState(ctx, request.StateDir, index); err != nil {
+	if _, err := store.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	return app.VerifiedInstallResult{

@@ -76,7 +76,7 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	assert.Equal(t, assetDigest.String(), tc.state.saved.Records[0].AssetDigest)
 	assert.Equal(t, []state.Binary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, tc.state.saved.Records[0].Binaries)
 	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, result.Binaries)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-save", "cleanup"}, tc.events)
+	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "cleanup"}, tc.events)
 }
 
 func TestVerifiedInstallerDoesNotExtractOrWriteWhenVerificationFails(t *testing.T) {
@@ -237,7 +237,7 @@ func TestVerifiedInstallerRollsBackLinksWhenInstalledStateFails(t *testing.T) {
 	assert.Contains(t, err.Error(), "record installed state")
 	assert.Equal(t, tc.files.links, tc.files.removedLinks)
 	assert.Equal(t, tc.files.layout, tc.files.removedLayout)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-save", "remove-links", "remove-store", "cleanup"}, tc.events)
+	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "remove-links", "remove-store", "cleanup"}, tc.events)
 }
 
 func TestVerifiedInstallerRemovesStoreWhenExtractionFails(t *testing.T) {
@@ -423,14 +423,18 @@ func (f *fakeInstalledStateStore) LoadInstalledState(context.Context, string) (s
 	return f.index.Normalize(), nil
 }
 
-func (f *fakeInstalledStateStore) SaveInstalledState(_ context.Context, _ string, index state.Index) error {
+func (f *fakeInstalledStateStore) AddInstalledRecord(_ context.Context, _ string, record state.Record) (state.Index, error) {
 	if f.events != nil {
-		*f.events = append(*f.events, "state-save")
+		*f.events = append(*f.events, "state-add")
 	}
 	if f.saveErr != nil {
-		return f.saveErr
+		return state.Index{}, f.saveErr
+	}
+	index, err := f.index.AddRecord(record)
+	if err != nil {
+		return state.Index{}, err
 	}
 	f.saved = index.Normalize()
 	f.index = f.saved
-	return nil
+	return f.saved, nil
 }

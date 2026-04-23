@@ -39,8 +39,8 @@ type InstallFileSystem interface {
 type InstalledStateStore interface {
 	// LoadInstalledState reads active installed package state from stateDir.
 	LoadInstalledState(ctx context.Context, stateDir string) (state.Index, error)
-	// SaveInstalledState writes active installed package state to stateDir.
-	SaveInstalledState(ctx context.Context, stateDir string, index state.Index) error
+	// AddInstalledRecord adds an active installed package record to stateDir.
+	AddInstalledRecord(ctx context.Context, stateDir string, record state.Record) (state.Index, error)
 }
 
 // VerifiedInstallDependencies contains the ports needed by VerifiedInstaller.
@@ -390,7 +390,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("write install metadata: %w", err))
 	}
-	installedState, err = installedState.AddRecord(state.Record{
+	record := state.Record{
 		Repository:       installRecord.Repository,
 		Package:          installRecord.Package,
 		Version:          installRecord.Version,
@@ -403,11 +403,8 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		VerificationPath: installRecord.VerificationPath,
 		Binaries:         stateBinaries(links),
 		InstalledAt:      i.now().UTC(),
-	})
-	if err != nil {
-		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("record installed state: %w", err))
 	}
-	if err := i.state.SaveInstalledState(ctx, request.StateDir, installedState); err != nil {
+	if _, err := i.state.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
 		return VerifiedInstallResult{}, i.rollbackLinkedInstall(ctx, layout, links, fmt.Errorf("record installed state: %w", err))
 	}
 

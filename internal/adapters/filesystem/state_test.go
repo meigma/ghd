@@ -2,8 +2,10 @@ package filesystem
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -26,17 +28,44 @@ func TestInstalledStoreLoadMissingStateReturnsEmptyIndex(t *testing.T) {
 func TestInstalledStoreRoundTripsInstalledState(t *testing.T) {
 	store := NewInstalledStore()
 	stateDir := t.TempDir()
-	index := state.NewIndex()
-	var err error
-	index, err = index.AddRecord(installedStateRecord("owner/repo", "foo"))
+	index, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
 	require.NoError(t, err)
-
-	require.NoError(t, store.SaveInstalledState(context.Background(), stateDir, index))
 	loaded, err := store.LoadInstalledState(context.Background(), stateDir)
 
 	require.NoError(t, err)
 	assert.Equal(t, index.Normalize(), loaded)
 	assert.FileExists(t, filepath.Join(stateDir, "installed.json"))
+}
+
+func TestInstalledStoreAddInstalledRecordMergesConcurrentWriters(t *testing.T) {
+	store := NewInstalledStore()
+	stateDir := t.TempDir()
+	const installs = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, installs)
+
+	for i := range installs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			record := installedStateRecord("owner/repo", fmt.Sprintf("pkg-%d", i))
+			record.Binaries[0].Name = record.Package
+			errs <- func() error {
+				_, err := store.AddInstalledRecord(context.Background(), stateDir, record)
+				return err
+			}()
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		require.NoError(t, err)
+	}
+
+	loaded, err := store.LoadInstalledState(context.Background(), stateDir)
+
+	require.NoError(t, err)
+	assert.Len(t, loaded.Records, installs)
 }
 
 func TestInstalledStoreRejectsMalformedState(t *testing.T) {
