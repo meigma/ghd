@@ -6,12 +6,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/spf13/viper"
 
+	"github.com/meigma/ghd/internal/adapters/filesystem"
 	"github.com/meigma/ghd/internal/app"
+	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/config"
+	"github.com/meigma/ghd/internal/manifest"
+	"github.com/meigma/ghd/internal/verification"
 )
 
 func TestMain(m *testing.M) {
@@ -45,6 +50,102 @@ func runTestCommand() int {
 }
 
 type testRuntime struct{}
+
+func (testRuntime) AddRepository(ctx context.Context, request app.RepositoryAddRequest) (catalog.RepositoryRecord, error) {
+	record, err := testRepositoryRecord(request.Repository)
+	if err != nil {
+		return catalog.RepositoryRecord{}, err
+	}
+	store := filesystem.NewCatalogStore()
+	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	if err != nil {
+		return catalog.RepositoryRecord{}, err
+	}
+	index, err = index.UpsertRepository(record)
+	if err != nil {
+		return catalog.RepositoryRecord{}, err
+	}
+	if err := store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
+		return catalog.RepositoryRecord{}, err
+	}
+	return record, nil
+}
+
+func (testRuntime) ListRepositories(ctx context.Context, request app.RepositoryListRequest) (app.RepositoryListResult, error) {
+	store := filesystem.NewCatalogStore()
+	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	if err != nil {
+		return app.RepositoryListResult{}, err
+	}
+	return app.RepositoryListResult{Repositories: index.Normalize().Repositories}, nil
+}
+
+func (testRuntime) RemoveRepository(ctx context.Context, request app.RepositoryRemoveRequest) error {
+	store := filesystem.NewCatalogStore()
+	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	if err != nil {
+		return err
+	}
+	index, removed := index.RemoveRepository(request.Repository)
+	if !removed {
+		return fmt.Errorf("repository %s is not indexed", request.Repository)
+	}
+	return store.SaveCatalog(ctx, request.IndexDir, index)
+}
+
+func (testRuntime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) (app.RepositoryRefreshResult, error) {
+	store := filesystem.NewCatalogStore()
+	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	if err != nil {
+		return app.RepositoryRefreshResult{}, err
+	}
+	if !request.Repository.IsZero() {
+		if _, ok := index.Repository(request.Repository); !ok {
+			return app.RepositoryRefreshResult{}, fmt.Errorf("repository %s is not indexed", request.Repository)
+		}
+		record, err := testRepositoryRecord(request.Repository)
+		if err != nil {
+			return app.RepositoryRefreshResult{}, err
+		}
+		index, err = index.UpsertRepository(record)
+		if err != nil {
+			return app.RepositoryRefreshResult{}, err
+		}
+		if err := store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
+			return app.RepositoryRefreshResult{}, err
+		}
+		return app.RepositoryRefreshResult{Repositories: []catalog.RepositoryRecord{record}}, nil
+	}
+	refreshed := make([]catalog.RepositoryRecord, 0, len(index.Repositories))
+	for _, existing := range index.Normalize().Repositories {
+		record, err := testRepositoryRecord(existing.Repository)
+		if err != nil {
+			return app.RepositoryRefreshResult{}, err
+		}
+		index, err = index.UpsertRepository(record)
+		if err != nil {
+			return app.RepositoryRefreshResult{}, err
+		}
+		refreshed = append(refreshed, record)
+	}
+	if err := store.SaveCatalog(ctx, request.IndexDir, index); err != nil {
+		return app.RepositoryRefreshResult{}, err
+	}
+	return app.RepositoryRefreshResult{Repositories: refreshed}, nil
+}
+
+func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error) {
+	store := filesystem.NewCatalogStore()
+	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	if err != nil {
+		return app.ResolvePackageResult{}, err
+	}
+	resolved, err := index.ResolvePackage(request.PackageName)
+	if err != nil {
+		return app.ResolvePackageResult{}, err
+	}
+	return app.ResolvePackageResult{Repository: resolved.Repository, PackageName: resolved.PackageName}, nil
+}
 
 func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
 	artifactPath := filepath.Join(request.OutputDir, "artifact.tar.gz")
@@ -86,4 +187,22 @@ func (testRuntime) Install(_ context.Context, request app.VerifiedInstallRequest
 			{Name: request.PackageName, LinkPath: linkPath, TargetPath: filepath.Join(request.StoreDir, "artifact")},
 		},
 	}, nil
+}
+
+func testRepositoryRecord(repository verification.Repository) (catalog.RepositoryRecord, error) {
+	packageName := "foo"
+	binaryPath := "bin/foo"
+	if repository.Name == "binary" {
+		packageName = "bar"
+		binaryPath = "bin/foo"
+	}
+	return catalog.NewRepositoryRecord(repository, manifest.Config{
+		Version: manifest.SchemaVersion,
+		Provenance: manifest.Provenance{
+			SignerWorkflow: repository.String() + "/.github/workflows/release.yml",
+		},
+		Packages: []manifest.Package{
+			{Name: packageName, Description: "Foo CLI", Binaries: []manifest.Binary{{Path: binaryPath}}},
+		},
+	}, time.Unix(1700000000, 0))
 }

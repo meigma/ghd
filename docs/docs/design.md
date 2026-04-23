@@ -432,7 +432,9 @@ The first vertical slice should prove the complete path for one real repository:
 7. Link it into the managed bin directory.
 8. Record `verification.json`.
 
-After that works, the next slice should add indexing and ambiguity handling.
+After the verified install and indexing slices work, the next slices should add
+installed-state management, update/check flows, uninstall, and clearer collision
+UX.
 
 ## Open Questions
 
