@@ -16,6 +16,7 @@ import (
 	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/config"
 	"github.com/meigma/ghd/internal/manifest"
+	"github.com/meigma/ghd/internal/state"
 	"github.com/meigma/ghd/internal/verification"
 )
 
@@ -147,6 +148,15 @@ func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackag
 	return app.ResolvePackageResult{Repository: resolved.Repository, PackageName: resolved.PackageName}, nil
 }
 
+func (testRuntime) ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error) {
+	store := filesystem.NewInstalledStore()
+	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return app.InstalledListResult{}, err
+	}
+	return app.InstalledListResult{Records: index.Normalize().Records}, nil
+}
+
 func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
 	artifactPath := filepath.Join(request.OutputDir, "artifact.tar.gz")
 	evidencePath := filepath.Join(request.OutputDir, "verification.json")
@@ -168,7 +178,7 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 	}, nil
 }
 
-func (testRuntime) Install(_ context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
+func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
 	if err := os.MkdirAll(request.BinDir, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
@@ -177,6 +187,32 @@ func (testRuntime) Install(_ context.Context, request app.VerifiedInstallRequest
 	}
 	linkPath := filepath.Join(request.BinDir, request.PackageName)
 	if err := os.WriteFile(linkPath, []byte("binary"), 0o755); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	record := state.Record{
+		Repository:       request.Repository.String(),
+		Package:          request.PackageName,
+		Version:          request.Version,
+		Tag:              "v" + request.Version,
+		Asset:            request.PackageName + ".tar.gz",
+		AssetDigest:      "sha256:abc123",
+		StorePath:        request.StoreDir,
+		ArtifactPath:     filepath.Join(request.StoreDir, "artifact"),
+		ExtractedPath:    filepath.Join(request.StoreDir, "extracted"),
+		VerificationPath: filepath.Join(request.StoreDir, "verification.json"),
+		Binaries:         []state.Binary{{Name: request.PackageName, LinkPath: linkPath, TargetPath: filepath.Join(request.StoreDir, "artifact")}},
+		InstalledAt:      time.Unix(1700000000, 0).UTC(),
+	}
+	store := filesystem.NewInstalledStore()
+	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	index, err = index.AddRecord(record)
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := store.SaveInstalledState(ctx, request.StateDir, index); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	return app.VerifiedInstallResult{

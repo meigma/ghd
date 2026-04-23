@@ -23,6 +23,7 @@ type Runtime struct {
 	cfg        config.Config
 	components components
 	catalog    *app.RepositoryCatalog
+	installed  *app.InstalledPackages
 	downloader *app.VerifiedDownloader
 	installer  *app.VerifiedInstaller
 }
@@ -40,10 +41,17 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	installedPackages, err := app.NewInstalledPackages(app.InstalledPackagesDependencies{
+		StateStore: components.installedStore,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &Runtime{
 		cfg:        cfg,
 		components: components,
 		catalog:    repositoryCatalog,
+		installed:  installedPackages,
 	}, nil
 }
 
@@ -107,10 +115,16 @@ func (r *Runtime) ResolvePackage(ctx context.Context, request app.ResolvePackage
 	return r.catalog.ResolvePackage(ctx, request)
 }
 
+// ListInstalled returns active installed packages.
+func (r *Runtime) ListInstalled(ctx context.Context, request app.InstalledListRequest) (app.InstalledListResult, error) {
+	return r.installed.ListInstalled(ctx, request)
+}
+
 type components struct {
 	githubClient   *github.Client
 	evidenceWriter filesystem.EvidenceWriter
 	catalogStore   filesystem.CatalogStore
+	installedStore filesystem.InstalledStore
 }
 
 func newComponents(ctx context.Context, cfg config.Config) (components, error) {
@@ -134,6 +148,7 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 		githubClient:   githubClient,
 		evidenceWriter: filesystem.NewEvidenceWriter(),
 		catalogStore:   filesystem.NewCatalogStore(),
+		installedStore: filesystem.NewInstalledStore(),
 	}, nil
 }
 
@@ -163,6 +178,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 		EvidenceWriter: r.components.evidenceWriter,
 		Archives:       archive.NewTarGzipExtractor(),
 		FileSystem:     filesystem.NewInstaller(),
+		StateStore:     r.components.installedStore,
 	})
 	if err != nil {
 		return err

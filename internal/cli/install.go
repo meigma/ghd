@@ -54,6 +54,7 @@ func newInstallCommand(options Options) *cobra.Command {
 				Version:     target.version,
 				StoreDir:    cfg.StoreDir,
 				BinDir:      cfg.BinDir,
+				StateDir:    cfg.StateDir,
 			})
 			if err != nil {
 				return err

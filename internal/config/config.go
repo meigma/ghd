@@ -22,6 +22,8 @@ type Config struct {
 	StoreDir string
 	// BinDir receives links to installed binaries.
 	BinDir string
+	// StateDir is the local installed package state directory.
+	StateDir string
 }
 
 // Load reads runtime settings from Viper and the process environment.
@@ -36,12 +38,16 @@ func Load(vp *viper.Viper) Config {
 	storeDir := strings.TrimSpace(vp.GetString("store-dir"))
 	binDir := strings.TrimSpace(vp.GetString("bin-dir"))
 	indexDir := strings.TrimSpace(vp.GetString("index-dir"))
+	stateDir := strings.TrimSpace(vp.GetString("state-dir"))
 	home, _ := os.UserHomeDir()
 	if indexDir == "" && home != "" {
 		indexDir = filepath.Join(home, ".local", "share", "ghd", "index")
 	}
 	if storeDir == "" && home != "" {
 		storeDir = filepath.Join(home, ".local", "share", "ghd", "store")
+	}
+	if stateDir == "" && home != "" {
+		stateDir = filepath.Join(home, ".local", "state", "ghd")
 	}
 	if binDir == "" && home != "" {
 		binDir = filepath.Join(home, ".local", "bin")
@@ -53,5 +59,6 @@ func Load(vp *viper.Viper) Config {
 		IndexDir:        indexDir,
 		StoreDir:        storeDir,
 		BinDir:          binDir,
+		StateDir:        stateDir,
 	}
 }

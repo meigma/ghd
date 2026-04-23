@@ -37,8 +37,9 @@ repository indexing, and one-off verified installs:
 go run ./cmd/ghd download owner/repo/package@version --output ./out
 go run ./cmd/ghd repo add owner/repo --index-dir ./index
 go run ./cmd/ghd repo list --index-dir ./index
-go run ./cmd/ghd install owner/repo/package@version --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd install package@version --index-dir ./index --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd installed --state-dir ./state
 ```
 
 Start with the design document for the intended full product shape:
@@ -46,7 +47,7 @@ Start with the design document for the intended full product shape:
 - [Initial Design](docs/docs/design.md)
 
 The broader command shape still includes package discovery, update, uninstall,
-and doctor flows.
+verify, and doctor flows.
 
 ## Documentation
 
