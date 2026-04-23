@@ -169,6 +169,35 @@ func TestClientResolveReleaseAssetSelectsExactName(t *testing.T) {
 	assert.Equal(t, "http://"+server.Listener.Addr().String()+"/foo", asset.DownloadURL)
 }
 
+func TestClientListRepositoryReleasesFollowsPagination(t *testing.T) {
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		assert.Equal(t, "/repos/owner/repo/releases", r.URL.Path)
+		assert.Equal(t, "100", r.URL.Query().Get("per_page"))
+		if r.URL.Query().Get("page") == "2" {
+			fmt.Fprint(w, `[{"tag_name":"foo-v1.3.0","prerelease":true,"assets":[{"name":"foo_1.3.0_darwin_arm64.tar.gz"}]}]`)
+			return
+		}
+		next := "http://" + r.Host + r.URL.Path + "?" + r.URL.RawQuery + "&page=2"
+		w.Header().Set("Link", fmt.Sprintf(`<%s>; rel="next"`, next))
+		fmt.Fprint(w, `[{"tag_name":"foo-v1.2.3","assets":[{"name":"foo_1.2.3_darwin_arm64.tar.gz"}]},{"tag_name":"foo-v1.2.4","draft":true,"assets":[{"name":"foo_1.2.4_darwin_arm64.tar.gz"}]}]`)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL, WithToken("token-123"))
+
+	releases, err := client.ListRepositoryReleases(context.Background(), verification.Repository{Owner: "owner", Name: "repo"})
+
+	require.NoError(t, err)
+	require.Len(t, releases, 3)
+	assert.Equal(t, "foo-v1.2.3", releases[0].TagName)
+	assert.Equal(t, []string{"foo_1.2.3_darwin_arm64.tar.gz"}, releases[0].AssetNames)
+	assert.True(t, releases[1].Draft)
+	assert.True(t, releases[2].Prerelease)
+	assert.Equal(t, "Bearer token-123", gotHeader.Get("Authorization"))
+}
+
 func TestClientDownloadReleaseAssetDoesNotSendGitHubTokenToAssetURL(t *testing.T) {
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -217,6 +246,19 @@ func TestClientReleaseAssetOperationsFailClosed(t *testing.T) {
 		client := newTestClient(t, server.URL)
 
 		_, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "decode GitHub response")
+	})
+
+	t.Run("list releases malformed response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprint(w, "{")
+		}))
+		t.Cleanup(server.Close)
+		client := newTestClient(t, server.URL)
+
+		_, err := client.ListRepositoryReleases(context.Background(), verification.Repository{Owner: "owner", Name: "repo"})
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decode GitHub response")

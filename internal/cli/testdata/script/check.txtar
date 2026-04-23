@@ -1,0 +1,111 @@
+# Zero args checks all installed packages.
+exec ghd --state-dir check-state check
+stdout 'owner/current/foo 1\.2\.3 up-to-date'
+stdout 'owner/repo/foo 1\.2\.3 update-available 1\.3\.0'
+! stderr .
+
+# --all is an explicit alias for checking every installed package.
+exec ghd --state-dir check-state check --all
+stdout 'owner/current/foo 1\.2\.3 up-to-date'
+stdout 'owner/repo/foo 1\.2\.3 update-available 1\.3\.0'
+! stderr .
+
+# One target checks just that installed package.
+exec ghd --state-dir check-state check owner/repo/foo
+stdout 'owner/repo/foo 1\.2\.3 update-available 1\.3\.0'
+! stdout 'owner/current/foo'
+! stderr .
+
+# Target and --all cannot be combined.
+! exec ghd --state-dir check-state check owner/repo/foo --all
+stderr 'check accepts a target or --all, not both'
+
+# Malformed targets fail cleanly.
+! exec ghd --state-dir check-state check owner/repo
+stderr 'check target must be name or owner/repo/package'
+
+# Aggregated failures still print results and return non-zero.
+! exec ghd --state-dir broken-state check --all
+stdout 'owner/broken/foo 1\.2\.3 cannot-determine'
+stderr 'could not determine updates for 1 installed package'
+
+# Help is scriptable and quiet on stderr.
+exec ghd check --help
+stdout 'Usage:'
+stdout 'check \[name\|owner/repo/package\|--all\]'
+stdout '--all'
+! stderr .
+
+-- check-state/installed.json --
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "repository": "owner/repo",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/repo",
+      "artifact_path": "/store/repo/artifact",
+      "extracted_path": "/store/repo/extracted",
+      "verification_path": "/store/repo/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo",
+          "target_path": "/store/repo/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": "owner/current",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/current",
+      "artifact_path": "/store/current/artifact",
+      "extracted_path": "/store/current/extracted",
+      "verification_path": "/store/current/verification.json",
+      "binaries": [
+        {
+          "name": "current",
+          "link_path": "/bin/current",
+          "target_path": "/store/current/extracted/current"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}
+
+-- broken-state/installed.json --
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "repository": "owner/broken",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/broken",
+      "artifact_path": "/store/broken/artifact",
+      "extracted_path": "/store/broken/extracted",
+      "verification_path": "/store/broken/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo",
+          "target_path": "/store/broken/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}

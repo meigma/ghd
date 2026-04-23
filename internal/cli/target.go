@@ -81,23 +81,39 @@ func parseRepositoryTarget(value string) (verification.Repository, error) {
 }
 
 func parseUninstallTarget(value string) (string, error) {
+	target, err := parseNamedOrQualifiedTarget(value)
+	if err != nil {
+		return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+	}
+	return target, nil
+}
+
+func parseCheckTarget(value string) (string, error) {
+	target, err := parseNamedOrQualifiedTarget(value)
+	if err != nil {
+		return "", fmt.Errorf("check target must be name or owner/repo/package")
+	}
+	return target, nil
+}
+
+func parseNamedOrQualifiedTarget(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+		return "", fmt.Errorf("target must be set")
 	}
 	parts := strings.Split(value, "/")
 	switch len(parts) {
 	case 1:
 		if strings.TrimSpace(parts[0]) == "" {
-			return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+			return "", fmt.Errorf("target must be set")
 		}
 		return parts[0], nil
 	case 3:
 		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
-			return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+			return "", fmt.Errorf("target must be set")
 		}
 		return value, nil
 	default:
-		return "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+		return "", fmt.Errorf("target must be name or owner/repo/package")
 	}
 }

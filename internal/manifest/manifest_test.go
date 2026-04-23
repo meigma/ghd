@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/meigma/ghd/internal/verification"
 )
 
 func TestDecodeValidOnePackageConfig(t *testing.T) {
@@ -94,6 +96,50 @@ func TestPackageSelectAssetFailsForMissingOrAmbiguousPlatform(t *testing.T) {
 	_, err = pkg.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, "1.2.3")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "multiple assets")
+}
+
+func TestPackageVersionForTagMatchesDefaultAndCustomPatterns(t *testing.T) {
+	cfg, err := Decode([]byte(validConfig()))
+	require.NoError(t, err)
+	pkg, err := cfg.Package("foo")
+	require.NoError(t, err)
+
+	version, matched, err := pkg.VersionForTag(verification.ReleaseTag("foo-v1.2.3"))
+	require.NoError(t, err)
+	require.True(t, matched)
+	assert.Equal(t, "1.2.3", version)
+
+	pkg.TagPattern = ""
+	version, matched, err = pkg.VersionForTag(verification.ReleaseTag("v1.2.3"))
+	require.NoError(t, err)
+	require.True(t, matched)
+	assert.Equal(t, "1.2.3", version)
+}
+
+func TestPackageVersionForTagRejectsNonMatchingTagsAndEmptyVersions(t *testing.T) {
+	cfg, err := Decode([]byte(validConfig()))
+	require.NoError(t, err)
+	pkg, err := cfg.Package("foo")
+	require.NoError(t, err)
+
+	version, matched, err := pkg.VersionForTag(verification.ReleaseTag("bar-v1.2.3"))
+	require.NoError(t, err)
+	assert.False(t, matched)
+	assert.Empty(t, version)
+
+	version, matched, err = pkg.VersionForTag(verification.ReleaseTag("foo-v"))
+	require.NoError(t, err)
+	assert.False(t, matched)
+	assert.Empty(t, version)
+}
+
+func TestPackageVersionForTagRejectsInvalidPatterns(t *testing.T) {
+	pkg := Package{Name: "foo", TagPattern: "foo-${version}-${version}"}
+
+	_, _, err := pkg.VersionForTag(verification.ReleaseTag("foo-1.2.3-1.2.3"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "exactly one")
 }
 
 func validConfig() string {
