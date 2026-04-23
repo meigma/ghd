@@ -278,6 +278,69 @@ func TestInstallerLinksBinariesWithAbsolutePathsFromRelativeBinRoot(t *testing.T
 	assert.Equal(t, wantLinkPath, links[0].LinkPath)
 }
 
+func TestInstallerReplaceManagedBinariesSwapsActiveLinks(t *testing.T) {
+	installer := NewInstaller()
+	binDir := t.TempDir()
+	oldTarget := filepath.Join(t.TempDir(), "old")
+	newTarget := filepath.Join(t.TempDir(), "new")
+	require.NoError(t, os.WriteFile(oldTarget, []byte("old"), 0o755))
+	require.NoError(t, os.WriteFile(newTarget, []byte("new"), 0o755))
+	linkPath := filepath.Join(binDir, "foo")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.Symlink(oldTarget, linkPath))
+
+	err := installer.ReplaceManagedBinaries(context.Background(), app.ReplaceManagedBinariesRequest{
+		BinDir: binDir,
+		Previous: []app.InstalledBinary{
+			{Name: "foo", LinkPath: linkPath, TargetPath: oldTarget},
+		},
+		Next: []app.InstalledBinary{
+			{Name: "foo", LinkPath: linkPath, TargetPath: newTarget},
+		},
+	})
+
+	require.NoError(t, err)
+	gotTarget, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, newTarget, gotTarget)
+}
+
+func TestInstallerReplaceManagedBinariesRestoresPreviousLinksWhenNewLinksFail(t *testing.T) {
+	installer := NewInstaller()
+	binDir := t.TempDir()
+	oldTarget := filepath.Join(t.TempDir(), "old")
+	require.NoError(t, os.WriteFile(oldTarget, []byte("old"), 0o755))
+	linkPath := filepath.Join(binDir, "foo")
+	blockingPath := filepath.Join(binDir, "bar")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.Symlink(oldTarget, linkPath))
+	require.NoError(t, os.WriteFile(blockingPath, []byte("existing"), 0o644))
+	newFooTarget := filepath.Join(t.TempDir(), "new-foo")
+	newBarTarget := filepath.Join(t.TempDir(), "new-bar")
+	require.NoError(t, os.WriteFile(newFooTarget, []byte("new foo"), 0o755))
+	require.NoError(t, os.WriteFile(newBarTarget, []byte("new bar"), 0o755))
+
+	err := installer.ReplaceManagedBinaries(context.Background(), app.ReplaceManagedBinariesRequest{
+		BinDir: binDir,
+		Previous: []app.InstalledBinary{
+			{Name: "foo", LinkPath: linkPath, TargetPath: oldTarget},
+		},
+		Next: []app.InstalledBinary{
+			{Name: "foo", LinkPath: linkPath, TargetPath: newFooTarget},
+			{Name: "bar", LinkPath: blockingPath, TargetPath: newBarTarget},
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+	gotTarget, readErr := os.Readlink(linkPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, oldTarget, gotTarget)
+	data, readErr := os.ReadFile(blockingPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, "existing", string(data))
+}
+
 func TestInstallerRemoveManagedInstallRemovesOnlyExpectedBinaryLinksAndStore(t *testing.T) {
 	installer := NewInstaller()
 	storeRoot := t.TempDir()
@@ -389,6 +452,21 @@ func TestInstallerRemoveManagedInstallRejectsPathsOutsideBinRoot(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "must be absolute")
 	assert.DirExists(t, storePath)
+}
+
+func TestInstallerRemoveManagedStoreRemovesStorePathUnderRoot(t *testing.T) {
+	storeRoot := t.TempDir()
+	storePath := filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123")
+	require.NoError(t, os.MkdirAll(filepath.Join(storePath, "extracted"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storePath, "artifact"), []byte("artifact"), 0o600))
+	untouched := filepath.Join(storeRoot, "github.com", "owner", "repo", "bar")
+	require.NoError(t, os.MkdirAll(untouched, 0o755))
+
+	err := NewInstaller().RemoveManagedStore(context.Background(), storeRoot, storePath)
+
+	require.NoError(t, err)
+	assert.NoDirExists(t, storePath)
+	assert.DirExists(t, untouched)
 }
 
 func TestInstallerWritesInstallMetadata(t *testing.T) {

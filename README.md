@@ -31,7 +31,8 @@ moon run docs:build
 ## Usage
 
 The prototype command surface currently supports direct verified downloads,
-repository indexing, one-off verified installs, and read-only update checks:
+repository indexing, one-off verified installs, installed-state management,
+read-only update checks, and single-target updates:
 
 ```sh
 go run ./cmd/ghd download owner/repo/package@version --output ./out
@@ -41,6 +42,7 @@ go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-
 go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd installed --state-dir ./state
 go run ./cmd/ghd check --state-dir ./state --all
+go run ./cmd/ghd update package --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
 ```
 
@@ -48,9 +50,9 @@ Start with the design document for the intended full product shape:
 
 - [Initial Design](docs/docs/design.md)
 
-The broader command shape still includes package discovery, update, verify, and
-doctor flows. `check` is read-only in the current prototype; `update` remains a
-future slice.
+The broader command shape still includes package discovery, verify, and doctor
+flows. `check` remains read-only in the current prototype; `verify` and
+`doctor` remain future slices.
 
 ## Documentation
 

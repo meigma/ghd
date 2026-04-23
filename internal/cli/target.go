@@ -96,6 +96,14 @@ func parseCheckTarget(value string) (string, error) {
 	return target, nil
 }
 
+func parseUpdateTarget(value string) (string, error) {
+	target, err := parseNamedOrQualifiedTarget(value)
+	if err != nil {
+		return "", fmt.Errorf("update target must be name or owner/repo/package")
+	}
+	return target, nil
+}
+
 func parseNamedOrQualifiedTarget(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {

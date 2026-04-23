@@ -362,16 +362,23 @@ func (f *fakeArchiveExtractor) ExtractArchive(_ context.Context, request Archive
 }
 
 type fakeInstallFileSystem struct {
-	events         *[]string
-	downloadDir    string
-	storeRequest   StoreLayoutRequest
-	layout         StoreLayout
-	links          []InstalledBinary
-	metadata       *InstallRecord
-	metadataErr    error
-	storeCalled    bool
-	linkErr        error
-	removedManaged *RemoveManagedInstallRequest
+	events           *[]string
+	downloadDir      string
+	storeRequest     StoreLayoutRequest
+	layout           StoreLayout
+	links            []InstalledBinary
+	metadata         *InstallRecord
+	metadataErr      error
+	storeCalled      bool
+	linkErr          error
+	replaceErr       error
+	replaceErrs      []error
+	removeStoreErr   error
+	removeManagedErr error
+	removedManaged   *RemoveManagedInstallRequest
+	replaceRequests  []ReplaceManagedBinariesRequest
+	removedStoreRoot string
+	removedStorePath string
 }
 
 func (f *fakeInstallFileSystem) CreateDownloadDir(context.Context) (string, func(), error) {
@@ -399,10 +406,36 @@ func (f *fakeInstallFileSystem) LinkBinaries(_ context.Context, _ LinkBinariesRe
 
 func (f *fakeInstallFileSystem) RemoveManagedInstall(_ context.Context, request RemoveManagedInstallRequest) error {
 	*f.events = append(*f.events, "remove-managed")
+	if f.removeManagedErr != nil {
+		return f.removeManagedErr
+	}
 	copied := request
 	copied.Binaries = append([]InstalledBinary(nil), request.Binaries...)
 	f.removedManaged = &copied
 	return nil
+}
+
+func (f *fakeInstallFileSystem) ReplaceManagedBinaries(_ context.Context, request ReplaceManagedBinariesRequest) error {
+	*f.events = append(*f.events, "replace-binaries")
+	copied := ReplaceManagedBinariesRequest{
+		BinDir:   request.BinDir,
+		Previous: append([]InstalledBinary(nil), request.Previous...),
+		Next:     append([]InstalledBinary(nil), request.Next...),
+	}
+	f.replaceRequests = append(f.replaceRequests, copied)
+	if len(f.replaceErrs) > 0 {
+		err := f.replaceErrs[0]
+		f.replaceErrs = f.replaceErrs[1:]
+		return err
+	}
+	return f.replaceErr
+}
+
+func (f *fakeInstallFileSystem) RemoveManagedStore(_ context.Context, storeRoot string, storePath string) error {
+	*f.events = append(*f.events, "remove-store")
+	f.removedStoreRoot = storeRoot
+	f.removedStorePath = storePath
+	return f.removeStoreErr
 }
 
 func (f *fakeInstallFileSystem) WriteInstallMetadata(_ context.Context, _ string, record InstallRecord) (string, error) {
@@ -415,11 +448,14 @@ func (f *fakeInstallFileSystem) WriteInstallMetadata(_ context.Context, _ string
 }
 
 type fakeInstalledStateStore struct {
-	events  *[]string
-	index   state.Index
-	saved   state.Index
-	loadErr error
-	saveErr error
+	events         *[]string
+	index          state.Index
+	saved          state.Index
+	replaced       state.Index
+	replacedRecord state.Record
+	loadErr        error
+	saveErr        error
+	replaceErr     error
 }
 
 func (f *fakeInstalledStateStore) LoadInstalledState(context.Context, string) (state.Index, error) {
@@ -446,4 +482,21 @@ func (f *fakeInstalledStateStore) AddInstalledRecord(_ context.Context, _ string
 	f.saved = index.Normalize()
 	f.index = f.saved
 	return f.saved, nil
+}
+
+func (f *fakeInstalledStateStore) ReplaceInstalledRecord(_ context.Context, _ string, record state.Record) (state.Index, error) {
+	if f.events != nil {
+		*f.events = append(*f.events, "state-replace")
+	}
+	f.replacedRecord = record
+	if f.replaceErr != nil {
+		return state.Index{}, f.replaceErr
+	}
+	index, err := f.index.ReplaceRecord(record)
+	if err != nil {
+		return state.Index{}, err
+	}
+	f.replaced = index.Normalize()
+	f.index = f.replaced
+	return f.replaced, nil
 }

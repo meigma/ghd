@@ -1,0 +1,87 @@
+# Successful update swaps the active install to the newer version.
+exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+stderr 'installed owner/repo/foo@1.2.3'
+exec ghd --state-dir state update foo --store-dir store --bin-dir bin
+stdout 'binary .*/bin/foo'
+stderr 'updated owner/repo/foo@1\.2\.3 -> 1\.3\.0'
+exec ghd --state-dir state installed
+stdout 'owner/repo/foo 1\.3\.0 foo'
+! exists store/github.com/owner/repo/foo/1.2.3/sha256-abc123
+exists store/github.com/owner/repo/foo/1.3.0/sha256-abc123
+
+# Already-current installs are a quiet no-op on stdout.
+exec ghd --state-dir current-state install owner/repo/foo@1.3.0 --store-dir current-store --bin-dir current-bin
+stderr 'installed owner/repo/foo@1.3.0'
+exec ghd --state-dir current-state update foo --store-dir current-store --bin-dir current-bin
+! stdout .
+stderr 'already up to date owner/repo/foo@1\.3\.0'
+
+# Ambiguous update targets require qualification.
+! exec ghd --state-dir ambiguous-state update foo --store-dir store --bin-dir bin
+stderr 'installed package "foo" is ambiguous'
+stderr 'owner/one/foo'
+stderr 'owner/two/bar'
+
+# Plain failures do not print a bogus no-op status first.
+! exec ghd --state-dir empty-state update foo --store-dir store --bin-dir bin
+stderr 'package "foo" is not installed'
+! stderr 'already up to date'
+
+# Malformed targets fail cleanly.
+! exec ghd update owner/repo --store-dir store --bin-dir bin
+stderr 'update target must be name or owner/repo/package'
+
+# Help is scriptable and quiet on stderr.
+exec ghd update --help
+stdout 'Usage:'
+stdout 'update name\|owner/repo/package --store-dir DIR --bin-dir DIR'
+stdout '--store-dir'
+stdout '--bin-dir'
+! stderr .
+
+-- ambiguous-state/installed.json --
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "repository": "owner/one",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/one",
+      "artifact_path": "/store/one/artifact",
+      "extracted_path": "/store/one/extracted",
+      "verification_path": "/store/one/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo",
+          "target_path": "/store/one/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": "owner/two",
+      "package": "bar",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "bar.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/two",
+      "artifact_path": "/store/two/artifact",
+      "extracted_path": "/store/two/extracted",
+      "verification_path": "/store/two/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo-two",
+          "target_path": "/store/two/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}

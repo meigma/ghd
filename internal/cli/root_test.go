@@ -170,6 +170,107 @@ func (testRuntime) CheckInstalled(ctx context.Context, request app.CheckRequest)
 	return results, nil
 }
 
+func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error) {
+	store := filesystem.NewInstalledStore()
+	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return app.UpdateResult{}, err
+	}
+	previous, err := index.ResolveTarget(request.Target)
+	if err != nil {
+		return app.UpdateResult{}, err
+	}
+	previousBinaries := make([]app.InstalledBinary, 0, len(previous.Binaries))
+	for _, binary := range previous.Binaries {
+		previousBinaries = append(previousBinaries, app.InstalledBinary{
+			Name:       binary.Name,
+			LinkPath:   binary.LinkPath,
+			TargetPath: binary.TargetPath,
+		})
+	}
+	if previous.Version == "1.3.0" {
+		return app.UpdateResult{
+			Previous: previous,
+			Current:  previous,
+			Updated:  false,
+			Binaries: previousBinaries,
+		}, nil
+	}
+
+	storeRoot, err := filepath.Abs(filepath.Clean(request.StoreDir))
+	if err != nil {
+		return app.UpdateResult{}, err
+	}
+	binRoot, err := filepath.Abs(filepath.Clean(request.BinDir))
+	if err != nil {
+		return app.UpdateResult{}, err
+	}
+	newVersion := "1.3.0"
+	newStorePath := filepath.Join(
+		storeRoot,
+		"github.com",
+		"owner",
+		"repo",
+		previous.Package,
+		newVersion,
+		"sha256-abc123",
+	)
+	newExtractedPath := filepath.Join(newStorePath, "extracted")
+	newArtifactPath := filepath.Join(newStorePath, "artifact")
+	newVerificationPath := filepath.Join(newStorePath, "verification.json")
+	if err := os.MkdirAll(newExtractedPath, 0o755); err != nil {
+		return app.UpdateResult{}, err
+	}
+	newTargetPath := filepath.Join(newExtractedPath, previous.Package)
+	if err := os.WriteFile(newTargetPath, []byte("binary"), 0o755); err != nil {
+		return app.UpdateResult{}, err
+	}
+	if err := os.WriteFile(newArtifactPath, []byte("artifact"), 0o600); err != nil {
+		return app.UpdateResult{}, err
+	}
+	if err := os.WriteFile(newVerificationPath, []byte("{}\n"), 0o600); err != nil {
+		return app.UpdateResult{}, err
+	}
+	nextBinaries := []app.InstalledBinary{
+		{
+			Name:       previous.Package,
+			LinkPath:   filepath.Join(binRoot, previous.Package),
+			TargetPath: newTargetPath,
+		},
+	}
+	installer := filesystem.NewInstaller()
+	if err := installer.ReplaceManagedBinaries(ctx, app.ReplaceManagedBinariesRequest{
+		BinDir:   binRoot,
+		Previous: previousBinaries,
+		Next:     nextBinaries,
+	}); err != nil {
+		return app.UpdateResult{}, err
+	}
+	current := previous
+	current.Version = newVersion
+	current.Tag = "v" + newVersion
+	current.StorePath = newStorePath
+	current.ArtifactPath = newArtifactPath
+	current.ExtractedPath = newExtractedPath
+	current.VerificationPath = newVerificationPath
+	current.Binaries = []state.Binary{
+		{Name: previous.Package, LinkPath: nextBinaries[0].LinkPath, TargetPath: nextBinaries[0].TargetPath},
+	}
+	current.InstalledAt = time.Unix(1700000100, 0).UTC()
+	if _, err := store.ReplaceInstalledRecord(ctx, request.StateDir, current); err != nil {
+		return app.UpdateResult{}, err
+	}
+	if err := installer.RemoveManagedStore(ctx, storeRoot, previous.StorePath); err != nil {
+		return app.UpdateResult{}, err
+	}
+	return app.UpdateResult{
+		Previous: previous,
+		Current:  current,
+		Updated:  true,
+		Binaries: nextBinaries,
+	}, nil
+}
+
 func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
 	store := filesystem.NewInstalledStore()
 	index, err := store.LoadInstalledState(ctx, stateDir)

@@ -88,52 +88,17 @@ func (Installer) LinkBinaries(ctx context.Context, request app.LinkBinariesReque
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if strings.TrimSpace(request.BinDir) == "" {
-		return nil, fmt.Errorf("bin directory must be set")
-	}
-	binRoot, err := cleanBinRoot(request.BinDir)
+	binRoot, planned, err := resolveManagedBinaryPlan(request)
 	if err != nil {
 		return nil, err
-	}
-	if len(request.Binaries) == 0 {
-		return nil, fmt.Errorf("at least one binary must be linked")
 	}
 	if err := os.MkdirAll(binRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create bin directory: %w", err)
 	}
-
-	created := make([]app.InstalledBinary, 0, len(request.Binaries))
-	cleanup := func() {
-		_ = removeManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, created)
+	if _, err := createManagedBinaryLinks(ctx, binRoot, planned, false); err != nil {
+		return nil, err
 	}
-	installed := make([]app.InstalledBinary, 0, len(request.Binaries))
-	for _, binary := range request.Binaries {
-		name, err := cleanPathSegment("binary name", binary.Name)
-		if err != nil {
-			cleanup()
-			return nil, err
-		}
-		if strings.TrimSpace(binary.Path) == "" {
-			cleanup()
-			return nil, fmt.Errorf("binary %q target path must be set", binary.Name)
-		}
-		linkPath := filepath.Join(binRoot, name)
-		if err := os.Symlink(binary.Path, linkPath); err != nil {
-			cleanup()
-			if os.IsExist(err) {
-				return nil, fmt.Errorf("binary link %s already exists", linkPath)
-			}
-			return nil, fmt.Errorf("link binary %s: %w", name, err)
-		}
-		installedBinary := app.InstalledBinary{
-			Name:       name,
-			LinkPath:   linkPath,
-			TargetPath: binary.Path,
-		}
-		created = append(created, installedBinary)
-		installed = append(installed, installedBinary)
-	}
-	return installed, nil
+	return planned, nil
 }
 
 // RemoveManagedInstall removes managed binaries and store contents for one install.
@@ -155,6 +120,203 @@ func (Installer) RemoveManagedInstall(ctx context.Context, request app.RemoveMan
 	return removeManagedStorePath(root, relStorePath)
 }
 
+// ReplaceManagedBinaries swaps one active binary set for another with rollback on creation failure.
+func (Installer) ReplaceManagedBinaries(ctx context.Context, request app.ReplaceManagedBinariesRequest) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	binRoot, err := cleanBinRoot(request.BinDir)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(binRoot, 0o755); err != nil {
+		return fmt.Errorf("create bin directory: %w", err)
+	}
+	if err := validateManagedBinarySet(binRoot, request.Next); err != nil {
+		return err
+	}
+	if err := ensureManagedBinaryLinks(ctx, binRoot, request.Previous); err != nil {
+		return err
+	}
+	if err := removeManagedBinaryLinks(ctx, binRoot, request.Previous); err != nil {
+		if restoreErr := restoreManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, request.Previous); restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("restore previous managed binaries: %w", restoreErr))
+		}
+		return err
+	}
+	if _, err := createManagedBinaryLinks(ctx, binRoot, request.Next, false); err != nil {
+		if restoreErr := restoreManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, request.Previous); restoreErr != nil {
+			return errors.Join(err, fmt.Errorf("restore previous managed binaries: %w", restoreErr))
+		}
+		return err
+	}
+	return nil
+}
+
+// RemoveManagedStore removes only the managed store directory for one install.
+func (Installer) RemoveManagedStore(ctx context.Context, storeRoot string, storePath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	root, relStorePath, err := openManagedStoreRoot(storeRoot, storePath)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	return removeManagedStorePath(root, relStorePath)
+}
+
+type managedBinaryLink struct {
+	binary app.InstalledBinary
+	rel    string
+}
+
+func resolveManagedBinaryPlan(request app.LinkBinariesRequest) (string, []app.InstalledBinary, error) {
+	if strings.TrimSpace(request.BinDir) == "" {
+		return "", nil, fmt.Errorf("bin directory must be set")
+	}
+	binRoot, err := cleanBinRoot(request.BinDir)
+	if err != nil {
+		return "", nil, err
+	}
+	if len(request.Binaries) == 0 {
+		return "", nil, fmt.Errorf("at least one binary must be linked")
+	}
+	planned := make([]app.InstalledBinary, 0, len(request.Binaries))
+	for _, binary := range request.Binaries {
+		name, err := cleanPathSegment("binary name", binary.Name)
+		if err != nil {
+			return "", nil, err
+		}
+		if strings.TrimSpace(binary.Path) == "" {
+			return "", nil, fmt.Errorf("binary %q target path must be set", binary.Name)
+		}
+		planned = append(planned, app.InstalledBinary{
+			Name:       name,
+			LinkPath:   filepath.Join(binRoot, name),
+			TargetPath: binary.Path,
+		})
+	}
+	return binRoot, planned, nil
+}
+
+func validateManagedBinarySet(binRoot string, binaries []app.InstalledBinary) error {
+	_, err := resolveManagedBinaryLinks(context.Background(), binRoot, binaries)
+	return err
+}
+
+func resolveManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) ([]managedBinaryLink, error) {
+	if len(binaries) == 0 {
+		return nil, nil
+	}
+	links := make([]managedBinaryLink, 0, len(binaries))
+	for _, binary := range binaries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		if _, err := cleanPathSegment("binary name", binary.Name); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(binary.TargetPath) == "" {
+			return nil, fmt.Errorf("binary %q target path must be set", binary.Name)
+		}
+		rel, err := cleanBinRelativePath(binRoot, binary.LinkPath)
+		if err != nil {
+			return nil, err
+		}
+		links = append(links, managedBinaryLink{binary: binary, rel: rel})
+	}
+	return links, nil
+}
+
+func ensureManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) error {
+	if len(binaries) == 0 {
+		return nil
+	}
+	binRoot, err := cleanBinRoot(binRoot)
+	if err != nil {
+		return err
+	}
+	links, err := resolveManagedBinaryLinks(ctx, binRoot, binaries)
+	if err != nil {
+		return err
+	}
+	root, err := os.OpenRoot(binRoot)
+	if os.IsNotExist(err) {
+		return fmt.Errorf("bin root %s does not exist", binRoot)
+	}
+	if err != nil {
+		return fmt.Errorf("open bin root: %w", err)
+	}
+	defer root.Close()
+	for _, link := range links {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		info, err := root.Lstat(link.rel)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("binary link %s does not exist", link.binary.LinkPath)
+		}
+		if err != nil {
+			return fmt.Errorf("inspect binary link %s: %w", link.binary.LinkPath, err)
+		}
+		if info.Mode()&os.ModeSymlink == 0 {
+			return fmt.Errorf("refusing to remove non-symlink binary path %s", link.binary.LinkPath)
+		}
+		target, err := root.Readlink(link.rel)
+		if err != nil {
+			return fmt.Errorf("read binary link %s: %w", link.binary.LinkPath, err)
+		}
+		if target != link.binary.TargetPath {
+			return fmt.Errorf("refusing to remove binary link %s with unexpected target %s", link.binary.LinkPath, target)
+		}
+	}
+	return nil
+}
+
+func createManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary, allowExistingExpected bool) ([]app.InstalledBinary, error) {
+	if len(binaries) == 0 {
+		return nil, nil
+	}
+	links, err := resolveManagedBinaryLinks(ctx, binRoot, binaries)
+	if err != nil {
+		return nil, err
+	}
+	created := make([]app.InstalledBinary, 0, len(links))
+	cleanup := func() {
+		_ = removeManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, created)
+	}
+	for _, link := range links {
+		if err := ctx.Err(); err != nil {
+			cleanup()
+			return nil, err
+		}
+		if err := os.Symlink(link.binary.TargetPath, link.binary.LinkPath); err != nil {
+			if os.IsExist(err) && allowExistingExpected {
+				info, statErr := os.Lstat(link.binary.LinkPath)
+				if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+					target, readErr := os.Readlink(link.binary.LinkPath)
+					if readErr == nil && target == link.binary.TargetPath {
+						continue
+					}
+				}
+			}
+			cleanup()
+			if os.IsExist(err) {
+				return nil, fmt.Errorf("binary link %s already exists", link.binary.LinkPath)
+			}
+			return nil, fmt.Errorf("link binary %s: %w", link.binary.Name, err)
+		}
+		created = append(created, link.binary)
+	}
+	return created, nil
+}
+
+func restoreManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) error {
+	_, err := createManagedBinaryLinks(ctx, binRoot, binaries, true)
+	return err
+}
+
 func removeManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) error {
 	if len(binaries) == 0 {
 		return nil
@@ -163,28 +325,8 @@ func removeManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 	if err != nil {
 		return err
 	}
-	type binaryLink struct {
-		binary app.InstalledBinary
-		rel    string
-	}
-	links := make([]binaryLink, 0, len(binaries))
-	var errs []error
-	for _, binary := range binaries {
-		if err := ctx.Err(); err != nil {
-			errs = append(errs, err)
-			break
-		}
-		if strings.TrimSpace(binary.LinkPath) == "" {
-			continue
-		}
-		rel, err := cleanBinRelativePath(binRoot, binary.LinkPath)
-		if err != nil {
-			errs = append(errs, err)
-			continue
-		}
-		links = append(links, binaryLink{binary: binary, rel: rel})
-	}
-	if err := errors.Join(errs...); err != nil {
+	links, err := resolveManagedBinaryLinks(ctx, binRoot, binaries)
+	if err != nil {
 		return err
 	}
 	root, err := os.OpenRoot(binRoot)
@@ -195,6 +337,7 @@ func removeManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 		return fmt.Errorf("open bin root: %w", err)
 	}
 	defer root.Close()
+	var errs []error
 	for _, link := range links {
 		if err := ctx.Err(); err != nil {
 			errs = append(errs, err)

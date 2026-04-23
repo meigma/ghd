@@ -164,47 +164,17 @@ func (c *InstalledPackageChecker) checkRecord(ctx context.Context, record state.
 		Package:    record.Package,
 		Version:    record.Version,
 	}
-	repository, err := parseRecordRepository(record.Repository)
-	if err != nil {
-		return CheckResult{}, err
-	}
-	installedVersion, err := normalizeSemver(record.Version)
-	if err != nil {
-		return CheckResult{}, fmt.Errorf("installed version %q is not a supported semantic version", record.Version)
-	}
-
-	manifestBytes, err := c.manifests.FetchManifest(ctx, repository)
-	if err != nil {
-		return CheckResult{}, fmt.Errorf("fetch ghd.toml: %w", err)
-	}
-	cfg, err := manifest.Decode(manifestBytes)
-	if err != nil {
-		return CheckResult{}, err
-	}
-	pkg, err := cfg.Package(record.Package)
-	if err != nil {
-		return CheckResult{}, err
-	}
-	installedAsset, err := installedAssetDeclaration(pkg, record)
+	candidate, err := resolveInstalledPackageUpdate(ctx, c.manifests, c.releases, record)
 	if err != nil {
 		return CheckResult{}, err
 	}
 
-	releases, err := c.releases.ListRepositoryReleases(ctx, repository)
-	if err != nil {
-		return CheckResult{}, fmt.Errorf("list GitHub releases: %w", err)
-	}
-	latestVersion, err := latestStableVersion(pkg, installedAsset, releases, installedVersion)
-	if err != nil {
-		return CheckResult{}, err
-	}
-
-	if latestVersion == "" {
+	if candidate.LatestVersion == "" {
 		result.Status = CheckStatusUpToDate
 		return result, nil
 	}
 	result.Status = CheckStatusUpdateAvailable
-	result.LatestVersion = latestVersion
+	result.LatestVersion = candidate.LatestVersion
 	return result, nil
 }
 

@@ -89,6 +89,34 @@ func (InstalledStore) RemoveInstalledRecord(ctx context.Context, stateDir string
 	return index.Normalize(), nil
 }
 
+// ReplaceInstalledRecord replaces one active installed package record under a state lock.
+func (InstalledStore) ReplaceInstalledRecord(ctx context.Context, stateDir string, record state.Record) (state.Index, error) {
+	if err := ctx.Err(); err != nil {
+		return state.Index{}, err
+	}
+	if strings.TrimSpace(stateDir) == "" {
+		return state.Index{}, fmt.Errorf("state directory must be set")
+	}
+	unlock, err := acquireInstalledStateLock(ctx, stateDir)
+	if err != nil {
+		return state.Index{}, err
+	}
+	defer unlock()
+
+	index, err := loadInstalledStateFile(stateDir)
+	if err != nil {
+		return state.Index{}, err
+	}
+	index, err = index.ReplaceRecord(record)
+	if err != nil {
+		return state.Index{}, err
+	}
+	if err := saveInstalledStateFile(stateDir, index); err != nil {
+		return state.Index{}, err
+	}
+	return index.Normalize(), nil
+}
+
 func loadInstalledStateFile(stateDir string) (state.Index, error) {
 	data, err := os.ReadFile(filepath.Join(stateDir, installedStateFile))
 	if os.IsNotExist(err) {

@@ -8,6 +8,10 @@ description: Initial product and security design for GitHub Downloader.
 Status: initial design. This document describes the first coherent shape of the
 project, not a frozen architecture.
 
+Prototype status: `download`, `install`, repository indexing, installed-state,
+`check`, `update`, and `uninstall` now exist as working slices. Package
+discovery, `verify`, and `doctor` remain future work.
+
 GitHub Downloader (`ghd`) is a CLI for securely installing binaries from GitHub
 releases. It is intentionally opinionated: a compatible repository must publish
 GitHub release assets, use GitHub-native artifact attestations, and publish
