@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/meigma/ghd/internal/state"
@@ -75,11 +76,10 @@ func loadInstalledStateFile(stateDir string) (state.Index, error) {
 	if err := json.Unmarshal(data, &index); err != nil {
 		return state.Index{}, fmt.Errorf("decode installed state: %w", err)
 	}
-	index = index.Normalize()
 	if err := index.Validate(); err != nil {
 		return state.Index{}, err
 	}
-	return index, nil
+	return index.Normalize(), nil
 }
 
 func saveInstalledStateFile(stateDir string, index state.Index) error {
@@ -101,22 +101,26 @@ func acquireInstalledStateLock(ctx context.Context, stateDir string) (func(), er
 		return nil, fmt.Errorf("create state directory: %w", err)
 	}
 	lockPath := filepath.Join(stateDir, installedStateLockFile)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open installed state lock: %w", err)
+	}
 	for {
-		file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
-		if err == nil {
+		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
 			unlock := func() {
+				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 				_ = file.Close()
-				_ = os.Remove(lockPath)
 			}
 			return unlock, nil
-		}
-		if !errors.Is(err, os.ErrExist) {
-			return nil, fmt.Errorf("create installed state lock: %w", err)
+		} else if !errors.Is(err, syscall.EWOULDBLOCK) && !errors.Is(err, syscall.EAGAIN) {
+			_ = file.Close()
+			return nil, fmt.Errorf("lock installed state: %w", err)
 		}
 		timer := time.NewTimer(50 * time.Millisecond)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
+			_ = file.Close()
 			return nil, ctx.Err()
 		case <-timer.C:
 		}

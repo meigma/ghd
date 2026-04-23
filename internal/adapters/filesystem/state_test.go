@@ -68,6 +68,19 @@ func TestInstalledStoreAddInstalledRecordMergesConcurrentWriters(t *testing.T) {
 	assert.Len(t, loaded.Records, installs)
 }
 
+func TestInstalledStoreAddInstalledRecordIgnoresStaleLockFile(t *testing.T) {
+	store := NewInstalledStore()
+	stateDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(stateDir, ".installed.lock"), []byte("stale"), 0o600))
+
+	_, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
+
+	require.NoError(t, err)
+	loaded, err := store.LoadInstalledState(context.Background(), stateDir)
+	require.NoError(t, err)
+	assert.Len(t, loaded.Records, 1)
+}
+
 func TestInstalledStoreRejectsMalformedState(t *testing.T) {
 	stateDir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "installed.json"), []byte("{"), 0o644))
@@ -76,6 +89,16 @@ func TestInstalledStoreRejectsMalformedState(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "decode installed state")
+}
+
+func TestInstalledStoreRejectsMissingSchemaVersion(t *testing.T) {
+	stateDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(stateDir, "installed.json"), []byte("{}\n"), 0o644))
+
+	_, err := NewInstalledStore().LoadInstalledState(context.Background(), stateDir)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unsupported installed state version 0")
 }
 
 func installedStateRecord(repository string, packageName string) state.Record {
