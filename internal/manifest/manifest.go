@@ -197,6 +197,23 @@ func (p Package) ReleaseTag(version string) (verification.ReleaseTag, error) {
 	return verification.ReleaseTag(tag), nil
 }
 
+// VersionForTag extracts one package version from tag when it matches TagPattern exactly.
+func (p Package) VersionForTag(tag verification.ReleaseTag) (string, bool, error) {
+	prefix, suffix, err := versionPatternParts(strings.TrimSpace(p.TagPattern))
+	if err != nil {
+		return "", false, err
+	}
+	value := string(tag)
+	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, suffix) {
+		return "", false, nil
+	}
+	version := strings.TrimSuffix(strings.TrimPrefix(value, prefix), suffix)
+	if version == "" {
+		return "", false, nil
+	}
+	return version, true, nil
+}
+
 // SelectAsset returns the single asset matching platform.
 func (p Package) SelectAsset(platform Platform, version string) (ResolvedAsset, error) {
 	platform = platform.WithDefaults()
@@ -299,4 +316,15 @@ func validatePackageName(name string) error {
 
 func expandVersion(pattern string, version string) string {
 	return strings.ReplaceAll(pattern, versionToken, version)
+}
+
+func versionPatternParts(pattern string) (string, string, error) {
+	if pattern == "" {
+		pattern = defaultTagPattern
+	}
+	if strings.Count(pattern, versionToken) != 1 {
+		return "", "", fmt.Errorf("tag pattern %q must contain exactly one %s token", pattern, versionToken)
+	}
+	prefix, suffix, _ := strings.Cut(pattern, versionToken)
+	return prefix, suffix, nil
 }

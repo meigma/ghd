@@ -211,6 +211,45 @@ func (c *Client) ResolveReleaseAsset(ctx context.Context, repository verificatio
 	}
 }
 
+// ListRepositoryReleases returns the repository's GitHub releases.
+func (c *Client) ListRepositoryReleases(ctx context.Context, repository verification.Repository) ([]app.RepositoryRelease, error) {
+	query := url.Values{}
+	query.Set("per_page", strconv.Itoa(defaultPerPage))
+
+	req, err := c.newGitHubRequest(ctx, http.MethodGet, releasesPath(repository), query)
+	if err != nil {
+		return nil, err
+	}
+
+	releases := make([]app.RepositoryRelease, 0, defaultPerPage)
+	for req != nil {
+		var response []releaseResponse
+		resp, err := c.doJSONResponse(req, &response)
+		if err != nil {
+			return nil, err
+		}
+		for _, release := range response {
+			assetNames := make([]string, 0, len(release.Assets))
+			for _, asset := range release.Assets {
+				assetNames = append(assetNames, asset.Name)
+			}
+			releases = append(releases, app.RepositoryRelease{
+				TagName:    release.TagName,
+				Draft:      release.Draft,
+				Prerelease: release.Prerelease,
+				AssetNames: assetNames,
+			})
+		}
+		next, err := c.nextRequest(ctx, resp)
+		resp.Body.Close()
+		if err != nil {
+			return nil, err
+		}
+		req = next
+	}
+	return releases, nil
+}
+
 // DownloadReleaseAsset downloads asset into outputDir without setting executable bits.
 func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsset, outputDir string) (string, error) {
 	if asset.Name == "" {
@@ -515,6 +554,10 @@ func releaseByTagPath(repository verification.Repository, tag verification.Relea
 	return rawPath(fmt.Sprintf("repos/%s/%s/releases/tags/%s", repository.Owner, repository.Name, tag))
 }
 
+func releasesPath(repository verification.Repository) rawPath {
+	return rawPath(fmt.Sprintf("repos/%s/%s/releases", repository.Owner, repository.Name))
+}
+
 func validateAssetFilename(name string) error {
 	if name == "." || name == ".." || strings.TrimSpace(name) == "" {
 		return fmt.Errorf("release asset name %q is not a safe filename", name)
@@ -560,7 +603,10 @@ func decodeManifestBody(body []byte) ([]byte, error) {
 }
 
 type releaseResponse struct {
-	Assets []releaseAssetResponse `json:"assets"`
+	TagName    string                 `json:"tag_name"`
+	Draft      bool                   `json:"draft"`
+	Prerelease bool                   `json:"prerelease"`
+	Assets     []releaseAssetResponse `json:"assets"`
 }
 
 type releaseAssetResponse struct {

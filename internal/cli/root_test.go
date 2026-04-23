@@ -125,6 +125,51 @@ func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackag
 	return app.ResolvePackageResult{Repository: resolved.Repository, PackageName: resolved.PackageName}, nil
 }
 
+func (testRuntime) CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error) {
+	store := filesystem.NewInstalledStore()
+	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return nil, err
+	}
+
+	var records []state.Record
+	if request.All {
+		records = index.Normalize().Records
+	} else {
+		record, err := index.ResolveTarget(request.Target)
+		if err != nil {
+			return nil, err
+		}
+		records = []state.Record{record}
+	}
+
+	results := make([]app.CheckResult, 0, len(records))
+	failures := 0
+	for _, record := range records {
+		result := app.CheckResult{
+			Repository: record.Repository,
+			Package:    record.Package,
+			Version:    record.Version,
+		}
+		switch record.Repository {
+		case "owner/repo":
+			result.Status = app.CheckStatusUpdateAvailable
+			result.LatestVersion = "1.3.0"
+		case "owner/current":
+			result.Status = app.CheckStatusUpToDate
+		default:
+			result.Status = app.CheckStatusCannotDetermine
+			result.Reason = "fetch ghd.toml: missing"
+			failures++
+		}
+		results = append(results, result)
+	}
+	if failures != 0 {
+		return results, app.CheckIncompleteError{Failed: failures}
+	}
+	return results, nil
+}
+
 func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
 	store := filesystem.NewInstalledStore()
 	index, err := store.LoadInstalledState(ctx, stateDir)

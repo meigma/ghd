@@ -24,6 +24,7 @@ type Runtime struct {
 	cfg         config.Config
 	components  components
 	catalog     *app.RepositoryCatalog
+	checker     *app.InstalledPackageChecker
 	installed   *app.InstalledPackages
 	uninstaller *app.PackageUninstaller
 	downloader  *app.VerifiedDownloader
@@ -39,6 +40,14 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	repositoryCatalog, err := app.NewRepositoryCatalog(app.RepositoryCatalogDependencies{
 		Manifests: components.githubClient,
 		Store:     components.catalogStore,
+	})
+	if err != nil {
+		return nil, err
+	}
+	checker, err := app.NewInstalledPackageChecker(app.InstalledPackageCheckerDependencies{
+		Manifests:  components.githubClient,
+		Releases:   components.githubClient,
+		StateStore: components.installedStore,
 	})
 	if err != nil {
 		return nil, err
@@ -60,6 +69,7 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		cfg:         cfg,
 		components:  components,
 		catalog:     repositoryCatalog,
+		checker:     checker,
 		installed:   installedPackages,
 		uninstaller: uninstaller,
 	}, nil
@@ -128,6 +138,11 @@ func (r *Runtime) ResolvePackage(ctx context.Context, request app.ResolvePackage
 // ListInstalled returns active installed packages.
 func (r *Runtime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
 	return r.installed.ListInstalled(ctx, stateDir)
+}
+
+// CheckInstalled reports update availability for installed packages.
+func (r *Runtime) CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error) {
+	return r.checker.Check(ctx, request)
 }
 
 // Uninstall removes one active installed package.
