@@ -250,6 +250,27 @@ func (c *Client) ListRepositoryReleases(ctx context.Context, repository verifica
 	return releases, nil
 }
 
+// CheckRateLimit returns the current GitHub core API rate-limit status.
+func (c *Client) CheckRateLimit(ctx context.Context) (app.GitHubRateLimitStatus, error) {
+	req, err := c.newGitHubRequest(ctx, http.MethodGet, rateLimitPath(), nil)
+	if err != nil {
+		return app.GitHubRateLimitStatus{}, err
+	}
+
+	var response rateLimitResponse
+	if err := c.doJSON(req, &response); err != nil {
+		return app.GitHubRateLimitStatus{}, err
+	}
+	if response.Resources.Core.Limit <= 0 {
+		return app.GitHubRateLimitStatus{}, fmt.Errorf("GitHub rate limit response did not include resources.core.limit")
+	}
+	return app.GitHubRateLimitStatus{
+		CoreLimit:     response.Resources.Core.Limit,
+		CoreRemaining: response.Resources.Core.Remaining,
+		CoreUsed:      response.Resources.Core.Used,
+	}, nil
+}
+
 // DownloadReleaseAsset downloads asset into outputDir without setting executable bits.
 func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsset, outputDir string) (string, error) {
 	if asset.Name == "" {
@@ -558,6 +579,10 @@ func releasesPath(repository verification.Repository) rawPath {
 	return rawPath(fmt.Sprintf("repos/%s/%s/releases", repository.Owner, repository.Name))
 }
 
+func rateLimitPath() rawPath {
+	return rawPath("rate_limit")
+}
+
 func validateAssetFilename(name string) error {
 	if name == "." || name == ".." || strings.TrimSpace(name) == "" {
 		return fmt.Errorf("release asset name %q is not a safe filename", name)
@@ -580,6 +605,16 @@ type gitRefResponse struct {
 	Object struct {
 		SHA string `json:"sha"`
 	} `json:"object"`
+}
+
+type rateLimitResponse struct {
+	Resources struct {
+		Core struct {
+			Limit     int `json:"limit"`
+			Remaining int `json:"remaining"`
+			Used      int `json:"used"`
+		} `json:"core"`
+	} `json:"resources"`
 }
 
 type contentResponse struct {

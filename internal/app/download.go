@@ -122,6 +122,46 @@ type VerificationRecord struct {
 	Evidence verification.Evidence `json:"evidence"`
 }
 
+// Validate checks one persisted verification record.
+func (r VerificationRecord) Validate() error {
+	if r.SchemaVersion != 1 {
+		return fmt.Errorf("unsupported verification record version %d", r.SchemaVersion)
+	}
+	if _, err := parseRecordRepository(r.Repository); err != nil {
+		return fmt.Errorf("verification repository must be owner/repo")
+	}
+	fields := []struct {
+		label string
+		value string
+	}{
+		{label: "package", value: r.Package},
+		{label: "version", value: r.Version},
+		{label: "tag", value: r.Tag},
+		{label: "asset", value: r.Asset},
+	}
+	for _, field := range fields {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("verification %s must be set", field.label)
+		}
+	}
+	if r.Evidence.Repository.IsZero() {
+		return fmt.Errorf("verification evidence repository must be set")
+	}
+	if !strings.EqualFold(r.Evidence.Repository.String(), r.Repository) {
+		return fmt.Errorf("verification evidence repository %s does not match record repository %s", r.Evidence.Repository, r.Repository)
+	}
+	if strings.TrimSpace(string(r.Evidence.Tag)) == "" {
+		return fmt.Errorf("verification evidence tag must be set")
+	}
+	if string(r.Evidence.Tag) != r.Tag {
+		return fmt.Errorf("verification evidence tag %s does not match record tag %s", r.Evidence.Tag, r.Tag)
+	}
+	if r.Evidence.AssetDigest.IsZero() {
+		return fmt.Errorf("verification evidence asset digest must be set")
+	}
+	return nil
+}
+
 // NewVerifiedDownloader creates a verified download use case.
 func NewVerifiedDownloader(deps VerifiedDownloadDependencies) (*VerifiedDownloader, error) {
 	if deps.Manifests == nil {

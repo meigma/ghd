@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -228,7 +229,7 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.U
 	if err := os.WriteFile(newArtifactPath, []byte("artifact"), 0o600); err != nil {
 		return app.UpdateResult{}, err
 	}
-	if err := os.WriteFile(newVerificationPath, []byte("{}\n"), 0o600); err != nil {
+	if err := writeTestVerificationRecord(newVerificationPath, verification.Repository{Owner: "owner", Name: "repo"}, previous.Package, newVersion); err != nil {
 		return app.UpdateResult{}, err
 	}
 	nextBinaries := []app.InstalledBinary{
@@ -253,6 +254,7 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.U
 	current.ArtifactPath = newArtifactPath
 	current.ExtractedPath = newExtractedPath
 	current.VerificationPath = newVerificationPath
+	current.AssetDigest = "sha256:" + strings.Repeat("a", 64)
 	current.Binaries = []state.Binary{
 		{Name: previous.Package, LinkPath: nextBinaries[0].LinkPath, TargetPath: nextBinaries[0].TargetPath},
 	}
@@ -278,6 +280,20 @@ func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.
 		return nil, err
 	}
 	return index.Normalize().Records, nil
+}
+
+func (testRuntime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) (state.Record, error) {
+	subject, err := app.NewInstalledPackageVerifier(app.InstalledPackageVerifierDependencies{
+		StateStore:    filesystem.NewInstalledStore(),
+		Verifier:      testReleaseVerifier{},
+		EvidenceStore: filesystem.NewEvidenceWriter(),
+		Archives:      testArchiveExtractor{},
+		FileSystem:    filesystem.NewInstaller(),
+	})
+	if err != nil {
+		return state.Record{}, err
+	}
+	return subject.Verify(ctx, request)
 }
 
 func (testRuntime) Uninstall(ctx context.Context, request app.UninstallRequest) (state.Record, error) {
@@ -348,7 +364,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	if err := os.WriteFile(artifactPath, []byte("artifact"), 0o600); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	if err := os.WriteFile(verificationPath, []byte("{}\n"), 0o600); err != nil {
+	if err := writeTestVerificationRecord(verificationPath, request.Repository, request.PackageName, request.Version); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	if err := os.Symlink(linkTarget, linkPath); err != nil {
@@ -360,7 +376,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		Version:          request.Version,
 		Tag:              "v" + request.Version,
 		Asset:            request.PackageName + ".tar.gz",
-		AssetDigest:      "sha256:abc123",
+		AssetDigest:      "sha256:" + strings.Repeat("a", 64),
 		StorePath:        storePath,
 		ArtifactPath:     artifactPath,
 		ExtractedPath:    extractedPath,
@@ -382,6 +398,17 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	}, nil
 }
 
+func (testRuntime) Doctor(ctx context.Context, request app.DoctorRequest) ([]app.DoctorResult, error) {
+	subject, err := app.NewEnvironmentDoctor(app.EnvironmentDoctorDependencies{
+		GitHub:      testGitHubDoctorChecker{token: request.GitHubToken},
+		TrustedRoot: testTrustedRootChecker{},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return subject.Doctor(ctx, request)
+}
+
 func testRepositoryRecord(repository verification.Repository) (catalog.RepositoryRecord, error) {
 	packageName := "foo"
 	binaryPath := "bin/foo"
@@ -398,4 +425,97 @@ func testRepositoryRecord(repository verification.Repository) (catalog.Repositor
 			{Name: packageName, Description: "Foo CLI", Binaries: []manifest.Binary{{Path: binaryPath}}},
 		},
 	}, time.Unix(1700000000, 0))
+}
+
+type testReleaseVerifier struct{}
+
+func (testReleaseVerifier) VerifyReleaseAsset(_ context.Context, request verification.Request) (verification.Evidence, error) {
+	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
+	if err != nil {
+		return verification.Evidence{}, err
+	}
+	return verification.Evidence{
+		Repository:  request.Repository,
+		Tag:         request.Tag,
+		AssetDigest: digest,
+		ProvenanceAttestation: verification.AttestationEvidence{
+			SignerWorkflow: request.Policy.TrustedSignerWorkflow,
+		},
+	}, nil
+}
+
+type testArchiveExtractor struct{}
+
+func (testArchiveExtractor) ExtractArchive(_ context.Context, request app.ArchiveExtractionRequest) ([]app.ExtractedBinary, error) {
+	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
+		return nil, err
+	}
+	out := make([]app.ExtractedBinary, 0, len(request.Binaries))
+	for _, binary := range request.Binaries {
+		targetPath := filepath.Join(request.DestinationDir, filepath.FromSlash(binary.Path))
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			return nil, err
+		}
+		if err := os.WriteFile(targetPath, []byte("binary"), 0o755); err != nil {
+			return nil, err
+		}
+		out = append(out, app.ExtractedBinary{
+			Name:         filepath.Base(binary.Path),
+			RelativePath: binary.Path,
+			Path:         targetPath,
+		})
+	}
+	return out, nil
+}
+
+type testGitHubDoctorChecker struct {
+	token string
+}
+
+func (c testGitHubDoctorChecker) CheckRateLimit(context.Context) (app.GitHubRateLimitStatus, error) {
+	switch strings.TrimSpace(c.token) {
+	case "fail":
+		return app.GitHubRateLimitStatus{}, fmt.Errorf("boom")
+	case "exhausted":
+		return app.GitHubRateLimitStatus{CoreLimit: 60, CoreRemaining: 0}, nil
+	case "":
+		return app.GitHubRateLimitStatus{CoreLimit: 60, CoreRemaining: 42}, nil
+	default:
+		return app.GitHubRateLimitStatus{CoreLimit: 5000, CoreRemaining: 4999, CoreUsed: 1}, nil
+	}
+}
+
+type testTrustedRootChecker struct{}
+
+func (testTrustedRootChecker) ValidateTrustedRoot(_ context.Context, path string) error {
+	if strings.Contains(path, "invalid") {
+		return fmt.Errorf("parse trusted root: bad root")
+	}
+	return nil
+}
+
+func writeTestVerificationRecord(path string, repository verification.Repository, packageName string, version string) error {
+	outputDir := filepath.Dir(path)
+	writer := filesystem.NewEvidenceWriter()
+	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
+	if err != nil {
+		return err
+	}
+	_, err = writer.WriteVerificationEvidence(context.Background(), outputDir, app.VerificationRecord{
+		SchemaVersion: 1,
+		Repository:    repository.String(),
+		Package:       packageName,
+		Version:       version,
+		Tag:           "v" + version,
+		Asset:         packageName + ".tar.gz",
+		Evidence: verification.Evidence{
+			Repository:  repository,
+			Tag:         verification.ReleaseTag("v" + version),
+			AssetDigest: digest,
+			ProvenanceAttestation: verification.AttestationEvidence{
+				SignerWorkflow: verification.WorkflowIdentity(repository.String() + "/.github/workflows/release.yml"),
+			},
+		},
+	})
+	return err
 }

@@ -1,0 +1,26 @@
+# Successful verify re-checks the installed package.
+exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+stderr 'installed owner/repo/foo@1.2.3'
+exec ghd --state-dir state verify foo
+stderr 'verified owner/repo/foo@1\.2\.3'
+
+# Executable-bit drift is detected.
+exec chmod 0644 store/github.com/owner/repo/foo/1.2.3/sha256-abc123/extracted/foo
+! exec ghd --state-dir state verify foo
+stderr 'is not executable'
+exec chmod 0755 store/github.com/owner/repo/foo/1.2.3/sha256-abc123/extracted/foo
+
+# Malformed verify targets fail cleanly.
+! exec ghd verify owner/repo
+stderr 'verify target must be name or owner/repo/package'
+
+# Installed binary drift is detected.
+cp tampered.txt store/github.com/owner/repo/foo/1.2.3/sha256-abc123/extracted/foo
+! exec ghd --state-dir state verify foo
+stderr 'installed binary "foo" does not match verified artifact'
+
+exec ghd verify --help
+stdout 'verify name\|owner/repo/package'
+
+-- tampered.txt --
+tampered
