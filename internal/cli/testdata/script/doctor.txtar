@@ -1,0 +1,20 @@
+# Doctor prints ordered results and warnings remain successful.
+env GITHUB_TOKEN=
+exec ghd doctor --index-dir index --store-dir store --state-dir state --bin-dir custom-bin
+stdout 'warn bin-dir-on-path managed bin directory '
+stdout 'pass index-dir '
+stdout 'pass store-dir '
+stdout 'pass state-dir '
+stdout 'pass bin-dir '
+stdout 'pass trusted-root using built-in Sigstore trust roots'
+stdout 'warn github-api GitHub token is not set; unauthenticated core rate limit remaining 42/60'
+! stderr .
+
+# Doctor exits non-zero when a check fails.
+env GITHUB_TOKEN=fail
+! exec ghd doctor --index-dir index --store-dir store --state-dir state --bin-dir custom-bin
+stdout 'fail github-api GitHub API check failed: boom'
+stderr 'doctor found 1 failing check'
+
+exec ghd doctor --help
+stdout 'doctor'

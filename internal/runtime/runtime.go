@@ -25,9 +25,11 @@ type Runtime struct {
 	components  components
 	catalog     *app.RepositoryCatalog
 	checker     *app.InstalledPackageChecker
+	verifier    *app.InstalledPackageVerifier
 	updater     *app.PackageUpdater
 	installed   *app.InstalledPackages
 	uninstaller *app.PackageUninstaller
+	doctor      *app.EnvironmentDoctor
 	downloader  *app.VerifiedDownloader
 	installer   *app.VerifiedInstaller
 }
@@ -66,6 +68,13 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
+	doctor, err := app.NewEnvironmentDoctor(app.EnvironmentDoctorDependencies{
+		GitHub:      components.githubClient,
+		TrustedRoot: sigstore.NewTrustedRootChecker(),
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &Runtime{
 		cfg:         cfg,
 		components:  components,
@@ -73,6 +82,7 @@ func New(ctx context.Context, cfg config.Config) (*Runtime, error) {
 		checker:     checker,
 		installed:   installedPackages,
 		uninstaller: uninstaller,
+		doctor:      doctor,
 	}, nil
 }
 
@@ -146,6 +156,14 @@ func (r *Runtime) CheckInstalled(ctx context.Context, request app.CheckRequest) 
 	return r.checker.Check(ctx, request)
 }
 
+// VerifyInstalled re-verifies one active installed package.
+func (r *Runtime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) (state.Record, error) {
+	if err := r.ensureVerifiedUseCases(ctx); err != nil {
+		return state.Record{}, err
+	}
+	return r.verifier.Verify(ctx, request)
+}
+
 // Update upgrades one active installed package when a newer eligible version exists.
 func (r *Runtime) Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error) {
 	if err := r.ensureVerifiedUseCases(ctx); err != nil {
@@ -166,6 +184,29 @@ func (r *Runtime) Uninstall(ctx context.Context, request app.UninstallRequest) (
 		request.BinDir = r.cfg.BinDir
 	}
 	return r.uninstaller.Uninstall(ctx, request)
+}
+
+// Doctor checks local environment readiness.
+func (r *Runtime) Doctor(ctx context.Context, request app.DoctorRequest) ([]app.DoctorResult, error) {
+	if request.IndexDir == "" {
+		request.IndexDir = r.cfg.IndexDir
+	}
+	if request.StoreDir == "" {
+		request.StoreDir = r.cfg.StoreDir
+	}
+	if request.StateDir == "" {
+		request.StateDir = r.cfg.StateDir
+	}
+	if request.BinDir == "" {
+		request.BinDir = r.cfg.BinDir
+	}
+	if request.TrustedRootPath == "" {
+		request.TrustedRootPath = r.cfg.TrustedRootPath
+	}
+	if request.GitHubToken == "" {
+		request.GitHubToken = r.cfg.GitHubToken
+	}
+	return r.doctor.Doctor(ctx, request)
 }
 
 type components struct {
@@ -201,7 +242,7 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 }
 
 func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
-	if r.downloader != nil && r.installer != nil && r.updater != nil {
+	if r.downloader != nil && r.installer != nil && r.updater != nil && r.verifier != nil {
 		return nil
 	}
 	coreVerifier, err := newCoreVerifier(ctx, r.cfg, r.components.githubClient)
@@ -245,9 +286,20 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	installedVerifier, err := app.NewInstalledPackageVerifier(app.InstalledPackageVerifierDependencies{
+		StateStore:    r.components.installedStore,
+		Verifier:      coreVerifier,
+		EvidenceStore: r.components.evidenceWriter,
+		Archives:      archive.NewTarGzipExtractor(),
+		FileSystem:    filesystem.NewInstaller(),
+	})
+	if err != nil {
+		return err
+	}
 	r.downloader = downloader
 	r.installer = installer
 	r.updater = updater
+	r.verifier = installedVerifier
 	return nil
 }
 

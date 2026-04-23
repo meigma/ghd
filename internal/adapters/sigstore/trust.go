@@ -1,8 +1,11 @@
 package sigstore
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/tuf"
@@ -16,6 +19,14 @@ const githubTUFMirror = "https://tuf-repo.github.com"
 //
 //go:embed github_tuf_root.json
 var githubTUFRoot []byte
+
+// TrustedRootChecker validates custom trusted_root.json documents.
+type TrustedRootChecker struct{}
+
+// NewTrustedRootChecker creates a trusted root checker.
+func NewTrustedRootChecker() TrustedRootChecker {
+	return TrustedRootChecker{}
+}
 
 // FetchGitHubTrustedRoot fetches GitHub's Sigstore trusted root through GitHub's TUF mirror.
 func FetchGitHubTrustedRoot() (*root.TrustedRoot, error) {
@@ -36,4 +47,23 @@ func FetchGitHubTrustedRoot() (*root.TrustedRoot, error) {
 		return nil, fmt.Errorf("parse GitHub trusted root: %w", err)
 	}
 	return trustedRoot, nil
+}
+
+// ValidateTrustedRoot checks that path exists and can build a usable Sigstore verifier.
+func (TrustedRootChecker) ValidateTrustedRoot(ctx context.Context, path string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return fmt.Errorf("trusted root path must be set")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read trusted root: %w", err)
+	}
+	if _, err := NewVerifier(WithTrustedRootJSON(data)); err != nil {
+		return err
+	}
+	return nil
 }

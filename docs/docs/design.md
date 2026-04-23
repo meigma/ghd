@@ -9,8 +9,8 @@ Status: initial design. This document describes the first coherent shape of the
 project, not a frozen architecture.
 
 Prototype status: `download`, `install`, repository indexing, installed-state,
-`check`, `update`, and `uninstall` now exist as working slices. Package
-discovery, `verify`, and `doctor` remain future work.
+`check`, `verify`, `doctor`, `update`, and `uninstall` now exist as working
+slices. Package discovery remains future work.
 
 GitHub Downloader (`ghd`) is a CLI for securely installing binaries from GitHub
 releases. It is intentionally opinionated: a compatible repository must publish
@@ -200,7 +200,7 @@ Installed package management:
 ghd installed
 ghd check [name | --all]
 ghd update <name | --all>
-ghd verify <name | --all>
+ghd verify <name>
 ghd uninstall <name>
 ghd doctor
 ```
@@ -437,8 +437,8 @@ The first vertical slice should prove the complete path for one real repository:
 8. Record `verification.json`.
 
 After the verified install, indexing, installed-state, uninstall, and read-only
-check slices work, the next slices should add update, verify, and clearer
-collision UX.
+check slices work, the next slices should add clearer collision UX and package
+discovery commands.
 
 ## Open Questions
 

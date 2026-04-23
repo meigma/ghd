@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/meigma/ghd/internal/app"
 )
@@ -16,6 +17,28 @@ type EvidenceWriter struct{}
 // NewEvidenceWriter creates a filesystem evidence writer.
 func NewEvidenceWriter() EvidenceWriter {
 	return EvidenceWriter{}
+}
+
+// ReadVerificationRecord reads one persisted verification.json record.
+func (EvidenceWriter) ReadVerificationRecord(ctx context.Context, path string) (app.VerificationRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return app.VerificationRecord{}, err
+	}
+	if strings.TrimSpace(path) == "" {
+		return app.VerificationRecord{}, fmt.Errorf("verification path must be set")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return app.VerificationRecord{}, fmt.Errorf("read verification record: %w", err)
+	}
+	var record app.VerificationRecord
+	if err := json.Unmarshal(data, &record); err != nil {
+		return app.VerificationRecord{}, fmt.Errorf("decode verification record: %w", err)
+	}
+	if err := record.Validate(); err != nil {
+		return app.VerificationRecord{}, err
+	}
+	return record, nil
 }
 
 // WriteVerificationEvidence writes verification.json into outputDir.

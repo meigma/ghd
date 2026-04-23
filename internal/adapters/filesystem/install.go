@@ -1,6 +1,7 @@
 package filesystem
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -164,6 +165,60 @@ func (Installer) RemoveManagedStore(ctx context.Context, storeRoot string, store
 	}
 	defer root.Close()
 	return removeManagedStorePath(root, relStorePath)
+}
+
+// VerifyManagedBinaryLink verifies that linkPath is a symlink to expectedTargetPath.
+func (Installer) VerifyManagedBinaryLink(ctx context.Context, linkPath string, expectedTargetPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if strings.TrimSpace(linkPath) == "" {
+		return fmt.Errorf("managed binary link path must be set")
+	}
+	if strings.TrimSpace(expectedTargetPath) == "" {
+		return fmt.Errorf("managed binary target path must be set")
+	}
+	info, err := os.Lstat(linkPath)
+	if err != nil {
+		return fmt.Errorf("inspect managed binary link %s: %w", linkPath, err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		return fmt.Errorf("managed binary link %s is not a symlink", linkPath)
+	}
+	targetPath, err := os.Readlink(linkPath)
+	if err != nil {
+		return fmt.Errorf("read managed binary link %s: %w", linkPath, err)
+	}
+	if targetPath != expectedTargetPath {
+		return fmt.Errorf("managed binary link %s points to %s, not %s", linkPath, targetPath, expectedTargetPath)
+	}
+	return nil
+}
+
+// CompareFiles verifies that both files have identical contents.
+func (Installer) CompareFiles(ctx context.Context, path string, otherPath string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return fmt.Errorf("stat file %s: %w", path, err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		return fmt.Errorf("file %s is not executable", path)
+	}
+	left, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", path, err)
+	}
+	right, err := os.ReadFile(otherPath)
+	if err != nil {
+		return fmt.Errorf("read file %s: %w", otherPath, err)
+	}
+	if !bytes.Equal(left, right) {
+		return fmt.Errorf("file %s does not match %s", path, otherPath)
+	}
+	return nil
 }
 
 type managedBinaryLink struct {

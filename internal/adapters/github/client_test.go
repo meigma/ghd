@@ -198,6 +198,26 @@ func TestClientListRepositoryReleasesFollowsPagination(t *testing.T) {
 	assert.Equal(t, "Bearer token-123", gotHeader.Get("Authorization"))
 }
 
+func TestClientCheckRateLimit(t *testing.T) {
+	var gotHeader http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHeader = r.Header.Clone()
+		assert.Equal(t, "/rate_limit", r.URL.Path)
+		fmt.Fprint(w, `{"resources":{"core":{"limit":5000,"remaining":4999,"used":1}}}`)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL, WithToken("token-123"))
+
+	status, err := client.CheckRateLimit(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, 5000, status.CoreLimit)
+	assert.Equal(t, 4999, status.CoreRemaining)
+	assert.Equal(t, 1, status.CoreUsed)
+	assert.Equal(t, "Bearer token-123", gotHeader.Get("Authorization"))
+}
+
 func TestClientDownloadReleaseAssetDoesNotSendGitHubTokenToAssetURL(t *testing.T) {
 	var gotHeader http.Header
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
