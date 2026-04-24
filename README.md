@@ -1,7 +1,8 @@
 # ghd
 
-`ghd` is an experimental CLI for installing GitHub release assets only after
-the selected artifact passes strict integrity and provenance checks.
+`ghd` is an experimental CLI for discovering, verifying, and installing GitHub
+release assets only after the selected artifact passes strict integrity and
+provenance checks.
 
 The repository currently contains the initial product/security design, docs
 scaffolding, and early `download` / `install` prototype commands.
@@ -30,15 +31,19 @@ moon run docs:build
 
 ## Usage
 
-The prototype command surface currently supports direct verified downloads,
-repository indexing, one-off verified installs, installed-state management,
-read-only update checks, re-verification, environment diagnostics, and
-single-target updates:
+The prototype command surface currently supports package discovery, direct
+verified downloads, repository indexing, one-off verified installs,
+installed-state management, read-only update checks, re-verification,
+environment diagnostics, and single-target updates:
 
 ```sh
 go run ./cmd/ghd download owner/repo/package@version --output ./out
 go run ./cmd/ghd repo add owner/repo --index-dir ./index
 go run ./cmd/ghd repo list --index-dir ./index
+go run ./cmd/ghd list --index-dir ./index
+go run ./cmd/ghd list owner/repo
+go run ./cmd/ghd info package --index-dir ./index
+go run ./cmd/ghd info owner/repo/package
 go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd installed --state-dir ./state
@@ -53,8 +58,9 @@ Start with the design document for the intended full product shape:
 
 - [Initial Design](docs/docs/design.md)
 
-The broader command shape still includes package discovery flows. `check`,
-`verify`, and `doctor` are intentionally read-only in the current prototype.
+`check`, `verify`, and `doctor` are intentionally read-only in the current
+prototype. Bulk lifecycle flows and richer collision ownership UX remain future
+work.
 
 ## Documentation
 

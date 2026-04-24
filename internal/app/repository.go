@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -80,6 +81,62 @@ type ResolvePackageResult struct {
 	Repository verification.Repository
 	// PackageName is the resolved package name.
 	PackageName string
+}
+
+// PackageListRequest describes package-discovery list behavior.
+type PackageListRequest struct {
+	// Repository optionally limits listing to one live repository manifest.
+	Repository verification.Repository
+	// IndexDir is the local catalog directory for index-backed listing.
+	IndexDir string
+}
+
+// PackageListResult is one listed package.
+type PackageListResult struct {
+	// Repository is the package's GitHub repository.
+	Repository verification.Repository
+	// PackageName is the package name within the repository manifest.
+	PackageName string
+	// Binaries are the exposed command names for the package.
+	Binaries []string
+}
+
+// PackageInfoRequest describes package detail lookup behavior.
+type PackageInfoRequest struct {
+	// Repository optionally identifies the repository that owns the package.
+	Repository verification.Repository
+	// PackageName optionally identifies one package within Repository.
+	PackageName string
+	// UnqualifiedName optionally resolves one package through the local index.
+	UnqualifiedName string
+	// IndexDir is the local catalog directory for unqualified resolution.
+	IndexDir string
+}
+
+// PackageInfoAsset is one declared package asset.
+type PackageInfoAsset struct {
+	// OS is the Go-style target operating system.
+	OS string
+	// Arch is the Go-style target architecture.
+	Arch string
+	// Pattern is the declared asset naming pattern.
+	Pattern string
+}
+
+// PackageInfoResult is one resolved package detail record.
+type PackageInfoResult struct {
+	// Repository is the GitHub repository that owns the package.
+	Repository verification.Repository
+	// PackageName is the package name within the repository manifest.
+	PackageName string
+	// SignerWorkflow is the repository's trusted signer workflow identity.
+	SignerWorkflow verification.WorkflowIdentity
+	// TagPattern is the effective release tag pattern for the package.
+	TagPattern string
+	// Binaries are the exposed command names for the package.
+	Binaries []string
+	// Assets are the declared package assets.
+	Assets []PackageInfoAsset
 }
 
 // NewRepositoryCatalog creates a repository catalog use case.
@@ -187,16 +244,137 @@ func (c *RepositoryCatalog) ResolvePackage(ctx context.Context, request ResolveP
 	return ResolvePackageResult{Repository: resolved.Repository, PackageName: resolved.PackageName}, nil
 }
 
-func (c *RepositoryCatalog) fetchRecord(ctx context.Context, repository verification.Repository) (catalog.RepositoryRecord, error) {
+// ListPackages returns package-discovery rows from the local index or one live repository.
+func (c *RepositoryCatalog) ListPackages(ctx context.Context, request PackageListRequest) ([]PackageListResult, error) {
+	if request.Repository.IsZero() {
+		if strings.TrimSpace(request.IndexDir) == "" {
+			return nil, fmt.Errorf("index directory must be set")
+		}
+		index, err := c.store.LoadCatalog(ctx, request.IndexDir)
+		if err != nil {
+			return nil, err
+		}
+		return packageListResultsFromIndex(index.Normalize()), nil
+	}
+
+	record, err := c.fetchRecord(ctx, request.Repository)
+	if err != nil {
+		return nil, err
+	}
+	return packageListResultsFromRecord(record), nil
+}
+
+// InfoPackage returns one package's detailed discovery information.
+func (c *RepositoryCatalog) InfoPackage(ctx context.Context, request PackageInfoRequest) (PackageInfoResult, error) {
+	repository := request.Repository
+	packageName := strings.TrimSpace(request.PackageName)
+	if strings.TrimSpace(request.UnqualifiedName) != "" {
+		resolved, err := c.ResolvePackage(ctx, ResolvePackageRequest{
+			PackageName: request.UnqualifiedName,
+			IndexDir:    request.IndexDir,
+		})
+		if err != nil {
+			return PackageInfoResult{}, err
+		}
+		repository = resolved.Repository
+		packageName = resolved.PackageName
+	}
+	if repository.IsZero() {
+		return PackageInfoResult{}, fmt.Errorf("info target must identify a repository")
+	}
+
+	cfg, err := c.fetchConfig(ctx, repository)
+	if err != nil {
+		return PackageInfoResult{}, err
+	}
+	if packageName == "" {
+		if len(cfg.Packages) != 1 {
+			return PackageInfoResult{}, fmt.Errorf("repository %s declares multiple packages; use %s/package", repository, repository)
+		}
+		packageName = cfg.Packages[0].Name
+	}
+	return c.packageInfoResult(repository, cfg, packageName)
+}
+
+func (c *RepositoryCatalog) fetchConfig(ctx context.Context, repository verification.Repository) (manifest.Config, error) {
 	manifestBytes, err := c.manifests.FetchManifest(ctx, repository)
 	if err != nil {
-		return catalog.RepositoryRecord{}, fmt.Errorf("fetch ghd.toml: %w", err)
+		return manifest.Config{}, fmt.Errorf("fetch ghd.toml: %w", err)
 	}
-	cfg, err := manifest.Decode(manifestBytes)
+	return manifest.Decode(manifestBytes)
+}
+
+func (c *RepositoryCatalog) fetchRecord(ctx context.Context, repository verification.Repository) (catalog.RepositoryRecord, error) {
+	cfg, err := c.fetchConfig(ctx, repository)
 	if err != nil {
 		return catalog.RepositoryRecord{}, err
 	}
 	return catalog.NewRepositoryRecord(repository, cfg, c.now())
+}
+
+func (c *RepositoryCatalog) packageInfoResult(repository verification.Repository, cfg manifest.Config, packageName string) (PackageInfoResult, error) {
+	pkg, err := cfg.Package(packageName)
+	if err != nil {
+		return PackageInfoResult{}, err
+	}
+	record, err := catalog.NewRepositoryRecord(repository, cfg, c.now())
+	if err != nil {
+		return PackageInfoResult{}, err
+	}
+
+	var binaries []string
+	for _, summary := range record.Packages {
+		if summary.Name == packageName {
+			binaries = append([]string(nil), summary.Binaries...)
+			break
+		}
+	}
+	if len(binaries) == 0 {
+		return PackageInfoResult{}, fmt.Errorf("repository %s package %q has no exposed binaries", repository, packageName)
+	}
+
+	assets := make([]PackageInfoAsset, 0, len(pkg.Assets))
+	for _, asset := range pkg.Assets {
+		assets = append(assets, PackageInfoAsset{
+			OS:      asset.OS,
+			Arch:    asset.Arch,
+			Pattern: asset.Pattern,
+		})
+	}
+	sort.Slice(assets, func(i, j int) bool {
+		left := strings.ToLower(assets[i].OS + "/" + assets[i].Arch + "/" + assets[i].Pattern)
+		right := strings.ToLower(assets[j].OS + "/" + assets[j].Arch + "/" + assets[j].Pattern)
+		return left < right
+	})
+
+	return PackageInfoResult{
+		Repository:     repository,
+		PackageName:    packageName,
+		SignerWorkflow: cfg.Provenance.TrustedSignerWorkflow(),
+		TagPattern:     pkg.EffectiveTagPattern(),
+		Binaries:       binaries,
+		Assets:         assets,
+	}, nil
+}
+
+func packageListResultsFromIndex(index catalog.Index) []PackageListResult {
+	results := make([]PackageListResult, 0, len(index.Repositories))
+	for _, record := range index.Repositories {
+		results = append(results, packageListResultsFromRecord(record)...)
+	}
+	return results
+}
+
+func packageListResultsFromRecord(record catalog.RepositoryRecord) []PackageListResult {
+	results := make([]PackageListResult, 0, len(record.Packages))
+	for _, pkg := range record.Packages {
+		results = append(results, PackageListResult{
+			Repository:  record.Repository,
+			PackageName: pkg.Name,
+			Binaries:    append([]string(nil), pkg.Binaries...),
+		})
+	}
+	return results
 }
 
 func validateRepositoryRequest(repository verification.Repository, indexDir string) error {

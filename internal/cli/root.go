@@ -32,6 +32,10 @@ type Runtime interface {
 	RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error)
 	// ResolvePackage resolves an unqualified package through the local index.
 	ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error)
+	// ListPackages returns package-discovery rows.
+	ListPackages(ctx context.Context, request app.PackageListRequest) ([]app.PackageListResult, error)
+	// InfoPackage returns one resolved package detail record.
+	InfoPackage(ctx context.Context, request app.PackageInfoRequest) (app.PackageInfoResult, error)
 	// CheckInstalled reports update availability for installed packages.
 	CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error)
 	// VerifyInstalled re-verifies one active installed package.
@@ -95,6 +99,8 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.PersistentFlags().String("state-dir", "", "local installed package state directory")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
+	root.AddCommand(newListCommand(options))
+	root.AddCommand(newInfoCommand(options))
 	root.AddCommand(newCheckCommand(options))
 	root.AddCommand(newVerifyCommand(options))
 	root.AddCommand(newUpdateCommand(options))

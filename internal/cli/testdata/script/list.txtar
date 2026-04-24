@@ -1,0 +1,21 @@
+# Local list reads the indexed package catalog.
+exec ghd --index-dir index repo add owner/repo
+exec ghd --index-dir index list
+stdout 'owner/repo/foo foo'
+! stderr .
+
+# Live list fetches a repository manifest without indexing it.
+exec ghd --index-dir empty list owner/multi
+stdout 'owner/multi/bar bar'
+stdout 'owner/multi/foo foo'
+! stderr .
+
+# Version-suffixed discovery targets are rejected at parse time.
+! exec ghd list owner/multi@1.2.3
+stderr 'list target must be owner/repo'
+
+# Help is scriptable and quiet on stderr.
+exec ghd list --help
+stdout 'Usage:'
+stdout 'list \[owner/repo\]'
+! stderr .

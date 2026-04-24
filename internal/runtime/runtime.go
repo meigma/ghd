@@ -146,6 +146,16 @@ func (r *Runtime) ResolvePackage(ctx context.Context, request app.ResolvePackage
 	return r.catalog.ResolvePackage(ctx, request)
 }
 
+// ListPackages returns package-discovery rows.
+func (r *Runtime) ListPackages(ctx context.Context, request app.PackageListRequest) ([]app.PackageListResult, error) {
+	return r.catalog.ListPackages(ctx, request)
+}
+
+// InfoPackage returns one resolved package detail record.
+func (r *Runtime) InfoPackage(ctx context.Context, request app.PackageInfoRequest) (app.PackageInfoResult, error) {
+	return r.catalog.InfoPackage(ctx, request)
+}
+
 // ListInstalled returns active installed packages.
 func (r *Runtime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
 	return r.installed.ListInstalled(ctx, stateDir)
