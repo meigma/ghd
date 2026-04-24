@@ -122,6 +122,9 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(c.Provenance.SignerWorkflow) == "" {
 		return fmt.Errorf("provenance.signer_workflow must be set")
 	}
+	if err := validateNoControlCharacters("provenance.signer_workflow", c.Provenance.SignerWorkflow); err != nil {
+		return err
+	}
 	if len(c.Packages) == 0 {
 		return fmt.Errorf("at least one package must be declared")
 	}
@@ -159,6 +162,12 @@ func (c Config) Package(name string) (Package, error) {
 // Validate checks one package declaration.
 func (p Package) Validate() error {
 	if err := validatePackageName(p.Name); err != nil {
+		return err
+	}
+	if err := validateNoControlCharacters("tag pattern", p.TagPattern); err != nil {
+		return err
+	}
+	if err := validateVersionPattern("tag pattern", p.EffectiveTagPattern()); err != nil {
 		return err
 	}
 	if len(p.Assets) == 0 {
@@ -257,11 +266,23 @@ func (a Asset) Validate() error {
 	if strings.TrimSpace(a.OS) == "" {
 		return fmt.Errorf("os must be set")
 	}
+	if err := validateNoControlCharacters("os", a.OS); err != nil {
+		return err
+	}
 	if strings.TrimSpace(a.Arch) == "" {
 		return fmt.Errorf("arch must be set")
 	}
+	if err := validateNoControlCharacters("arch", a.Arch); err != nil {
+		return err
+	}
 	if strings.TrimSpace(a.Pattern) == "" {
 		return fmt.Errorf("pattern must be set")
+	}
+	if err := validateNoControlCharacters("pattern", a.Pattern); err != nil {
+		return err
+	}
+	if err := validateVersionPattern("asset pattern", strings.TrimSpace(a.Pattern)); err != nil {
+		return err
 	}
 	return nil
 }
@@ -284,6 +305,9 @@ func (b Binary) Validate() error {
 	binaryPath := strings.TrimSpace(b.Path)
 	if binaryPath == "" {
 		return fmt.Errorf("path must be set")
+	}
+	if err := validateNoControlCharacters("binary path", b.Path); err != nil {
+		return err
 	}
 	normalized := strings.ReplaceAll(binaryPath, "\\", "/")
 	if path.IsAbs(normalized) || filepath.IsAbs(binaryPath) {
@@ -328,9 +352,28 @@ func versionPatternParts(pattern string) (string, string, error) {
 	if pattern == "" {
 		pattern = defaultTagPattern
 	}
-	if strings.Count(pattern, versionToken) != 1 {
-		return "", "", fmt.Errorf("tag pattern %q must contain exactly one %s token", pattern, versionToken)
+	if err := validateVersionPattern("tag pattern", pattern); err != nil {
+		return "", "", err
 	}
 	prefix, suffix, _ := strings.Cut(pattern, versionToken)
 	return prefix, suffix, nil
+}
+
+func validateVersionPattern(label string, pattern string) error {
+	if strings.Count(pattern, versionToken) != 1 {
+		return fmt.Errorf("%s %q must contain exactly one %s token", label, pattern, versionToken)
+	}
+	if err := validateNoControlCharacters(label, pattern); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateNoControlCharacters(label string, value string) error {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return fmt.Errorf("%s must not contain control characters", label)
+		}
+	}
+	return nil
 }

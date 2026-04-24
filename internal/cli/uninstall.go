@@ -39,7 +39,7 @@ func newUninstallCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(options.Err, "uninstalled %s/%s@%s\n", result.Repository, result.Package, result.Version)
+			fmt.Fprintf(options.Err, "uninstalled %s/%s@%s\n", terminalSafeText(result.Repository), terminalSafeText(result.Package), terminalSafeText(result.Version))
 			return nil
 		},
 	}

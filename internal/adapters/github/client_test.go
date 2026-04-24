@@ -138,6 +138,22 @@ func TestClientFetchManifestUsesRawContentsAPI(t *testing.T) {
 	assert.Equal(t, "Bearer token-123", gotHeader.Get("Authorization"))
 }
 
+func TestClientFetchManifestAtRefUsesContentsAPIRef(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/repos/owner/repo/contents/ghd.toml", r.URL.Path)
+		assert.Equal(t, "release/v1.2.3", r.URL.Query().Get("ref"))
+		fmt.Fprint(w, "version = 1\n")
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+
+	data, err := client.FetchManifestAtRef(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "release/v1.2.3")
+
+	require.NoError(t, err)
+	assert.Equal(t, "version = 1\n", string(data))
+}
+
 func TestClientFetchManifestAcceptsContentsJSON(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("version = 1\n"))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -153,8 +153,8 @@ func writeRepositoryList(options Options, repositories []catalog.RepositoryRecor
 	for _, record := range repositories {
 		packages := make([]string, 0, len(record.Packages))
 		for _, pkg := range record.Packages {
-			packages = append(packages, pkg.Name)
+			packages = append(packages, terminalSafeText(pkg.Name))
 		}
-		fmt.Fprintf(options.Out, "%s %s\n", record.Repository, strings.Join(packages, ","))
+		fmt.Fprintf(options.Out, "%s %s\n", terminalSafeText(record.Repository.String()), strings.Join(packages, ","))
 	}
 }

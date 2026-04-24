@@ -36,6 +36,7 @@ func newInstallCommand(options Options) *cobra.Command {
 			}
 
 			cfg := config.Load(options.Viper)
+			writeTrustedRootNotice(options.Err, cfg.TrustedRootPath)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
@@ -64,14 +65,15 @@ func newInstallCommand(options Options) *cobra.Command {
 				target.packageName = resolved.PackageName
 			}
 			result, err := runtime.Install(cmd.Context(), app.VerifiedInstallRequest{
-				Repository:  target.repository,
-				PackageName: target.packageName,
-				Version:     target.version,
-				StoreDir:    cfg.StoreDir,
-				BinDir:      cfg.BinDir,
-				StateDir:    cfg.StateDir,
-				Progress:    progress,
-				Approve:     installApprovalCallback(options, mode, status),
+				Repository:    target.repository,
+				PackageName:   target.packageName,
+				Version:       target.version,
+				StoreDir:      cfg.StoreDir,
+				BinDir:        cfg.BinDir,
+				StateDir:      cfg.StateDir,
+				TrustRootPath: cfg.TrustedRootPath,
+				Progress:      progress,
+				Approve:       installApprovalCallback(options, mode, status),
 			})
 			if err != nil {
 				return err
@@ -83,7 +85,7 @@ func newInstallCommand(options Options) *cobra.Command {
 			writeInstallSummary(options.Err, result, mode.enhanced, mode.color)
 			if mode.nonInteractive {
 				for _, binary := range result.Binaries {
-					fmt.Fprintf(options.Out, "binary %s\n", binary.LinkPath)
+					fmt.Fprintf(options.Out, "binary %s\n", terminalSafeText(binary.LinkPath))
 				}
 			}
 			return nil

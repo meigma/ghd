@@ -62,6 +62,8 @@ type PackageUpdaterDependencies struct {
 	Verifier Verifier
 	// EvidenceWriter records verification evidence.
 	EvidenceWriter EvidenceWriter
+	// EvidenceStore loads persisted verification evidence for the installed version.
+	EvidenceStore VerificationRecordStore
 	// Archives extracts verified archives.
 	Archives ArchiveExtractor
 	// FileSystem owns install store and binary exposure behavior.
@@ -160,6 +162,8 @@ type UpdateApproval struct {
 	ProvenancePredicateType string
 	// SignerWorkflow is the accepted provenance signer workflow.
 	SignerWorkflow verification.WorkflowIdentity
+	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
+	TrustRootPath string
 	// BinDir receives exposed binary links if the update proceeds.
 	BinDir string
 	// Binaries are the binary names that will be exposed if the update proceeds.
@@ -223,6 +227,7 @@ type PackageUpdater struct {
 	download  ArtifactDownloader
 	verify    Verifier
 	evidence  EvidenceWriter
+	records   VerificationRecordStore
 	archives  ArchiveExtractor
 	files     UpdateFileSystem
 	state     InstalledStateReplaceStore
@@ -241,6 +246,8 @@ type UpdateRequest struct {
 	BinDir string
 	// StateDir stores active installed package state.
 	StateDir string
+	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
+	TrustRootPath string
 	// Progress receives user-visible update progress. Nil disables progress reports.
 	Progress UpdateProgressFunc
 	// Approve approves a verified artifact before extraction, linking, or state writes. Nil approves automatically.
@@ -273,6 +280,9 @@ func NewPackageUpdater(deps PackageUpdaterDependencies) (*PackageUpdater, error)
 	if deps.EvidenceWriter == nil {
 		return nil, fmt.Errorf("evidence writer must be set")
 	}
+	if deps.EvidenceStore == nil {
+		return nil, fmt.Errorf("verification record store must be set")
+	}
 	if deps.Archives == nil {
 		return nil, fmt.Errorf("archive extractor must be set")
 	}
@@ -293,6 +303,7 @@ func NewPackageUpdater(deps PackageUpdaterDependencies) (*PackageUpdater, error)
 		download:  deps.Downloader,
 		verify:    deps.Verifier,
 		evidence:  deps.EvidenceWriter,
+		records:   deps.EvidenceStore,
 		archives:  deps.Archives,
 		files:     deps.FileSystem,
 		state:     deps.StateStore,
@@ -353,16 +364,24 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if candidate.LatestVersion == "" {
 		return result, nil
 	}
+	previousVerification, err := u.records.ReadVerificationRecord(ctx, previous.VerificationPath)
+	if err != nil {
+		return result, err
+	}
+	if err := verifyInstalledRecordConsistency(previous, previousVerification); err != nil {
+		return result, err
+	}
+	trustedSignerWorkflow := previousVerification.Evidence.ProvenanceAttestation.SignerWorkflow
+	if strings.TrimSpace(string(trustedSignerWorkflow)) == "" {
+		return result, fmt.Errorf("verification evidence for %s/%s@%s has no trusted signer workflow", previous.Repository, previous.Package, previous.Version)
+	}
 	request.report(UpdateProgressCheckingBinaries, fmt.Sprintf("Checking %s binary ownership", target))
 	if err := u.checkBinaryOwnership(ctx, request.StateDir, previous, candidate.Package.Binaries); err != nil {
 		return result, err
 	}
 
-	tag, err := candidate.Package.ReleaseTag(candidate.LatestVersion)
-	if err != nil {
-		return result, err
-	}
-	assetName, err := candidate.InstalledAsset.ResolveName(candidate.LatestVersion)
+	tag := candidate.Tag
+	assetName, err := candidate.CandidateAsset.ResolveName(candidate.LatestVersion)
 	if err != nil {
 		return result, err
 	}
@@ -399,7 +418,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		Tag:        tag,
 		AssetPath:  artifactPath,
 		Policy: verification.Policy{
-			TrustedSignerWorkflow: candidate.Config.Provenance.TrustedSignerWorkflow(),
+			TrustedSignerWorkflow: trustedSignerWorkflow,
 		},
 	})
 	if err != nil {
@@ -418,6 +437,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
 		ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
 		SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
+		TrustRootPath:           request.TrustRootPath,
 		BinDir:                  request.BinDir,
 		Binaries:                manifestBinaryNames(candidate.Package.Binaries),
 	}); err != nil {

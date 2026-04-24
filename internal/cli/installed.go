@@ -41,8 +41,8 @@ func writeInstalledList(options Options, records []state.Record) {
 	for _, record := range records {
 		binaries := make([]string, 0, len(record.Binaries))
 		for _, binary := range record.Binaries {
-			binaries = append(binaries, binary.Name)
+			binaries = append(binaries, terminalSafeText(binary.Name))
 		}
-		fmt.Fprintf(options.Out, "%s/%s %s %s\n", record.Repository, record.Package, record.Version, strings.Join(binaries, ","))
+		fmt.Fprintf(options.Out, "%s/%s %s %s\n", terminalSafeText(record.Repository), terminalSafeText(record.Package), terminalSafeText(record.Version), strings.Join(binaries, ","))
 	}
 }

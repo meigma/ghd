@@ -59,11 +59,11 @@ func newCheckCommand(options Options) *cobra.Command {
 
 func writeCheckResults(options Options, results []app.CheckResult) {
 	for _, result := range results {
-		target := result.Repository + "/" + result.Package
+		target := terminalSafeText(result.Repository + "/" + result.Package)
 		if result.LatestVersion != "" {
-			fmt.Fprintf(options.Out, "%s %s %s %s\n", target, result.Version, result.Status, result.LatestVersion)
+			fmt.Fprintf(options.Out, "%s %s %s %s\n", target, terminalSafeText(result.Version), result.Status, terminalSafeText(result.LatestVersion))
 			continue
 		}
-		fmt.Fprintf(options.Out, "%s %s %s\n", target, result.Version, result.Status)
+		fmt.Fprintf(options.Out, "%s %s %s\n", target, terminalSafeText(result.Version), result.Status)
 	}
 }

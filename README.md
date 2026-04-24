@@ -62,6 +62,11 @@ go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin
 Commands that return stable row-style results support `--json`: `list`, `info`,
 `installed`, `check`, `verify`, `update`, `doctor`, and `repo list`.
 
+Download, install, check, and update now fail closed unless the selected release
+tag contains a root `ghd.toml`. The default-branch manifest is only used to
+discover a candidate release tag; signer workflow, asset pattern, and binary
+path policy come from the manifest at that tag.
+
 Interactive `install` and `update` run with transient terminal status, show
 byte-level download progress when GitHub reports an asset size, and ask for
 approval after verification but before exposing or swapping binaries. The

@@ -17,10 +17,8 @@ import (
 
 func TestPackageUpdaterUpdateSingleTargetUpdatedRowAfterSuccessfulStaging(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 	storeDir := filepath.Join(t.TempDir(), "store-root")
@@ -60,15 +58,13 @@ func TestPackageUpdaterUpdateSingleTargetUpdatedRowAfterSuccessfulStaging(t *tes
 
 func TestPackageUpdaterReportsProgressInUpdateOrder(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 	var stages []UpdateProgressStage
 
-	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+	_, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -100,10 +96,8 @@ func TestPackageUpdaterReportsProgressInUpdateOrder(t *testing.T) {
 
 func TestPackageUpdaterForwardsDownloadProgressBeforeVerification(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 	tc.verifier.events = &tc.events
@@ -114,7 +108,7 @@ func TestPackageUpdaterForwardsDownloadProgressBeforeVerification(t *testing.T) 
 	}
 	var downloads []DownloadProgress
 
-	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+	_, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -151,15 +145,13 @@ func TestPackageUpdaterForwardsDownloadProgressBeforeVerification(t *testing.T) 
 
 func TestPackageUpdaterApprovalReceivesVerifiedFacts(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 	var approval UpdateApproval
 
-	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+	_, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   "/managed/bin",
@@ -185,12 +177,60 @@ func TestPackageUpdaterApprovalReceivesVerifiedFacts(t *testing.T) {
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
 }
 
+func TestPackageUpdaterPinsUpdateVerificationToInstalledSigner(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	configureInstalledUpdateRecords(t, tc, record)
+	tc.manifests.data[record.Repository] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, record.Tag)] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, "foo-v1.3.0")] = []byte(testManifestWithSigner("owner/repo/.github/workflows/evil.yml"))
+	tc.releases.data[record.Repository] = []RepositoryRelease{{
+		TagName:    "foo-v1.3.0",
+		AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"},
+	}}
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+
+	_, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+}
+
+func TestPackageUpdaterCannotUpdateWhenInstalledTagManifestDrifts(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	configureInstalledUpdateRecords(t, tc, record)
+	tc.manifests.data[record.Repository] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, record.Tag)] = []byte(testManifestWithTagPattern("other-v${version}"))
+	tc.releases.data[record.Repository] = []RepositoryRelease{{
+		TagName:    "foo-v1.3.0",
+		AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"},
+	}}
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.Error(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, "maps foo@1.2.3 to other-v1.2.3")
+	assert.False(t, tc.files.storeCalled)
+}
+
 func TestPackageUpdaterDoesNotMutateWhenApprovalDeclines(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 	tc.verifier.events = &tc.events
@@ -222,10 +262,8 @@ func TestPackageUpdaterDoesNotMutateWhenApprovalDeclines(t *testing.T) {
 
 func TestPackageUpdaterDoesNotRequestApprovalWhenAlreadyUpToDate(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.3.0")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 
 	results, err := tc.subject.Update(context.Background(), UpdateRequest{
@@ -249,9 +287,7 @@ func TestPackageUpdaterRejectsBinaryOwnershipCollisionBeforeDownloading(t *testi
 	record := updateInstalledRecord("owner/repo", "1.2.3")
 	conflicting := updateInstalledRecordForPackage("owner/other", "bar", "1.2.3")
 	conflicting.Binaries = []state.Binary{{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/other/bar/extracted/bar"}}
-	var err error
-	tc.state.index, err = mustUpdateIndex(record, conflicting)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record, conflicting)
 	tc.manifests.data[record.Repository] = []byte(testManifestWithBinary("bin/bar"))
 	tc.releases.data[record.Repository] = []RepositoryRelease{{
 		TagName:    "foo-v1.3.0",
@@ -280,10 +316,8 @@ func TestPackageUpdaterRejectsBinaryOwnershipCollisionBeforeDownloading(t *testi
 
 func TestPackageUpdaterUpdateSingleTargetAlreadyUpToDate(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.3.0")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 
 	results, err := tc.subject.Update(context.Background(), UpdateRequest{
@@ -309,10 +343,8 @@ func TestPackageUpdaterUpdateSingleTargetAlreadyUpToDate(t *testing.T) {
 
 func TestPackageUpdaterUpdateSingleTargetCannotUpdateWhenInstalledAssetVariantDrifts(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	tc.manifests.data[record.Repository] = []byte(`
 version = 1
 
@@ -357,10 +389,8 @@ path = "bin/foo"
 
 func TestPackageUpdaterUpdateSingleTargetCannotUpdateAndRollsBackLinksWhenStateReplacementFails(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	tc.state.replaceErr = errors.New("write installed state")
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
@@ -391,10 +421,8 @@ func TestPackageUpdaterUpdateSingleTargetCannotUpdateAndRollsBackLinksWhenStateR
 
 func TestPackageUpdaterUpdateSingleTargetPreservesStagedStoreWhenRollbackFails(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	tc.state.replaceErr = errors.New("write installed state")
 	tc.files.replaceErrs = []error{nil, errors.New("restore links")}
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
@@ -422,10 +450,8 @@ func TestPackageUpdaterUpdateSingleTargetPreservesStagedStoreWhenRollbackFails(t
 
 func TestPackageUpdaterUpdateSingleTargetUpdatedWithWarningWhenPreviousStoreCleanupFails(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
-	var err error
 	record := updateInstalledRecord("owner/repo", "1.2.3")
-	tc.state.index, err = mustUpdateIndex(record)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, record)
 	tc.files.removeStoreErr = errors.New("permission denied")
 	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
@@ -459,9 +485,7 @@ func TestPackageUpdaterUpdateAllSuccess(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	alpha := updateInstalledRecordForPackage("owner/alpha", "alpha", "1.2.3")
 	repo := updateInstalledRecord("owner/repo", "1.2.3")
-	var err error
-	tc.state.index, err = mustUpdateIndex(alpha, repo)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, alpha, repo)
 	configureRepositoryRecordForVersion(t, tc, alpha, "1.3.0")
 	configureRepositoryForVersion(t, tc, repo.Repository, "1.3.0")
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
@@ -497,9 +521,7 @@ func TestPackageUpdaterUpdateAllMixedWarningAndFailure(t *testing.T) {
 	current := updateInstalledRecordForPackage("owner/current", "current", "1.3.0")
 	repo := updateInstalledRecord("owner/repo", "1.2.3")
 	warn := updateInstalledRecordForPackage("owner/warn", "warn", "1.2.3")
-	var err error
-	tc.state.index, err = mustUpdateIndex(broken, current, repo, warn)
-	require.NoError(t, err)
+	configureInstalledUpdateRecords(t, tc, broken, current, repo, warn)
 	tc.manifests.err[broken.Repository] = errors.New("missing")
 	configureRepositoryRecordForVersion(t, tc, current, "1.3.0")
 	configureRepositoryForVersion(t, tc, repo.Repository, "1.3.0")
@@ -522,7 +544,7 @@ func TestPackageUpdaterUpdateAllMixedWarningAndFailure(t *testing.T) {
 	assert.Equal(t, "update completed with 1 warning and 1 failure", err.Error())
 	require.Len(t, results, 4)
 	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
-	assert.Contains(t, results[0].Reason, "fetch ghd.toml: missing")
+	assert.Contains(t, results[0].Reason, "fetch ghd.toml at broken-v1.2.3: missing")
 	assert.Equal(t, UpdateInstalledResult{
 		Repository:      "owner/current",
 		Package:         "current",
@@ -584,9 +606,7 @@ func TestPackageUpdaterUpdateReturnsPreflightErrorsWithoutResults(t *testing.T) 
 		one.Binaries = []state.Binary{{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/one/foo/extracted/one"}}
 		two := updateInstalledRecordForPackage("owner/two", "bar", "1.2.3")
 		two.Binaries = []state.Binary{{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/two/bar/extracted/foo"}}
-		var err error
-		tc.state.index, err = mustUpdateIndex(one, two)
-		require.NoError(t, err)
+		configureInstalledUpdateRecords(t, tc, one, two)
 
 		results, err := tc.subject.Update(context.Background(), UpdateRequest{
 			Target:   "foo",
@@ -620,8 +640,10 @@ func newPackageUpdaterTestContext(t *testing.T) *packageUpdaterTestContext {
 	t.Helper()
 	tc := &packageUpdaterTestContext{
 		manifests: &fakeManifestRouter{
-			data: map[string][]byte{},
-			err:  map[string]error{},
+			data:    map[string][]byte{},
+			refData: map[string][]byte{},
+			err:     map[string]error{},
+			refErr:  map[string]error{},
 		},
 		releases: &fakeRepositoryReleaseSource{
 			data: map[string][]RepositoryRelease{},
@@ -642,6 +664,7 @@ func newPackageUpdaterTestContext(t *testing.T) *packageUpdaterTestContext {
 		Downloader:     tc.downloader,
 		Verifier:       tc.verifier,
 		EvidenceWriter: tc.evidence,
+		EvidenceStore:  tc.evidence,
 		Archives:       tc.archives,
 		FileSystem:     tc.files,
 		StateStore:     tc.state,
@@ -692,6 +715,14 @@ func configureRepositoryRecordForVersion(t *testing.T, tc *packageUpdaterTestCon
 	}}
 }
 
+func configureInstalledUpdateRecords(t *testing.T, tc *packageUpdaterTestContext, records ...state.Record) {
+	t.Helper()
+	index, err := mustUpdateIndex(records...)
+	require.NoError(t, err)
+	tc.state.index = index
+	tc.evidence.StoreInstalledRecords(t, records...)
+}
+
 func updateInstalledRecord(repository string, version string) state.Record {
 	return updateInstalledRecordForPackage(repository, "foo", version)
 }
@@ -716,6 +747,14 @@ func updateInstalledRecordForPackage(repository string, packageName string, vers
 
 func testManifestWithBinary(binaryPath string) string {
 	return strings.Replace(testManifest(), "path = \"bin/foo\"", "path = \""+binaryPath+"\"", 1)
+}
+
+func testManifestWithSigner(signer string) string {
+	return strings.Replace(testManifest(), "signer_workflow = \"owner/repo/.github/workflows/release.yml\"", "signer_workflow = \""+signer+"\"", 1)
+}
+
+func testManifestWithTagPattern(pattern string) string {
+	return strings.Replace(testManifest(), "tag_pattern = \"foo-v${version}\"", "tag_pattern = \""+pattern+"\"", 1)
 }
 
 func testManifestForPackage(packageName string) string {

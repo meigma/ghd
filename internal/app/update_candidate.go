@@ -14,7 +14,9 @@ type resolvedInstalledPackageUpdate struct {
 	Config         manifest.Config
 	Package        manifest.Package
 	InstalledAsset manifest.Asset
+	CandidateAsset manifest.Asset
 	LatestVersion  string
+	Tag            verification.ReleaseTag
 }
 
 func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource, releases RepositoryReleaseSource, record state.Record) (resolvedInstalledPackageUpdate, error) {
@@ -27,19 +29,11 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 		return resolvedInstalledPackageUpdate{}, fmt.Errorf("installed version %q is not a supported semantic version", record.Version)
 	}
 
-	manifestBytes, err := manifests.FetchManifest(ctx, repository)
-	if err != nil {
-		return resolvedInstalledPackageUpdate{}, fmt.Errorf("fetch ghd.toml: %w", err)
-	}
-	cfg, err := manifest.Decode(manifestBytes)
+	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, record.Package, record.Version, verification.ReleaseTag(record.Tag))
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
-	pkg, err := cfg.Package(record.Package)
-	if err != nil {
-		return resolvedInstalledPackageUpdate{}, err
-	}
-	installedAsset, err := installedAssetDeclaration(pkg, record)
+	installedAsset, err := installedAssetDeclaration(installedPkg, record)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
@@ -48,16 +42,18 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, fmt.Errorf("list GitHub releases: %w", err)
 	}
-	latestVersion, err := latestStableVersion(pkg, installedAsset, repositoryReleases, installedVersion)
+	candidate, err := latestStablePackageUpdate(ctx, manifests, repository, record.Package, installedAsset, repositoryReleases, installedVersion)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
+	if candidate.LatestVersion == "" {
+		return resolvedInstalledPackageUpdate{
+			Repository:     repository,
+			Config:         installedCfg,
+			Package:        installedPkg,
+			InstalledAsset: installedAsset,
+		}, nil
+	}
 
-	return resolvedInstalledPackageUpdate{
-		Repository:     repository,
-		Config:         cfg,
-		Package:        pkg,
-		InstalledAsset: installedAsset,
-		LatestVersion:  latestVersion,
-	}, nil
+	return candidate, nil
 }

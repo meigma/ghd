@@ -58,6 +58,6 @@ func newDoctorCommand(options Options) *cobra.Command {
 
 func writeDoctorResults(options Options, results []app.DoctorResult) {
 	for _, result := range results {
-		fmt.Fprintf(options.Out, "%s %s %s\n", result.Status, result.ID, result.Message)
+		fmt.Fprintf(options.Out, "%s %s %s\n", result.Status, terminalSafeText(result.ID), terminalSafeText(result.Message))
 	}
 }

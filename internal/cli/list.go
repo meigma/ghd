@@ -52,11 +52,11 @@ func newListCommand(options Options) *cobra.Command {
 
 func writePackageList(options Options, results []app.PackageListResult) {
 	for _, result := range results {
-		target := result.Repository.String() + "/" + result.PackageName
+		target := terminalSafeText(result.Repository.String() + "/" + result.PackageName)
 		if len(result.Binaries) == 0 {
 			fmt.Fprintln(options.Out, target)
 			continue
 		}
-		fmt.Fprintf(options.Out, "%s %s\n", target, strings.Join(result.Binaries, ","))
+		fmt.Fprintf(options.Out, "%s %s\n", target, strings.Join(terminalSafeStrings(result.Binaries), ","))
 	}
 }

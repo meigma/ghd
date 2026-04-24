@@ -1053,6 +1053,10 @@ func (testRuntimeManifestSource) FetchManifest(_ context.Context, repository ver
 	return toml.Marshal(cfg)
 }
 
+func (testRuntimeManifestSource) FetchManifestAtRef(ctx context.Context, repository verification.Repository, _ string) ([]byte, error) {
+	return testRuntimeManifestSource{}.FetchManifest(ctx, repository)
+}
+
 func testManifestConfig(repository verification.Repository) (manifest.Config, error) {
 	switch repository.Name {
 	case "binary":

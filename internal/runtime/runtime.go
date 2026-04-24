@@ -3,6 +3,8 @@ package runtime
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"strings"
 
 	sigroot "github.com/sigstore/sigstore-go/pkg/root"
 
@@ -236,6 +238,9 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 		githubOptions = append(githubOptions, github.WithBaseURL(cfg.GitHubBaseURL))
 	}
 	if cfg.GitHubToken != "" {
+		if !githubBaseURLCanReceiveToken(cfg.GitHubBaseURL) {
+			return components{}, fmt.Errorf("refusing to send GitHub token to custom API URL %s; unset GITHUB_TOKEN/GH_TOKEN or use %s", cfg.GitHubBaseURL, github.DefaultBaseURL)
+		}
 		githubOptions = append(githubOptions, github.WithToken(cfg.GitHubToken))
 	}
 	githubClient, err := github.NewClient(githubOptions...)
@@ -249,6 +254,21 @@ func newComponents(ctx context.Context, cfg config.Config) (components, error) {
 		catalogStore:   filesystem.NewCatalogStore(),
 		installedStore: filesystem.NewInstalledStore(),
 	}, nil
+}
+
+func githubBaseURLCanReceiveToken(baseURL string) bool {
+	baseURL = strings.TrimSpace(baseURL)
+	if baseURL == "" {
+		return true
+	}
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
+	if parsed.Scheme != "https" || !strings.EqualFold(parsed.Host, "api.github.com") {
+		return false
+	}
+	return strings.TrimRight(parsed.Path, "/") == ""
 }
 
 func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
@@ -289,6 +309,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 		Downloader:     r.components.githubClient,
 		Verifier:       coreVerifier,
 		EvidenceWriter: r.components.evidenceWriter,
+		EvidenceStore:  r.components.evidenceWriter,
 		Archives:       archive.NewTarGzipExtractor(),
 		FileSystem:     filesystem.NewInstaller(),
 		StateStore:     r.components.installedStore,

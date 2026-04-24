@@ -48,18 +48,20 @@ func newUpdateCommand(options Options) *cobra.Command {
 			}
 
 			cfg := config.Load(options.Viper)
+			writeTrustedRootNotice(options.Err, cfg.TrustedRootPath)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
 			results, err := runtime.Update(cmd.Context(), app.UpdateRequest{
-				Target:   target,
-				All:      all,
-				StoreDir: cfg.StoreDir,
-				BinDir:   cfg.BinDir,
-				StateDir: cfg.StateDir,
-				Progress: progress,
-				Approve:  updateApprovalCallback(options, mode, status),
+				Target:        target,
+				All:           all,
+				StoreDir:      cfg.StoreDir,
+				BinDir:        cfg.BinDir,
+				StateDir:      cfg.StateDir,
+				TrustRootPath: cfg.TrustedRootPath,
+				Progress:      progress,
+				Approve:       updateApprovalCallback(options, mode, status),
 			})
 			if status != nil {
 				status.Clear()
@@ -70,7 +72,7 @@ func newUpdateCommand(options Options) *cobra.Command {
 				}
 			} else {
 				writeUpdateResults(options, results)
-				writeUpdateSummary(options.Err, results, mode.enhanced, mode.color)
+				writeUpdateSummary(options.Err, results, mode.enhanced, mode.color, cfg.TrustedRootPath)
 			}
 			if err != nil {
 				return err
@@ -87,11 +89,11 @@ func newUpdateCommand(options Options) *cobra.Command {
 
 func writeUpdateResults(options Options, results []app.UpdateInstalledResult) {
 	for _, result := range results {
-		target := result.Repository + "/" + result.Package
+		target := terminalSafeText(result.Repository + "/" + result.Package)
 		if result.Reason != "" {
-			fmt.Fprintf(options.Out, "%s %s %s %s %s\n", target, result.PreviousVersion, result.CurrentVersion, result.Status, result.Reason)
+			fmt.Fprintf(options.Out, "%s %s %s %s %s\n", target, terminalSafeText(result.PreviousVersion), terminalSafeText(result.CurrentVersion), result.Status, terminalSafeText(result.Reason))
 			continue
 		}
-		fmt.Fprintf(options.Out, "%s %s %s %s\n", target, result.PreviousVersion, result.CurrentVersion, result.Status)
+		fmt.Fprintf(options.Out, "%s %s %s %s\n", target, terminalSafeText(result.PreviousVersion), terminalSafeText(result.CurrentVersion), result.Status)
 	}
 }
