@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -21,12 +22,26 @@ func newDoctorCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check local environment readiness",
-		Args:  cobra.NoArgs,
+		Example: strings.TrimSpace(`
+ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
+ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin --json
+ghd --non-interactive doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
+`),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectReadOnlyPresentationMode(options, jsonOutput)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 			cfg := config.Load(options.Viper)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
+			}
+			if status != nil {
+				status.Show("Checking local environment readiness")
 			}
 			results, err := runtime.Doctor(cmd.Context(), app.DoctorRequest{
 				GitHubToken:     cfg.GitHubToken,
@@ -37,12 +52,19 @@ func newDoctorCommand(options Options) *cobra.Command {
 				BinDir:          cfg.BinDir,
 				PathEnv:         os.Getenv("PATH"),
 			})
+			if status != nil {
+				status.Clear()
+			}
 			if jsonOutput {
 				if writeErr := writeDoctorResultsJSON(options, results); writeErr != nil {
 					return writeErr
 				}
 			} else {
-				writeDoctorResults(options, results)
+				if mode.richOutput {
+					writeDoctorResultsTTY(options.Out, results, mode.color)
+				} else {
+					writeDoctorResults(options, results)
+				}
 			}
 			if err != nil {
 				return err

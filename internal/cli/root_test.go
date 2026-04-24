@@ -713,6 +713,350 @@ func TestCheckTTYRendersSummaryAndStaticStatus(t *testing.T) {
 	assert.Equal(t, "\r\033[KChecking installed packages for updates\r\033[K", stderr.String())
 }
 
+func TestVerifyTTYRendersGroupedResultsAndStaticStatus(t *testing.T) {
+	t.Helper()
+
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/alpha/bar@1.0.0", "--store-dir", storeDir, "--bin-dir", binDir))
+	require.NoError(t, os.WriteFile(filepath.Join(storeDir, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123", "extracted", "foo"), []byte("tampered"), 0o755))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--state-dir", stateDir, "verify", "--all")
+
+	require.Error(t, err)
+	assert.Contains(t, stdout.String(), "verification")
+	assert.Contains(t, stdout.String(), "verified")
+	assert.Contains(t, stdout.String(), "could not verify")
+	assert.Contains(t, stdout.String(), "owner/alpha/bar  1.0.0")
+	assert.Contains(t, stdout.String(), "owner/repo/foo  1.2.3  installed binary")
+	assert.Contains(t, stdout.String(), "summary")
+	assert.Equal(t, "\r\033[KRe-verifying installed packages\r\033[K", stderr.String())
+}
+
+func TestVerifyJSONKeepsStructuredOutputOnTTY(t *testing.T) {
+	t.Helper()
+
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--state-dir", stateDir, "verify", "foo", "--json")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"verifications":[`)
+	assert.Contains(t, stdout.String(), `"target":"owner/repo/foo"`)
+	assert.NotContains(t, stdout.String(), "verification\n")
+	assert.Empty(t, stderr.String())
+}
+
+func TestVerifyNonInteractiveKeepsPlainRowsOnTTY(t *testing.T) {
+	t.Helper()
+
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--non-interactive", "--state-dir", stateDir, "verify", "foo")
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/repo/foo 1.2.3 verified\n", stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+func TestDoctorTTYRendersGroupedResultsAndStaticStatus(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("GITHUB_TOKEN", "fail")
+	t.Setenv("GH_TOKEN", "")
+
+	indexDir := t.TempDir()
+	storeDir := t.TempDir()
+	stateDir := t.TempDir()
+	binDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "--store-dir", storeDir, "--state-dir", stateDir, "--bin-dir", binDir, "doctor")
+
+	require.Error(t, err)
+	assert.Contains(t, stdout.String(), "doctor")
+	assert.Contains(t, stdout.String(), "fail")
+	assert.Contains(t, stdout.String(), "warn")
+	assert.Contains(t, stdout.String(), "pass")
+	assert.Contains(t, stdout.String(), "github-api  GitHub API check failed: boom")
+	assert.Contains(t, stdout.String(), "summary")
+	assert.Equal(t, "\r\033[KChecking local environment readiness\r\033[K", stderr.String())
+}
+
+func TestDoctorJSONKeepsStructuredOutputOnTTY(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	indexDir := t.TempDir()
+	storeDir := t.TempDir()
+	stateDir := t.TempDir()
+	binDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "--store-dir", storeDir, "--state-dir", stateDir, "--bin-dir", binDir, "doctor", "--json")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"checks":[`)
+	assert.Contains(t, stdout.String(), `"id":"github-api"`)
+	assert.NotContains(t, stdout.String(), "\ndoctor\n")
+	assert.Empty(t, stderr.String())
+}
+
+func TestDoctorNonInteractiveKeepsPlainRowsOnTTY(t *testing.T) {
+	t.Helper()
+
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("GH_TOKEN", "")
+
+	indexDir := t.TempDir()
+	storeDir := t.TempDir()
+	stateDir := t.TempDir()
+	binDir := t.TempDir()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--non-interactive", "--index-dir", indexDir, "--store-dir", storeDir, "--state-dir", stateDir, "--bin-dir", binDir, "doctor")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "warn bin-dir-on-path")
+	assert.Contains(t, stdout.String(), "pass trusted-root")
+	assert.Empty(t, stderr.String())
+}
+
+func TestRepoListTTYRendersRepositoryViewAndStaticStatus(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "repo", "list")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "indexed repositories")
+	assert.Contains(t, stdout.String(), "owner/repo")
+	assert.Contains(t, stdout.String(), "Refreshed:")
+	assert.Contains(t, stdout.String(), "Foo CLI")
+	assert.Equal(t, "\r\033[KLoading indexed repositories\r\033[K", stderr.String())
+}
+
+func TestRepoListJSONKeepsStructuredOutputOnTTY(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "repo", "list", "--json")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"repositories":[`)
+	assert.Contains(t, stdout.String(), `"repository":"owner/repo"`)
+	assert.NotContains(t, stdout.String(), "indexed repositories")
+	assert.Empty(t, stderr.String())
+}
+
+func TestRepoAddTTYShowsSummary(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo")
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "\r\033[K")
+	assert.Contains(t, stderr.String(), "indexed owner/repo")
+	assert.Contains(t, stderr.String(), "Packages:")
+	assert.Contains(t, stderr.String(), "Commands:")
+}
+
+func TestRepoAddNonInteractiveKeepsPlainSummaryOnTTY(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--non-interactive", "--index-dir", indexDir, "repo", "add", "owner/repo")
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "indexed owner/repo\n", stderr.String())
+}
+
+func TestRepoRefreshTTYShowsSummary(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/binary"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "repo", "refresh", "--all")
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "\r\033[K")
+	assert.Contains(t, stderr.String(), "refreshed 2 repositories")
+	assert.Contains(t, stderr.String(), "owner/repo")
+	assert.Contains(t, stderr.String(), "owner/binary")
+}
+
+func TestRepoRemoveTTYShowsSummary(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "repo", "remove", "owner/repo")
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "\r\033[K")
+	assert.Contains(t, stderr.String(), "removed owner/repo")
+	assert.Contains(t, stderr.String(), "Installed packages from this repository, if any, were not changed.")
+}
+
 func runTestCommand() int {
 	vp := viper.New()
 	root := NewRootCommand(Options{

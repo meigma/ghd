@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,8 +16,19 @@ func newVerifyCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "verify [name|owner/repo/package|--all]",
 		Short: "Re-verify active installed packages",
-		Args:  cobra.MaximumNArgs(1),
+		Example: strings.TrimSpace(`
+ghd verify package --state-dir ./state
+ghd verify --all --state-dir ./state
+ghd verify package --state-dir ./state --json
+`),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectReadOnlyPresentationMode(options, jsonOutput)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 			if all && len(args) > 0 {
 				return fmt.Errorf("verify accepts a target or --all, not both")
 			}
@@ -36,17 +48,31 @@ func newVerifyCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				if all || target == "" {
+					status.Show("Re-verifying installed packages")
+				} else {
+					status.Show(fmt.Sprintf("Re-verifying %s", terminalSafeText(target)))
+				}
+			}
 			results, err := runtime.VerifyInstalled(cmd.Context(), app.VerifyInstalledRequest{
 				Target:   target,
 				All:      all,
 				StateDir: cfg.StateDir,
 			})
+			if status != nil {
+				status.Clear()
+			}
 			if jsonOutput {
 				if writeErr := writeVerifyResultsJSON(options, results); writeErr != nil {
 					return writeErr
 				}
 			} else {
-				writeVerifyResults(options, results)
+				if mode.richOutput {
+					writeVerifyResultsTTY(options.Out, results, mode.color)
+				} else {
+					writeVerifyResults(options, results)
+				}
 			}
 			if err != nil {
 				return err
