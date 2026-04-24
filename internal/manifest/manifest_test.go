@@ -35,6 +35,14 @@ func TestPackageResolvesDefaultAndExplicitTagPatterns(t *testing.T) {
 	assert.Equal(t, "v1.2.3", string(tag))
 }
 
+func TestPackageEffectiveTagPatternUsesSchemaDefault(t *testing.T) {
+	pkg := Package{Name: "foo"}
+	assert.Equal(t, "v${version}", pkg.EffectiveTagPattern())
+
+	pkg.TagPattern = "foo-v${version}"
+	assert.Equal(t, "foo-v${version}", pkg.EffectiveTagPattern())
+}
+
 func TestPackageSelectsPlatformAsset(t *testing.T) {
 	cfg, err := Decode([]byte(validConfig()))
 	require.NoError(t, err)

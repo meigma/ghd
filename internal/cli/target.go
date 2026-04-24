@@ -14,6 +14,12 @@ type packageVersionTarget struct {
 	qualified   bool
 }
 
+type packageInfoTarget struct {
+	repository      verification.Repository
+	packageName     string
+	unqualifiedName string
+}
+
 func parsePackageVersionTarget(command string, value string) (packageVersionTarget, error) {
 	value = strings.TrimSpace(value)
 	targetPart, version, found := strings.Cut(value, "@")
@@ -73,7 +79,11 @@ func parseInstallTarget(value string) (packageVersionTarget, error) {
 }
 
 func parseRepositoryTarget(value string) (verification.Repository, error) {
-	parts := strings.Split(strings.TrimSpace(value), "/")
+	value = strings.TrimSpace(value)
+	if strings.Contains(value, "@") {
+		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
+	}
+	parts := strings.Split(value, "/")
 	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
 		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
 	}
@@ -110,6 +120,55 @@ func parseVerifyTarget(value string) (string, error) {
 		return "", fmt.Errorf("verify target must be name or owner/repo/package")
 	}
 	return target, nil
+}
+
+func parseListTarget(value string) (verification.Repository, error) {
+	repository, err := parseRepositoryTarget(value)
+	if err != nil {
+		return verification.Repository{}, fmt.Errorf("list target must be owner/repo")
+	}
+	return repository, nil
+}
+
+func parseInfoTarget(value string) (packageInfoTarget, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+	}
+	if strings.Contains(value, "@") {
+		return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+	}
+	parts := strings.Split(value, "/")
+	switch len(parts) {
+	case 1:
+		if strings.TrimSpace(parts[0]) == "" {
+			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+		}
+		return packageInfoTarget{unqualifiedName: parts[0]}, nil
+	case 2:
+		if parts[0] == "" || parts[1] == "" {
+			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+		}
+		return packageInfoTarget{
+			repository: verification.Repository{
+				Owner: parts[0],
+				Name:  parts[1],
+			},
+		}, nil
+	case 3:
+		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
+			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+		}
+		return packageInfoTarget{
+			repository: verification.Repository{
+				Owner: parts[0],
+				Name:  parts[1],
+			},
+			packageName: parts[2],
+		}, nil
+	default:
+		return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+	}
 }
 
 func parseNamedOrQualifiedTarget(value string) (string, error) {

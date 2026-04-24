@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pelletier/go-toml/v2"
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/spf13/viper"
 
@@ -54,76 +55,59 @@ func runTestCommand() int {
 type testRuntime struct{}
 
 func (testRuntime) AddRepository(ctx context.Context, request app.RepositoryAddRequest) (catalog.RepositoryRecord, error) {
-	record, err := testRepositoryRecord(request.Repository)
+	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return catalog.RepositoryRecord{}, err
 	}
-	store := filesystem.NewCatalogStore()
-	if _, err := store.UpsertRepository(ctx, request.IndexDir, record); err != nil {
-		return catalog.RepositoryRecord{}, err
-	}
-	return record, nil
+	return subject.AddRepository(ctx, request)
 }
 
 func (testRuntime) ListRepositories(ctx context.Context, indexDir string) ([]catalog.RepositoryRecord, error) {
-	store := filesystem.NewCatalogStore()
-	index, err := store.LoadCatalog(ctx, indexDir)
+	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return nil, err
 	}
-	return index.Normalize().Repositories, nil
+	return subject.ListRepositories(ctx, indexDir)
 }
 
 func (testRuntime) RemoveRepository(ctx context.Context, request app.RepositoryRemoveRequest) error {
-	store := filesystem.NewCatalogStore()
-	_, err := store.RemoveRepository(ctx, request.IndexDir, request.Repository)
-	return err
+	subject, err := newTestRepositoryCatalog()
+	if err != nil {
+		return err
+	}
+	return subject.RemoveRepository(ctx, request)
 }
 
 func (testRuntime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error) {
-	store := filesystem.NewCatalogStore()
-	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return nil, err
 	}
-	if !request.Repository.IsZero() {
-		if _, ok := index.Repository(request.Repository); !ok {
-			return nil, fmt.Errorf("repository %s is not indexed", request.Repository)
-		}
-		record, err := testRepositoryRecord(request.Repository)
-		if err != nil {
-			return nil, err
-		}
-		if _, err := store.UpsertRepository(ctx, request.IndexDir, record); err != nil {
-			return nil, err
-		}
-		return []catalog.RepositoryRecord{record}, nil
-	}
-	refreshed := make([]catalog.RepositoryRecord, 0, len(index.Repositories))
-	for _, existing := range index.Normalize().Repositories {
-		record, err := testRepositoryRecord(existing.Repository)
-		if err != nil {
-			return nil, err
-		}
-		refreshed = append(refreshed, record)
-	}
-	if _, err := store.UpsertRepositories(ctx, request.IndexDir, refreshed); err != nil {
-		return nil, err
-	}
-	return refreshed, nil
+	return subject.RefreshRepositories(ctx, request)
 }
 
 func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error) {
-	store := filesystem.NewCatalogStore()
-	index, err := store.LoadCatalog(ctx, request.IndexDir)
+	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return app.ResolvePackageResult{}, err
 	}
-	resolved, err := index.ResolvePackage(request.PackageName)
+	return subject.ResolvePackage(ctx, request)
+}
+
+func (testRuntime) ListPackages(ctx context.Context, request app.PackageListRequest) ([]app.PackageListResult, error) {
+	subject, err := newTestRepositoryCatalog()
 	if err != nil {
-		return app.ResolvePackageResult{}, err
+		return nil, err
 	}
-	return app.ResolvePackageResult{Repository: resolved.Repository, PackageName: resolved.PackageName}, nil
+	return subject.ListPackages(ctx, request)
+}
+
+func (testRuntime) InfoPackage(ctx context.Context, request app.PackageInfoRequest) (app.PackageInfoResult, error) {
+	subject, err := newTestRepositoryCatalog()
+	if err != nil {
+		return app.PackageInfoResult{}, err
+	}
+	return subject.InfoPackage(ctx, request)
 }
 
 func (testRuntime) CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error) {
@@ -409,22 +393,91 @@ func (testRuntime) Doctor(ctx context.Context, request app.DoctorRequest) ([]app
 	return subject.Doctor(ctx, request)
 }
 
-func testRepositoryRecord(repository verification.Repository) (catalog.RepositoryRecord, error) {
-	packageName := "foo"
-	binaryPath := "bin/foo"
-	if repository.Name == "binary" {
-		packageName = "bar"
-		binaryPath = "bin/foo"
+func newTestRepositoryCatalog() (*app.RepositoryCatalog, error) {
+	return app.NewRepositoryCatalog(app.RepositoryCatalogDependencies{
+		Manifests: testRuntimeManifestSource{},
+		Store:     filesystem.NewCatalogStore(),
+		Now:       func() time.Time { return time.Unix(1700000000, 0) },
+	})
+}
+
+type testRuntimeManifestSource struct{}
+
+func (testRuntimeManifestSource) FetchManifest(_ context.Context, repository verification.Repository) ([]byte, error) {
+	cfg, err := testManifestConfig(repository)
+	if err != nil {
+		return nil, err
 	}
-	return catalog.NewRepositoryRecord(repository, manifest.Config{
-		Version: manifest.SchemaVersion,
-		Provenance: manifest.Provenance{
-			SignerWorkflow: repository.String() + "/.github/workflows/release.yml",
-		},
-		Packages: []manifest.Package{
-			{Name: packageName, Description: "Foo CLI", Binaries: []manifest.Binary{{Path: binaryPath}}},
-		},
-	}, time.Unix(1700000000, 0))
+	return toml.Marshal(cfg)
+}
+
+func testManifestConfig(repository verification.Repository) (manifest.Config, error) {
+	switch repository.Name {
+	case "binary":
+		return manifest.Config{
+			Version: manifest.SchemaVersion,
+			Provenance: manifest.Provenance{
+				SignerWorkflow: repository.String() + "/.github/workflows/release.yml",
+			},
+			Packages: []manifest.Package{
+				{
+					Name:        "bar",
+					Description: "Bar CLI",
+					Assets: []manifest.Asset{
+						{OS: "darwin", Arch: "arm64", Pattern: "bar_${version}_darwin_arm64.tar.gz"},
+						{OS: "linux", Arch: "amd64", Pattern: "bar_${version}_linux_amd64.tar.gz"},
+					},
+					Binaries: []manifest.Binary{{Path: "bin/foo"}},
+				},
+			},
+		}, nil
+	case "multi":
+		return manifest.Config{
+			Version: manifest.SchemaVersion,
+			Provenance: manifest.Provenance{
+				SignerWorkflow: repository.String() + "/.github/workflows/release.yml",
+			},
+			Packages: []manifest.Package{
+				{
+					Name:        "foo",
+					Description: "Foo CLI",
+					Assets: []manifest.Asset{
+						{OS: "darwin", Arch: "arm64", Pattern: "foo_${version}_darwin_arm64.tar.gz"},
+						{OS: "linux", Arch: "amd64", Pattern: "foo_${version}_linux_amd64.tar.gz"},
+					},
+					Binaries: []manifest.Binary{{Path: "bin/foo"}},
+				},
+				{
+					Name:        "bar",
+					Description: "Bar CLI",
+					TagPattern:  "bar-v${version}",
+					Assets: []manifest.Asset{
+						{OS: "darwin", Arch: "arm64", Pattern: "bar_${version}_darwin_arm64.tar.gz"},
+						{OS: "linux", Arch: "amd64", Pattern: "bar_${version}_linux_amd64.tar.gz"},
+					},
+					Binaries: []manifest.Binary{{Path: "bin/bar"}},
+				},
+			},
+		}, nil
+	default:
+		return manifest.Config{
+			Version: manifest.SchemaVersion,
+			Provenance: manifest.Provenance{
+				SignerWorkflow: repository.String() + "/.github/workflows/release.yml",
+			},
+			Packages: []manifest.Package{
+				{
+					Name:        "foo",
+					Description: "Foo CLI",
+					Assets: []manifest.Asset{
+						{OS: "darwin", Arch: "arm64", Pattern: "foo_${version}_darwin_arm64.tar.gz"},
+						{OS: "linux", Arch: "amd64", Pattern: "foo_${version}_linux_amd64.tar.gz"},
+					},
+					Binaries: []manifest.Binary{{Path: "bin/foo"}},
+				},
+			},
+		}, nil
+	}
 }
 
 type testReleaseVerifier struct{}

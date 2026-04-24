@@ -1,0 +1,38 @@
+# Unqualified info resolves through the local index, then fetches live package details.
+exec ghd --index-dir index repo add owner/repo
+exec ghd --index-dir index info foo
+stdout 'repository owner/repo'
+stdout 'package foo'
+stdout 'signer-workflow owner/repo/\.github/workflows/release\.yml'
+stdout 'tag-pattern v\$\{version\}'
+stdout 'binaries foo'
+stdout 'asset darwin/arm64 foo_\$\{version\}_darwin_arm64\.tar\.gz'
+stdout 'asset linux/amd64 foo_\$\{version\}_linux_amd64\.tar\.gz'
+! stderr .
+
+# Repo-only info requires qualification for multi-package manifests.
+! exec ghd info owner/multi
+stderr 'repository owner/multi declares multiple packages; use owner/multi/package'
+
+# Qualified info prints explicit package details.
+exec ghd info owner/multi/bar
+stdout 'repository owner/multi'
+stdout 'package bar'
+stdout 'signer-workflow owner/multi/\.github/workflows/release\.yml'
+stdout 'tag-pattern bar-v\$\{version\}'
+stdout 'binaries bar'
+stdout 'asset darwin/arm64 bar_\$\{version\}_darwin_arm64\.tar\.gz'
+stdout 'asset linux/amd64 bar_\$\{version\}_linux_amd64\.tar\.gz'
+! stderr .
+
+# Version-suffixed discovery targets are rejected at parse time.
+! exec ghd info foo@1.2.3
+stderr 'info target must be name, owner/repo, or owner/repo/package'
+! exec ghd info owner/multi/bar@1.2.3
+stderr 'info target must be name, owner/repo, or owner/repo/package'
+
+# Help is scriptable and quiet on stderr.
+exec ghd info --help
+stdout 'Usage:'
+stdout 'info name\|owner/repo\|owner/repo/package'
+! stderr .

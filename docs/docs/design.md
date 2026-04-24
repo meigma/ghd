@@ -8,9 +8,9 @@ description: Initial product and security design for GitHub Downloader.
 Status: initial design. This document describes the first coherent shape of the
 project, not a frozen architecture.
 
-Prototype status: `download`, `install`, repository indexing, installed-state,
-`check`, `verify`, `doctor`, `update`, and `uninstall` now exist as working
-slices. Package discovery remains future work.
+Prototype status: `list`, `info`, `download`, `install`, repository indexing,
+installed-state, `check`, `verify`, `doctor`, `update`, and `uninstall` now
+exist as working slices.
 
 GitHub Downloader (`ghd`) is a CLI for securely installing binaries from GitHub
 releases. It is intentionally opinionated: a compatible repository must publish
@@ -213,6 +213,8 @@ Behavior notes:
 - `list` without a repository reads the local index.
 - `list owner/repo` fetches and displays that repository's packages without
   adding it.
+- `info owner/repo` selects the only declared package when the repository has
+  exactly one package; otherwise the user must qualify `owner/repo/package`.
 - `install owner/repo/foo` can be a one-off install without adding the
   repository to the index.
 - `check` is read-only and reports available updates for installed packages.
@@ -436,9 +438,9 @@ The first vertical slice should prove the complete path for one real repository:
 7. Link it into the managed bin directory.
 8. Record `verification.json`.
 
-After the verified install, indexing, installed-state, uninstall, and read-only
-check slices work, the next slices should add clearer collision UX and package
-discovery commands.
+After the verified install, indexing, installed-state, uninstall, read-only
+check, and package-discovery slices work, the next slices should add clearer
+collision UX and broader lifecycle flows.
 
 ## Open Questions
 

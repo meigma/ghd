@@ -180,16 +180,22 @@ func (p Package) Validate() error {
 	return nil
 }
 
+// EffectiveTagPattern returns the explicit tag pattern or the schema default.
+func (p Package) EffectiveTagPattern() string {
+	pattern := strings.TrimSpace(p.TagPattern)
+	if pattern == "" {
+		return defaultTagPattern
+	}
+	return pattern
+}
+
 // ReleaseTag expands the package tag pattern for version.
 func (p Package) ReleaseTag(version string) (verification.ReleaseTag, error) {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		return "", fmt.Errorf("version must be set")
 	}
-	pattern := strings.TrimSpace(p.TagPattern)
-	if pattern == "" {
-		pattern = defaultTagPattern
-	}
+	pattern := p.EffectiveTagPattern()
 	tag := expandVersion(pattern, version)
 	if tag == "" {
 		return "", fmt.Errorf("release tag pattern for package %q resolved to an empty tag", p.Name)
