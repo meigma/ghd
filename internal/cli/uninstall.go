@@ -1,7 +1,7 @@
 package cli
 
 import (
-	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -19,8 +19,21 @@ func newUninstallCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "uninstall name|owner/repo/package",
 		Short: "Uninstall one active package",
-		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
+ghd --non-interactive uninstall owner/repo/package --state-dir ./state --store-dir ./store --bin-dir ./bin
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectUninstallPresentationMode(options)
+			var status *statusLine
+			var progress app.UninstallProgressFunc
+			if mode.statusLine {
+				status = newStatusLine(options.Err, mode.color)
+				defer status.Clear()
+				progress = status.UpdateUninstallProgress
+			}
+
 			target, err := parseUninstallTarget(args[0])
 			if err != nil {
 				return err
@@ -35,11 +48,15 @@ func newUninstallCommand(options Options) *cobra.Command {
 				StoreDir: cfg.StoreDir,
 				BinDir:   cfg.BinDir,
 				StateDir: cfg.StateDir,
+				Progress: progress,
 			})
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(options.Err, "uninstalled %s/%s@%s\n", terminalSafeText(result.Repository), terminalSafeText(result.Package), terminalSafeText(result.Version))
+			if status != nil {
+				status.Clear()
+			}
+			writeUninstallSummary(options.Err, result, mode.enhanced, mode.color)
 			return nil
 		},
 	}

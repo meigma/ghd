@@ -70,6 +70,35 @@ type DownloadProgress struct {
 // DownloadProgressFunc receives byte-level artifact download progress.
 type DownloadProgressFunc func(DownloadProgress)
 
+// VerifiedDownloadProgressStage identifies one user-visible download step.
+type VerifiedDownloadProgressStage string
+
+const (
+	// VerifiedDownloadProgressResolvingManifest means ghd is resolving package metadata.
+	VerifiedDownloadProgressResolvingManifest VerifiedDownloadProgressStage = "resolving-manifest"
+	// VerifiedDownloadProgressResolvingAsset means ghd is selecting the concrete release asset.
+	VerifiedDownloadProgressResolvingAsset VerifiedDownloadProgressStage = "resolving-asset"
+	// VerifiedDownloadProgressDownloading means ghd is downloading the selected asset.
+	VerifiedDownloadProgressDownloading VerifiedDownloadProgressStage = "downloading"
+	// VerifiedDownloadProgressVerifying means ghd is verifying the downloaded asset.
+	VerifiedDownloadProgressVerifying VerifiedDownloadProgressStage = "verifying"
+	// VerifiedDownloadProgressWritingEvidence means ghd is writing verification evidence.
+	VerifiedDownloadProgressWritingEvidence VerifiedDownloadProgressStage = "writing-evidence"
+)
+
+// VerifiedDownloadProgress describes user-visible verified download progress.
+type VerifiedDownloadProgress struct {
+	// Stage identifies the current lifecycle step.
+	Stage VerifiedDownloadProgressStage
+	// Message is a short user-facing description of the current step.
+	Message string
+	// Download carries byte-level download progress when Stage is downloading.
+	Download *DownloadProgress
+}
+
+// VerifiedDownloadProgressFunc receives user-visible verified download progress.
+type VerifiedDownloadProgressFunc func(VerifiedDownloadProgress)
+
 // DownloadReleaseAssetRequest describes one artifact download.
 type DownloadReleaseAssetRequest struct {
 	// Asset is the concrete GitHub release asset to download.
@@ -118,6 +147,8 @@ type VerifiedDownloadRequest struct {
 	OutputDir string
 	// Platform optionally overrides the current OS/architecture.
 	Platform manifest.Platform
+	// Progress receives user-visible verified download progress. Nil disables progress reports.
+	Progress VerifiedDownloadProgressFunc
 }
 
 // VerifiedDownloadResult describes a completed verified download.
@@ -235,6 +266,7 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	}
 	platform := request.Platform.WithDefaults()
 
+	request.report(VerifiedDownloadProgressResolvingManifest, "Resolving package manifest")
 	manifestBytes, err := d.manifests.FetchManifest(ctx, request.Repository)
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("fetch ghd.toml: %w", err)
@@ -259,6 +291,7 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
+	request.report(VerifiedDownloadProgressResolvingAsset, "Resolving release asset")
 	releaseAsset, err := d.assets.ResolveReleaseAsset(ctx, request.Repository, tag, selected.Name)
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("resolve release asset %q: %w", selected.Name, err)
@@ -269,13 +302,20 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	}
 	defer cleanup()
 
-	artifactPath, err := d.download.DownloadReleaseAsset(ctx, DownloadReleaseAssetRequest{
+	downloadRequest := DownloadReleaseAssetRequest{
 		Asset:     releaseAsset,
 		OutputDir: downloadDir,
-	})
+	}
+	if request.Progress != nil {
+		downloadRequest.Progress = func(progress DownloadProgress) {
+			request.reportDownload(progress)
+		}
+	}
+	artifactPath, err := d.download.DownloadReleaseAsset(ctx, downloadRequest)
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
 	}
+	request.report(VerifiedDownloadProgressVerifying, "Verifying release artifact")
 	evidence, err := d.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: request.Repository,
 		Tag:        tag,
@@ -301,6 +341,7 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 		Asset:         selected.Name,
 		Evidence:      evidence,
 	}
+	request.report(VerifiedDownloadProgressWritingEvidence, "Writing verification evidence")
 	evidencePath, err := d.evidence.WriteVerificationEvidence(ctx, request.OutputDir, record)
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("write verification evidence: %w", err)
@@ -335,6 +376,28 @@ func (r VerifiedDownloadRequest) validate() error {
 		return fmt.Errorf("output directory must be set")
 	}
 	return nil
+}
+
+func (r VerifiedDownloadRequest) report(stage VerifiedDownloadProgressStage, message string) {
+	if r.Progress == nil {
+		return
+	}
+	r.Progress(VerifiedDownloadProgress{
+		Stage:   stage,
+		Message: message,
+	})
+}
+
+func (r VerifiedDownloadRequest) reportDownload(progress DownloadProgress) {
+	if r.Progress == nil {
+		return
+	}
+	copied := progress
+	r.Progress(VerifiedDownloadProgress{
+		Stage:    VerifiedDownloadProgressDownloading,
+		Message:  "Downloading release asset",
+		Download: &copied,
+	})
 }
 
 func fetchPackageManifestForVersionAtTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, version string, tag verification.ReleaseTag) (manifest.Config, manifest.Package, error) {

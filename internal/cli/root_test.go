@@ -99,6 +99,57 @@ func TestUpdateWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
 	}
 }
 
+func TestDownloadNonInteractiveKeepsPlainOutput(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	outputDir := t.TempDir()
+	root := NewRootCommand(Options{
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+	})
+	root.SetArgs([]string{"--non-interactive", "download", "owner/repo/foo@1.2.3", "--output", outputDir})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "verified owner/repo/foo@1.2.3\n", stderr.String())
+	assert.Equal(t, fmt.Sprintf("artifact %s\nverification %s\n", filepath.Join(outputDir, "artifact.tar.gz"), filepath.Join(outputDir, "verification.json")), stdout.String())
+}
+
+func TestDownloadInteractiveWritesSummaryToStderrOnly(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	outputDir := t.TempDir()
+	root := NewRootCommand(Options{
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+		StderrTTY:    boolPtr(true),
+		ColorEnabled: boolPtr(false),
+	})
+	root.SetArgs([]string{"download", "owner/repo/foo@1.2.3", "--output", outputDir})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "\r\033[K")
+	assert.Contains(t, stderr.String(), "verified owner/repo/foo@1.2.3")
+	assert.Contains(t, stderr.String(), "artifact.tar.gz")
+	assert.Contains(t, stderr.String(), "verification.json")
+}
+
 func TestInstallYesNonInteractiveKeepsPlainOutput(t *testing.T) {
 	t.Helper()
 
@@ -455,6 +506,69 @@ func TestUpdateApprovalDeclineDoesNotMutateState(t *testing.T) {
 	assert.Empty(t, stderr.String())
 	record := requireInstalledRecord(t, stateDir, "owner/repo", "foo")
 	assert.Equal(t, "1.2.3", record.Version)
+}
+
+func TestUninstallNonInteractiveKeepsPlainStderr(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--non-interactive", "--state-dir", stateDir, "uninstall", "foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Equal(t, "uninstalled owner/repo/foo@1.2.3\n", stderr.String())
+}
+
+func TestUninstallInteractiveWritesSummaryToStderrOnly(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--state-dir", stateDir, "uninstall", "foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.NoError(t, err)
+	assert.Empty(t, stdout.String())
+	assert.Contains(t, stderr.String(), "\r\033[K")
+	assert.Contains(t, stderr.String(), "uninstalled owner/repo/foo@1.2.3")
+	assert.Contains(t, stderr.String(), filepath.Join(binDir, "foo"))
+	assert.Contains(t, stderr.String(), "verification.json")
 }
 
 func TestListTTYRendersGroupedViewAndStaticStatus(t *testing.T) {
@@ -1021,6 +1135,18 @@ func (testRuntime) Uninstall(ctx context.Context, request app.UninstallRequest) 
 func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
 	artifactPath := filepath.Join(request.OutputDir, "artifact.tar.gz")
 	evidencePath := filepath.Join(request.OutputDir, "verification.json")
+	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
+	if err != nil {
+		return app.VerifiedDownloadResult{}, err
+	}
+	if request.Progress != nil {
+		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressResolvingManifest, Message: "Resolving package manifest"})
+		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressResolvingAsset, Message: "Resolving release asset"})
+		progress := app.DownloadProgress{AssetName: "artifact.tar.gz", BytesDownloaded: 512, TotalBytes: 1024}
+		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressDownloading, Message: "Downloading release asset", Download: &progress})
+		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressVerifying, Message: "Verifying release artifact"})
+		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressWritingEvidence, Message: "Writing verification evidence"})
+	}
 	if err := os.MkdirAll(request.OutputDir, 0o755); err != nil {
 		return app.VerifiedDownloadResult{}, err
 	}
@@ -1034,8 +1160,15 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 		Repository:   request.Repository,
 		PackageName:  request.PackageName,
 		Version:      request.Version,
+		Tag:          verification.ReleaseTag("v" + request.Version),
+		AssetName:    "artifact.tar.gz",
 		ArtifactPath: artifactPath,
 		EvidencePath: evidencePath,
+		Evidence: verification.Evidence{
+			Repository:  request.Repository,
+			Tag:         verification.ReleaseTag("v" + request.Version),
+			AssetDigest: digest,
+		},
 	}, nil
 }
 

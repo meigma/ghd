@@ -15,8 +15,21 @@ func newDownloadCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "download owner/repo/package@version --output DIR",
 		Short: "Download and verify one GitHub release asset",
-		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+ghd download owner/repo/package@version --output ./out
+ghd --non-interactive download owner/repo/package@version --output ./out
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectDownloadPresentationMode(options)
+			var status *statusLine
+			var progress app.VerifiedDownloadProgressFunc
+			if mode.statusLine {
+				status = newStatusLine(options.Err, mode.color)
+				defer status.Clear()
+				progress = status.UpdateDownloadProgress
+			}
+
 			target, err := parsePackageVersionTarget("download", args[0])
 			if err != nil {
 				return err
@@ -36,14 +49,20 @@ func newDownloadCommand(options Options) *cobra.Command {
 				PackageName: target.packageName,
 				Version:     target.version,
 				OutputDir:   outputDir,
+				Progress:    progress,
 			})
 			if err != nil {
 				return err
 			}
 
-			fmt.Fprintf(options.Err, "verified %s/%s@%s\n", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName), terminalSafeText(result.Version))
-			fmt.Fprintf(options.Out, "artifact %s\n", terminalSafeText(result.ArtifactPath))
-			fmt.Fprintf(options.Out, "verification %s\n", terminalSafeText(result.EvidencePath))
+			if status != nil {
+				status.Clear()
+			}
+			writeDownloadSummary(options.Err, result, mode.enhanced, mode.color, cfg.TrustedRootPath)
+			if !mode.enhanced {
+				fmt.Fprintf(options.Out, "artifact %s\n", terminalSafeText(result.ArtifactPath))
+				fmt.Fprintf(options.Out, "verification %s\n", terminalSafeText(result.EvidencePath))
+			}
 			return nil
 		},
 	}

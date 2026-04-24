@@ -36,6 +36,29 @@ type PackageUninstaller struct {
 	files UninstallFileSystem
 }
 
+// UninstallProgressStage identifies one user-visible uninstall step.
+type UninstallProgressStage string
+
+const (
+	// UninstallProgressLoadingState means ghd is loading installed package state.
+	UninstallProgressLoadingState UninstallProgressStage = "loading-state"
+	// UninstallProgressRemovingManaged means ghd is removing managed binaries and store data.
+	UninstallProgressRemovingManaged UninstallProgressStage = "removing-managed"
+	// UninstallProgressRemovingState means ghd is updating installed package state.
+	UninstallProgressRemovingState UninstallProgressStage = "removing-state"
+)
+
+// UninstallProgress describes user-visible uninstall progress.
+type UninstallProgress struct {
+	// Stage identifies the current lifecycle step.
+	Stage UninstallProgressStage
+	// Message is a short user-facing description of the current step.
+	Message string
+}
+
+// UninstallProgressFunc receives user-visible uninstall progress.
+type UninstallProgressFunc func(UninstallProgress)
+
 // UninstallRequest describes one uninstall request.
 type UninstallRequest struct {
 	// Target is a package name, binary name, or owner/repo/package.
@@ -46,6 +69,8 @@ type UninstallRequest struct {
 	BinDir string
 	// StateDir stores active installed package state.
 	StateDir string
+	// Progress receives user-visible uninstall progress. Nil disables progress reports.
+	Progress UninstallProgressFunc
 }
 
 // NewPackageUninstaller creates an uninstall use case.
@@ -64,6 +89,7 @@ func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallReq
 	if err := request.validate(); err != nil {
 		return state.Record{}, err
 	}
+	request.report(UninstallProgressLoadingState, "Loading installed packages")
 	index, err := u.state.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
 		return state.Record{}, err
@@ -72,6 +98,7 @@ func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallReq
 	if err != nil {
 		return state.Record{}, err
 	}
+	request.report(UninstallProgressRemovingManaged, "Removing managed files")
 	if err := u.files.RemoveManagedInstall(ctx, RemoveManagedInstallRequest{
 		StoreRoot: request.StoreDir,
 		BinRoot:   request.BinDir,
@@ -80,6 +107,7 @@ func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallReq
 	}); err != nil {
 		return state.Record{}, err
 	}
+	request.report(UninstallProgressRemovingState, "Updating installed state")
 	if _, err := u.state.RemoveInstalledRecord(ctx, request.StateDir, record.Repository, record.Package); err != nil {
 		return state.Record{}, err
 	}
@@ -112,4 +140,14 @@ func installedBinaries(binaries []state.Binary) []InstalledBinary {
 		})
 	}
 	return records
+}
+
+func (r UninstallRequest) report(stage UninstallProgressStage, message string) {
+	if r.Progress == nil {
+		return
+	}
+	r.Progress(UninstallProgress{
+		Stage:   stage,
+		Message: message,
+	})
 }
