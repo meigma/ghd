@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -86,6 +87,81 @@ func TestDecodeRejectsUnsafeBinaryPaths(t *testing.T) {
 
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "binary path")
+		})
+	}
+}
+
+func TestDecodeRejectsVersionPatternsWithoutExactlyOneToken(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			name: "static tag pattern",
+			data: strings.Replace(validConfig(), `tag_pattern = "foo-v${version}"`, `tag_pattern = "foo-v1.2.3"`, 1),
+			want: "tag pattern",
+		},
+		{
+			name: "duplicate tag pattern token",
+			data: strings.Replace(validConfig(), `tag_pattern = "foo-v${version}"`, `tag_pattern = "foo-${version}-${version}"`, 1),
+			want: "tag pattern",
+		},
+		{
+			name: "static asset pattern",
+			data: strings.Replace(validConfig(), `pattern = "foo_${version}_darwin_arm64.tar.gz"`, `pattern = "foo_1.2.3_darwin_arm64.tar.gz"`, 1),
+			want: "asset pattern",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Decode([]byte(tt.data))
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Contains(t, err.Error(), "exactly one")
+		})
+	}
+}
+
+func TestDecodeRejectsControlCharactersInStructuralFields(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want string
+	}{
+		{
+			name: "signer workflow",
+			data: strings.Replace(validConfig(), `signer_workflow = "owner/repo/.github/workflows/release.yml"`, `signer_workflow = "owner/repo/.github/workflows/release.yml\n"`, 1),
+			want: "provenance.signer_workflow",
+		},
+		{
+			name: "tag pattern",
+			data: strings.Replace(validConfig(), `tag_pattern = "foo-v${version}"`, `tag_pattern = "foo-v${version}\n"`, 1),
+			want: "tag pattern",
+		},
+		{
+			name: "asset pattern",
+			data: strings.Replace(validConfig(), `pattern = "foo_${version}_darwin_arm64.tar.gz"`, `pattern = "foo_${version}_darwin_arm64.tar.gz\n"`, 1),
+			want: "pattern",
+		},
+		{
+			name: "binary path",
+			data: strings.Replace(validConfig(), `path = "bin/foo"`, `path = "bin/foo\n"`, 1),
+			want: "binary path",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Decode([]byte(tt.data))
+
+			require.Error(t, err)
+			assert.Contains(t, err.Error(), tt.want)
+			assert.Contains(t, err.Error(), "control")
 		})
 	}
 }

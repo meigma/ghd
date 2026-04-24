@@ -41,7 +41,7 @@ func installedRecord(repository string, packageName string) state.Record {
 		Repository:       repository,
 		Package:          packageName,
 		Version:          "1.2.3",
-		Tag:              "v1.2.3",
+		Tag:              packageName + "-v1.2.3",
 		Asset:            packageName + "_1.2.3_darwin_arm64.tar.gz",
 		AssetDigest:      "sha256:abc123",
 		StorePath:        "/store/foo",

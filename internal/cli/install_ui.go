@@ -137,7 +137,8 @@ func installApprovalSummary(approval app.InstallApproval) string {
 	return formatRows([]uiRow{
 		{"From", approval.Repository.String()},
 		{"To", installApprovalDestination(approval)},
-		{"Verified", "GitHub release + SLSA provenance"},
+		{"Verified", trustRootVerificationLabel(approval.TrustRootPath)},
+		{"Trust root", approval.TrustRootPath},
 	}, 9)
 }
 
@@ -166,6 +167,7 @@ func installApprovalDescription(approval app.InstallApproval) string {
 		{"Release", approval.ReleasePredicateType},
 		{"Provenance", approval.ProvenancePredicateType},
 		{"Signer", string(approval.SignerWorkflow)},
+		{"Trust root", approval.TrustRootPath},
 		{"Bin dir", approval.BinDir},
 		{"Binaries", strings.Join(approval.Binaries, ", ")},
 	}, 10)
@@ -175,7 +177,7 @@ func renderInstallDownloadProgress(progress app.DownloadProgress, frame string, 
 	assetName := strings.TrimSpace(progress.AssetName)
 	message := "Downloading"
 	if assetName != "" {
-		message = "Downloading " + assetName
+		message = "Downloading " + terminalSafeText(assetName)
 	}
 	downloaded := max(progress.BytesDownloaded, 0)
 	if progress.TotalBytes <= 0 {
@@ -198,21 +200,34 @@ func renderInstallDownloadProgress(progress app.DownloadProgress, frame string, 
 
 func writeInstallSummary(w io.Writer, result app.VerifiedInstallResult, enhanced bool, color bool) {
 	if !enhanced {
-		fmt.Fprintf(w, "installed %s/%s@%s\n", result.Repository, result.PackageName, result.Version)
+		fmt.Fprintf(w, "installed %s/%s@%s\n", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName), terminalSafeText(result.Version))
+		if strings.TrimSpace(result.TrustRootPath) != "" {
+			fmt.Fprintf(w, "trust-root %s\n", terminalSafeText(result.TrustRootPath))
+		}
 		return
 	}
 	styles := newUIStyles(color)
-	fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("installed %s/%s@%s", result.Repository, result.PackageName, result.Version)))
+	fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("installed %s/%s@%s", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName), terminalSafeText(result.Version))))
 	if result.AssetName != "" {
-		fmt.Fprintf(w, "%s %s\n", styles.label.Render("asset"), result.AssetName)
+		fmt.Fprintf(w, "%s %s\n", styles.label.Render("asset"), terminalSafeText(result.AssetName))
 	}
 	if result.Evidence.AssetDigest.String() != "" {
 		fmt.Fprintf(w, "%s %s\n", styles.label.Render("digest"), result.Evidence.AssetDigest.String())
 	}
+	if strings.TrimSpace(result.TrustRootPath) != "" {
+		fmt.Fprintf(w, "%s %s\n", styles.label.Render("trust root"), terminalSafeText(result.TrustRootPath))
+	}
 	if len(result.Binaries) > 0 {
 		fmt.Fprintf(w, "%s\n", styles.label.Render("binaries"))
 		for _, binary := range result.Binaries {
-			fmt.Fprintf(w, "  %s\n", binary.LinkPath)
+			fmt.Fprintf(w, "  %s\n", terminalSafeText(binary.LinkPath))
 		}
 	}
+}
+
+func trustRootVerificationLabel(path string) string {
+	if strings.TrimSpace(path) == "" {
+		return "GitHub release + SLSA provenance"
+	}
+	return "custom Sigstore trust root + SLSA provenance"
 }

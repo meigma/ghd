@@ -341,6 +341,36 @@ func TestInstallerReplaceManagedBinariesRestoresPreviousLinksWhenNewLinksFail(t 
 	assert.Equal(t, "existing", string(data))
 }
 
+func TestInstallerReplaceManagedBinariesRejectsNewLinksOutsideBinRoot(t *testing.T) {
+	installer := NewInstaller()
+	binDir := t.TempDir()
+	oldTarget := filepath.Join(t.TempDir(), "old")
+	newTarget := filepath.Join(t.TempDir(), "new")
+	require.NoError(t, os.WriteFile(oldTarget, []byte("old"), 0o755))
+	require.NoError(t, os.WriteFile(newTarget, []byte("new"), 0o755))
+	linkPath := filepath.Join(binDir, "foo")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	require.NoError(t, os.Symlink(oldTarget, linkPath))
+	outsideLink := filepath.Join(t.TempDir(), "foo")
+
+	err := installer.ReplaceManagedBinaries(context.Background(), app.ReplaceManagedBinariesRequest{
+		BinDir: binDir,
+		Previous: []app.InstalledBinary{
+			{Name: "foo", LinkPath: linkPath, TargetPath: oldTarget},
+		},
+		Next: []app.InstalledBinary{
+			{Name: "foo", LinkPath: outsideLink, TargetPath: newTarget},
+		},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "not under bin root")
+	gotTarget, readErr := os.Readlink(linkPath)
+	require.NoError(t, readErr)
+	assert.Equal(t, oldTarget, gotTarget)
+	assert.NoFileExists(t, outsideLink)
+}
+
 func TestInstallerRemoveManagedInstallRemovesOnlyExpectedBinaryLinksAndStore(t *testing.T) {
 	installer := NewInstaller()
 	storeRoot := t.TempDir()

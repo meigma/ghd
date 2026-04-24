@@ -30,6 +30,21 @@ func TestInstallApprovalSummaryHighlightsCriticalDetails(t *testing.T) {
 	assert.NotContains(t, summary, "Predicate")
 }
 
+func TestInstallApprovalSummaryDisclosesCustomTrustRoot(t *testing.T) {
+	approval := app.InstallApproval{
+		Repository:    verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName:   "foo",
+		Version:       "1.2.3",
+		TrustRootPath: "/tmp/trusted_root.json",
+	}
+
+	summary := installApprovalSummary(approval)
+
+	assert.Contains(t, summary, "custom Sigstore trust root + SLSA provenance")
+	assert.Contains(t, summary, "Trust root:")
+	assert.Contains(t, summary, "/tmp/trusted_root.json")
+}
+
 func TestInstallApprovalDetailsIncludeProvenanceFacts(t *testing.T) {
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
 	assert.NoError(t, err)

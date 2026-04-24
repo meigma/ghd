@@ -48,12 +48,12 @@ func newInfoCommand(options Options) *cobra.Command {
 }
 
 func writePackageInfo(options Options, result app.PackageInfoResult) {
-	fmt.Fprintf(options.Out, "repository %s\n", result.Repository)
-	fmt.Fprintf(options.Out, "package %s\n", result.PackageName)
-	fmt.Fprintf(options.Out, "signer-workflow %s\n", result.SignerWorkflow)
-	fmt.Fprintf(options.Out, "tag-pattern %s\n", result.TagPattern)
-	fmt.Fprintf(options.Out, "binaries %s\n", strings.Join(result.Binaries, ","))
+	fmt.Fprintf(options.Out, "repository %s\n", terminalSafeText(result.Repository.String()))
+	fmt.Fprintf(options.Out, "package %s\n", terminalSafeText(result.PackageName))
+	fmt.Fprintf(options.Out, "signer-workflow %s\n", terminalSafeText(string(result.SignerWorkflow)))
+	fmt.Fprintf(options.Out, "tag-pattern %s\n", terminalSafeText(result.TagPattern))
+	fmt.Fprintf(options.Out, "binaries %s\n", strings.Join(terminalSafeStrings(result.Binaries), ","))
 	for _, asset := range result.Assets {
-		fmt.Fprintf(options.Out, "asset %s/%s %s\n", asset.OS, asset.Arch, asset.Pattern)
+		fmt.Fprintf(options.Out, "asset %s/%s %s\n", terminalSafeText(asset.OS), terminalSafeText(asset.Arch), terminalSafeText(asset.Pattern))
 	}
 }

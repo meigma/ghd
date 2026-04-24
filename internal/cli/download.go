@@ -25,7 +25,9 @@ func newDownloadCommand(options Options) *cobra.Command {
 				return fmt.Errorf("--output must be set")
 			}
 
-			downloader, err := options.RuntimeFactory(cmd.Context(), config.Load(options.Viper))
+			cfg := config.Load(options.Viper)
+			writeTrustedRootNotice(options.Err, cfg.TrustedRootPath)
+			downloader, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
@@ -39,9 +41,9 @@ func newDownloadCommand(options Options) *cobra.Command {
 				return err
 			}
 
-			fmt.Fprintf(options.Err, "verified %s/%s@%s\n", result.Repository, result.PackageName, result.Version)
-			fmt.Fprintf(options.Out, "artifact %s\n", result.ArtifactPath)
-			fmt.Fprintf(options.Out, "verification %s\n", result.EvidencePath)
+			fmt.Fprintf(options.Err, "verified %s/%s@%s\n", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName), terminalSafeText(result.Version))
+			fmt.Fprintf(options.Out, "artifact %s\n", terminalSafeText(result.ArtifactPath))
+			fmt.Fprintf(options.Out, "verification %s\n", terminalSafeText(result.EvidencePath))
 			return nil
 		},
 	}

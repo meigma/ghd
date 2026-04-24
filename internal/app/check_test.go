@@ -250,8 +250,10 @@ func newInstalledPackageCheckerTestContext(t *testing.T) *installedPackageChecke
 }
 
 type fakeManifestRouter struct {
-	data map[string][]byte
-	err  map[string]error
+	data    map[string][]byte
+	refData map[string][]byte
+	err     map[string]error
+	refErr  map[string]error
 }
 
 func (f *fakeManifestRouter) FetchManifest(_ context.Context, repository verification.Repository) ([]byte, error) {
@@ -262,6 +264,21 @@ func (f *fakeManifestRouter) FetchManifest(_ context.Context, repository verific
 		return data, nil
 	}
 	return nil, errors.New("manifest not found")
+}
+
+func (f *fakeManifestRouter) FetchManifestAtRef(_ context.Context, repository verification.Repository, ref string) ([]byte, error) {
+	key := manifestRefKey(repository.String(), ref)
+	if err, ok := f.refErr[key]; ok {
+		return nil, err
+	}
+	if data, ok := f.refData[key]; ok {
+		return data, nil
+	}
+	return f.FetchManifest(context.Background(), repository)
+}
+
+func manifestRefKey(repository string, ref string) string {
+	return repository + "@" + ref
 }
 
 type fakeRepositoryReleaseSource struct {

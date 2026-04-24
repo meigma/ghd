@@ -158,7 +158,8 @@ func updateApprovalSummary(approval app.UpdateApproval) string {
 		{"From", approval.Repository.String()},
 		{"Version", updateVersionChange(approval)},
 		{"To", updateApprovalDestination(approval)},
-		{"Verified", "GitHub release + SLSA provenance"},
+		{"Verified", trustRootVerificationLabel(approval.TrustRootPath)},
+		{"Trust root", approval.TrustRootPath},
 	}, 9)
 }
 
@@ -188,29 +189,37 @@ func updateApprovalDescription(approval app.UpdateApproval) string {
 		{"Release", approval.ReleasePredicateType},
 		{"Provenance", approval.ProvenancePredicateType},
 		{"Signer", string(approval.SignerWorkflow)},
+		{"Trust root", approval.TrustRootPath},
 		{"Bin dir", approval.BinDir},
 		{"Binaries", strings.Join(approval.Binaries, ", ")},
 	}, 10)
 }
 
-func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanced bool, color bool) {
+func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanced bool, color bool, trustRootPath string) {
+	if !enhanced && strings.TrimSpace(trustRootPath) != "" {
+		fmt.Fprintf(w, "trust-root %s\n", terminalSafeText(trustRootPath))
+		return
+	}
 	if !enhanced || len(results) == 0 {
 		return
 	}
 	styles := newUIStyles(color)
 	if len(results) == 1 {
 		result := results[0]
-		target := packageTarget(result.Repository, result.Package)
+		target := terminalSafeText(packageTarget(result.Repository, result.Package))
 		switch result.Status {
 		case app.UpdateStatusUpdated, app.UpdateStatusUpdatedWithWarning:
-			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("updated %s %s -> %s", target, result.PreviousVersion, result.CurrentVersion)))
+			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("updated %s %s -> %s", target, terminalSafeText(result.PreviousVersion), terminalSafeText(result.CurrentVersion))))
 		case app.UpdateStatusAlreadyUpToDate:
 			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("%s already up to date", target)))
 		default:
 			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("could not update %s", target)))
 		}
 		if result.Reason != "" {
-			fmt.Fprintf(w, "%s %s\n", styles.label.Render("reason"), result.Reason)
+			fmt.Fprintf(w, "%s %s\n", styles.label.Render("reason"), terminalSafeText(result.Reason))
+		}
+		if strings.TrimSpace(trustRootPath) != "" {
+			fmt.Fprintf(w, "%s %s\n", styles.label.Render("trust root"), terminalSafeText(trustRootPath))
 		}
 		return
 	}
@@ -237,6 +246,7 @@ func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanc
 		{"Current", fmt.Sprint(current)},
 		{"Warnings", fmt.Sprint(warned)},
 		{"Failed", fmt.Sprint(failed)},
+		{"Trust root", trustRootPath},
 	}, 9))
 	fmt.Fprintln(w)
 }

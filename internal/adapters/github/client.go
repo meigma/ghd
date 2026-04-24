@@ -161,7 +161,24 @@ func (c *Client) ResolveReleaseTag(ctx context.Context, repository verification.
 
 // FetchManifest returns the root ghd.toml for repository.
 func (c *Client) FetchManifest(ctx context.Context, repository verification.Repository) ([]byte, error) {
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, rawPath(fmt.Sprintf("repos/%s/%s/contents/ghd.toml", repository.Owner, repository.Name)), nil)
+	return c.fetchManifest(ctx, repository, "")
+}
+
+// FetchManifestAtRef returns the root ghd.toml for repository at ref.
+func (c *Client) FetchManifestAtRef(ctx context.Context, repository verification.Repository, ref string) ([]byte, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return nil, fmt.Errorf("manifest ref must be set")
+	}
+	return c.fetchManifest(ctx, repository, ref)
+}
+
+func (c *Client) fetchManifest(ctx context.Context, repository verification.Repository, ref string) ([]byte, error) {
+	query := url.Values{}
+	if ref != "" {
+		query.Set("ref", ref)
+	}
+	req, err := c.newGitHubRequest(ctx, http.MethodGet, rawPath(fmt.Sprintf("repos/%s/%s/contents/ghd.toml", repository.Owner, repository.Name)), query)
 	if err != nil {
 		return nil, err
 	}

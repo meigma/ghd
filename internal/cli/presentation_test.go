@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +15,22 @@ func TestFormatRowsSkipsEmptyValuesAndAlignsLabels(t *testing.T) {
 	}, 9)
 
 	assert.Equal(t, "From:     owner/repo\nVerified: GitHub release + SLSA provenance", got)
+}
+
+func TestFormatRowsEscapesTerminalControlCharacters(t *testing.T) {
+	got := formatRows([]uiRow{
+		{label: "Asset", value: "foo\n\x1b[31mbar"},
+	}, 6)
+
+	assert.Equal(t, `Asset: foo\n\x1b[31mbar`, got)
+}
+
+func TestWriteTrustedRootNoticeEscapesPath(t *testing.T) {
+	var buf bytes.Buffer
+
+	writeTrustedRootNotice(&buf, "/tmp/root\ntrusted.json")
+
+	assert.Equal(t, "using custom Sigstore trust root /tmp/root\\ntrusted.json\n", buf.String())
 }
 
 func TestRenderProgressBarClampsRatio(t *testing.T) {

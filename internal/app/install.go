@@ -146,6 +146,8 @@ type InstallApproval struct {
 	ProvenancePredicateType string
 	// SignerWorkflow is the accepted provenance signer workflow.
 	SignerWorkflow verification.WorkflowIdentity
+	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
+	TrustRootPath string
 	// BinDir receives exposed binary links if the install proceeds.
 	BinDir string
 	// Binaries are the binary names that will be exposed if the install proceeds.
@@ -169,6 +171,8 @@ type VerifiedInstallRequest struct {
 	BinDir string
 	// StateDir stores active installed package state.
 	StateDir string
+	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
+	TrustRootPath string
 	// Platform optionally overrides the current OS/architecture.
 	Platform manifest.Platform
 	// Progress receives user-visible install progress. Nil disables progress reports.
@@ -203,6 +207,8 @@ type VerifiedInstallResult struct {
 	Binaries []InstalledBinary
 	// Evidence is the accepted release and provenance verification evidence.
 	Evidence verification.Evidence
+	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
+	TrustRootPath string
 }
 
 // ArchiveExtractionRequest describes one archive extraction.
@@ -374,16 +380,20 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, fmt.Errorf("fetch ghd.toml: %w", err)
 	}
-	cfg, err := manifest.Decode(manifestBytes)
+	discoveryCfg, err := manifest.Decode(manifestBytes)
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
 	request.report(InstallProgressResolvingPackage, "Resolving package and platform asset")
-	pkg, err := cfg.Package(request.PackageName)
+	discoveryPkg, err := discoveryCfg.Package(request.PackageName)
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
-	tag, err := pkg.ReleaseTag(request.Version)
+	tag, err := discoveryPkg.ReleaseTag(request.Version)
+	if err != nil {
+		return VerifiedInstallResult{}, err
+	}
+	cfg, pkg, err := fetchPackageManifestForVersionAtTag(ctx, i.manifests, request.Repository, request.PackageName, request.Version, tag)
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
@@ -448,6 +458,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
 		ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
 		SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
+		TrustRootPath:           request.TrustRootPath,
 		BinDir:                  request.BinDir,
 		Binaries:                manifestBinaryNames(pkg.Binaries),
 	}); err != nil {
@@ -575,6 +586,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		MetadataPath:  metadataPath,
 		Binaries:      links,
 		Evidence:      evidence,
+		TrustRootPath: request.TrustRootPath,
 	}, nil
 }
 

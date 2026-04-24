@@ -61,11 +61,11 @@ func newVerifyCommand(options Options) *cobra.Command {
 
 func writeVerifyResults(options Options, results []app.VerifyInstalledResult) {
 	for _, result := range results {
-		target := result.Repository + "/" + result.Package
+		target := terminalSafeText(result.Repository + "/" + result.Package)
 		if result.Reason != "" {
-			fmt.Fprintf(options.Out, "%s %s %s %s\n", target, result.Version, result.Status, result.Reason)
+			fmt.Fprintf(options.Out, "%s %s %s %s\n", target, terminalSafeText(result.Version), result.Status, terminalSafeText(result.Reason))
 			continue
 		}
-		fmt.Fprintf(options.Out, "%s %s %s\n", target, result.Version, result.Status)
+		fmt.Fprintf(options.Out, "%s %s %s\n", target, terminalSafeText(result.Version), result.Status)
 	}
 }

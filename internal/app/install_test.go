@@ -195,6 +195,32 @@ func TestVerifiedInstallerApprovalReceivesVerifiedFacts(t *testing.T) {
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
 }
 
+func TestVerifiedInstallerUsesReleaseManifestForAssetBinariesAndSigner(t *testing.T) {
+	tc := newInstallTestContext(t)
+	evidence := givenSuccessfulInstallFixture(t, tc)
+	tc.manifests.data = []byte(maliciousDiscoveryManifest())
+	tc.manifests.refData = map[string][]byte{
+		"foo-v1.2.3": []byte(testManifest()),
+	}
+
+	result, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", result.AssetName)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.assets.assetName)
+	assert.Equal(t, []manifest.Binary{{Path: "bin/foo"}}, tc.archives.request.Binaries)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+	assert.Equal(t, evidence.AssetDigest, result.Evidence.AssetDigest)
+}
+
 func TestVerifiedInstallerDoesNotMutateWhenApprovalDeclines(t *testing.T) {
 	tc := newInstallTestContext(t)
 	givenSuccessfulInstallFixture(t, tc)
@@ -538,10 +564,11 @@ func givenSuccessfulInstallFixture(t *testing.T, tc *installTestContext) verific
 }
 
 type eventEvidenceWriter struct {
-	events *[]string
-	path   string
-	record *VerificationRecord
-	err    error
+	events  *[]string
+	path    string
+	record  *VerificationRecord
+	records map[string]VerificationRecord
+	err     error
 }
 
 func (f *eventEvidenceWriter) WriteVerificationEvidence(_ context.Context, _ string, record VerificationRecord) (string, error) {
@@ -551,6 +578,40 @@ func (f *eventEvidenceWriter) WriteVerificationEvidence(_ context.Context, _ str
 	}
 	f.record = &record
 	return f.path, nil
+}
+
+func (f *eventEvidenceWriter) ReadVerificationRecord(_ context.Context, path string) (VerificationRecord, error) {
+	if record, ok := f.records[path]; ok {
+		return record, nil
+	}
+	return VerificationRecord{}, errors.New("verification record not found")
+}
+
+func (f *eventEvidenceWriter) StoreInstalledRecords(t *testing.T, records ...state.Record) {
+	t.Helper()
+	if f.records == nil {
+		f.records = map[string]VerificationRecord{}
+	}
+	for _, record := range records {
+		repository, err := parseRecordRepository(record.Repository)
+		require.NoError(t, err)
+		f.records[record.VerificationPath] = VerificationRecord{
+			SchemaVersion: 1,
+			Repository:    record.Repository,
+			Package:       record.Package,
+			Version:       record.Version,
+			Tag:           record.Tag,
+			Asset:         record.Asset,
+			Evidence: verification.Evidence{
+				Repository:  repository,
+				Tag:         verification.ReleaseTag(record.Tag),
+				AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
+				ProvenanceAttestation: verification.AttestationEvidence{
+					SignerWorkflow: verification.WorkflowIdentity(record.Repository + "/.github/workflows/release.yml"),
+				},
+			},
+		}
+	}
 }
 
 type fakeArchiveExtractor struct {

@@ -13,6 +13,8 @@ import (
 type ManifestSource interface {
 	// FetchManifest returns the raw root ghd.toml for repository.
 	FetchManifest(ctx context.Context, repository verification.Repository) ([]byte, error)
+	// FetchManifestAtRef returns the raw root ghd.toml for repository at ref.
+	FetchManifestAtRef(ctx context.Context, repository verification.Repository, ref string) ([]byte, error)
 }
 
 // ReleaseAssetSource resolves release assets.
@@ -222,15 +224,19 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("fetch ghd.toml: %w", err)
 	}
-	cfg, err := manifest.Decode(manifestBytes)
+	discoveryCfg, err := manifest.Decode(manifestBytes)
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
-	pkg, err := cfg.Package(request.PackageName)
+	discoveryPkg, err := discoveryCfg.Package(request.PackageName)
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
-	tag, err := pkg.ReleaseTag(request.Version)
+	tag, err := discoveryPkg.ReleaseTag(request.Version)
+	if err != nil {
+		return VerifiedDownloadResult{}, err
+	}
+	cfg, pkg, err := fetchPackageManifestForVersionAtTag(ctx, d.manifests, request.Repository, request.PackageName, request.Version, tag)
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
@@ -304,4 +310,27 @@ func (r VerifiedDownloadRequest) validate() error {
 		return fmt.Errorf("output directory must be set")
 	}
 	return nil
+}
+
+func fetchPackageManifestForVersionAtTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, version string, tag verification.ReleaseTag) (manifest.Config, manifest.Package, error) {
+	manifestBytes, err := manifests.FetchManifestAtRef(ctx, repository, string(tag))
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, fmt.Errorf("fetch ghd.toml at %s: %w", tag, err)
+	}
+	cfg, err := manifest.Decode(manifestBytes)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, err
+	}
+	pkg, err := cfg.Package(packageName)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, err
+	}
+	resolvedTag, err := pkg.ReleaseTag(version)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, err
+	}
+	if resolvedTag != tag {
+		return manifest.Config{}, manifest.Package{}, fmt.Errorf("ghd.toml at %s maps %s@%s to %s", tag, packageName, version, resolvedTag)
+	}
+	return cfg, pkg, nil
 }

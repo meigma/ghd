@@ -79,6 +79,35 @@ func TestVerifiedDownloaderDoesNotWriteEvidenceWhenVerificationFails(t *testing.
 	assert.Nil(t, tc.writer.record)
 }
 
+func TestVerifiedDownloaderUsesReleaseManifestForTrustPolicy(t *testing.T) {
+	tc := newDownloadTestContext(t)
+	tc.manifests.data = []byte(maliciousDiscoveryManifest())
+	tc.manifests.refData = map[string][]byte{
+		"foo-v1.2.3": []byte(testManifest()),
+	}
+	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
+	tc.verifier.evidence = verification.Evidence{
+		Repository:       verification.Repository{Owner: "owner", Name: "repo"},
+		Tag:              "foo-v1.2.3",
+		AssetDigest:      mustDigest(t, "sha256", repeatHex("aa", 32)),
+		ReleaseTagDigest: mustDigest(t, "sha1", repeatHex("bb", 20)),
+	}
+
+	_, err := tc.subject.Download(context.Background(), VerifiedDownloadRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		OutputDir:   t.TempDir(),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.ReleaseTag("foo-v1.2.3"), tc.assets.tag)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.assets.assetName)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+}
+
 func TestVerifiedDownloaderReportsMissingPackageAndAsset(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -154,20 +183,36 @@ func newDownloadTestContext(t *testing.T) *downloadTestContext {
 }
 
 type fakeManifestSource struct {
-	data []byte
-	err  error
+	data    []byte
+	refData map[string][]byte
+	err     error
+	refErr  map[string]error
 }
 
 func (f *fakeManifestSource) FetchManifest(context.Context, verification.Repository) ([]byte, error) {
 	return f.data, f.err
 }
 
-type fakeReleaseAssetSource struct {
-	asset ReleaseAsset
-	err   error
+func (f *fakeManifestSource) FetchManifestAtRef(_ context.Context, _ verification.Repository, ref string) ([]byte, error) {
+	if err, ok := f.refErr[ref]; ok {
+		return nil, err
+	}
+	if data, ok := f.refData[ref]; ok {
+		return data, nil
+	}
+	return f.data, f.err
 }
 
-func (f *fakeReleaseAssetSource) ResolveReleaseAsset(context.Context, verification.Repository, verification.ReleaseTag, string) (ReleaseAsset, error) {
+type fakeReleaseAssetSource struct {
+	asset     ReleaseAsset
+	tag       verification.ReleaseTag
+	assetName string
+	err       error
+}
+
+func (f *fakeReleaseAssetSource) ResolveReleaseAsset(_ context.Context, _ verification.Repository, tag verification.ReleaseTag, assetName string) (ReleaseAsset, error) {
+	f.tag = tag
+	f.assetName = assetName
 	return f.asset, f.err
 }
 
@@ -240,6 +285,27 @@ pattern = "foo_${version}_darwin_arm64.tar.gz"
 
 [[packages.binaries]]
 path = "bin/foo"
+`
+}
+
+func maliciousDiscoveryManifest() string {
+	return `
+version = 1
+
+[provenance]
+signer_workflow = "owner/repo/.github/workflows/evil.yml"
+
+[[packages]]
+name = "foo"
+tag_pattern = "foo-v${version}"
+
+[[packages.assets]]
+os = "darwin"
+arch = "arm64"
+pattern = "evil_${version}_darwin_arm64.tar.gz"
+
+[[packages.binaries]]
+path = "bin/evil"
 `
 }
 

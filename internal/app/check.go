@@ -256,6 +256,103 @@ func latestStableVersion(pkg manifest.Package, installedAsset manifest.Asset, re
 	return bestVersion, nil
 }
 
+func latestStablePackageUpdate(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, installedAsset manifest.Asset, releases []RepositoryRelease, installedVersion string) (resolvedInstalledPackageUpdate, error) {
+	var best resolvedInstalledPackageUpdate
+	bestSemver := ""
+	for _, release := range releases {
+		if err := ctx.Err(); err != nil {
+			return resolvedInstalledPackageUpdate{}, err
+		}
+		if release.Draft || release.Prerelease || strings.TrimSpace(release.TagName) == "" {
+			continue
+		}
+		tag := verification.ReleaseTag(release.TagName)
+		cfg, pkg, version, err := fetchPackageManifestForReleaseTag(ctx, manifests, repository, packageName, tag)
+		if err != nil {
+			continue
+		}
+		releaseVersion, err := normalizeStableSemver(version)
+		if err != nil {
+			continue
+		}
+		if semver.Compare(releaseVersion, installedVersion) <= 0 {
+			continue
+		}
+		candidateAsset, err := assetForPlatform(pkg, manifest.Platform{OS: installedAsset.OS, Arch: installedAsset.Arch})
+		if err != nil {
+			continue
+		}
+		candidateAssetName, err := candidateAsset.ResolveName(version)
+		if err != nil {
+			continue
+		}
+		if !release.hasAsset(candidateAssetName) {
+			continue
+		}
+		if bestSemver == "" || semver.Compare(releaseVersion, bestSemver) > 0 {
+			bestSemver = releaseVersion
+			best = resolvedInstalledPackageUpdate{
+				Repository:     repository,
+				Config:         cfg,
+				Package:        pkg,
+				InstalledAsset: installedAsset,
+				CandidateAsset: candidateAsset,
+				LatestVersion:  version,
+				Tag:            tag,
+			}
+		}
+	}
+	return best, nil
+}
+
+func fetchPackageManifestForReleaseTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, tag verification.ReleaseTag) (manifest.Config, manifest.Package, string, error) {
+	manifestBytes, err := manifests.FetchManifestAtRef(ctx, repository, string(tag))
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("fetch ghd.toml at %s: %w", tag, err)
+	}
+	cfg, err := manifest.Decode(manifestBytes)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, "", err
+	}
+	pkg, err := cfg.Package(packageName)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, "", err
+	}
+	version, matched, err := pkg.VersionForTag(tag)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, "", err
+	}
+	if !matched {
+		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("ghd.toml at %s does not declare %s for that release tag", tag, packageName)
+	}
+	resolvedTag, err := pkg.ReleaseTag(version)
+	if err != nil {
+		return manifest.Config{}, manifest.Package{}, "", err
+	}
+	if resolvedTag != tag {
+		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("ghd.toml at %s maps %s@%s to %s", tag, packageName, version, resolvedTag)
+	}
+	return cfg, pkg, version, nil
+}
+
+func assetForPlatform(pkg manifest.Package, platform manifest.Platform) (manifest.Asset, error) {
+	platform = platform.WithDefaults()
+	matches := make([]manifest.Asset, 0, 1)
+	for _, asset := range pkg.Assets {
+		if strings.EqualFold(asset.OS, platform.OS) && strings.EqualFold(asset.Arch, platform.Arch) {
+			matches = append(matches, asset)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		return manifest.Asset{}, fmt.Errorf("package %q has no asset for %s/%s", pkg.Name, platform.OS, platform.Arch)
+	case 1:
+		return matches[0], nil
+	default:
+		return manifest.Asset{}, fmt.Errorf("package %q has multiple assets for %s/%s", pkg.Name, platform.OS, platform.Arch)
+	}
+}
+
 func installedAssetDeclaration(pkg manifest.Package, record state.Record) (manifest.Asset, error) {
 	matches := make([]manifest.Asset, 0, 1)
 	for _, asset := range pkg.Assets {

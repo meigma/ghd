@@ -337,6 +337,11 @@ func createManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 	if err != nil {
 		return nil, err
 	}
+	root, err := os.OpenRoot(binRoot)
+	if err != nil {
+		return nil, fmt.Errorf("open bin root: %w", err)
+	}
+	defer root.Close()
 	created := make([]app.InstalledBinary, 0, len(links))
 	cleanup := func() {
 		_ = removeManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, created)
@@ -346,11 +351,11 @@ func createManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 			cleanup()
 			return nil, err
 		}
-		if err := os.Symlink(link.binary.TargetPath, link.binary.LinkPath); err != nil {
+		if err := root.Symlink(link.binary.TargetPath, link.rel); err != nil {
 			if os.IsExist(err) && allowExistingExpected {
-				info, statErr := os.Lstat(link.binary.LinkPath)
+				info, statErr := root.Lstat(link.rel)
 				if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-					target, readErr := os.Readlink(link.binary.LinkPath)
+					target, readErr := root.Readlink(link.rel)
 					if readErr == nil && target == link.binary.TargetPath {
 						continue
 					}

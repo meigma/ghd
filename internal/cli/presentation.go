@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
@@ -160,14 +161,14 @@ func formatRows(rows []uiRow, labelWidth int) string {
 		if strings.TrimSpace(row.value) == "" {
 			continue
 		}
-		fmt.Fprintf(&b, "%-*s %s\n", labelWidth, row.label+":", row.value)
+		fmt.Fprintf(&b, "%-*s %s\n", labelWidth, row.label+":", terminalSafeText(row.value))
 	}
 	return strings.TrimRight(b.String(), "\n")
 }
 
 func escapeNoteDescription(value string) string {
 	var b strings.Builder
-	for _, char := range value {
+	for _, char := range terminalSafeText(value) {
 		switch char {
 		case '\\', '_', '*', '`':
 			b.WriteRune('\\')
@@ -175,6 +176,48 @@ func escapeNoteDescription(value string) string {
 		b.WriteRune(char)
 	}
 	return b.String()
+}
+
+func terminalSafeText(value string) string {
+	var b strings.Builder
+	for _, char := range value {
+		switch char {
+		case '\n':
+			b.WriteString(`\n`)
+		case '\r':
+			b.WriteString(`\r`)
+		case '\t':
+			b.WriteString(`\t`)
+		case '\x1b':
+			b.WriteString(`\x1b`)
+		default:
+			if unicode.IsControl(char) {
+				if char <= 0xff {
+					fmt.Fprintf(&b, "\\x%02x", char)
+					continue
+				}
+				fmt.Fprintf(&b, "\\u%04x", char)
+				continue
+			}
+			b.WriteRune(char)
+		}
+	}
+	return b.String()
+}
+
+func terminalSafeStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		out = append(out, terminalSafeText(value))
+	}
+	return out
+}
+
+func writeTrustedRootNotice(w io.Writer, path string) {
+	if strings.TrimSpace(path) == "" {
+		return
+	}
+	fmt.Fprintf(w, "using custom Sigstore trust root %s\n", terminalSafeText(path))
 }
 
 func renderProgressBar(ratio float64, width int, styles uiStyles) string {

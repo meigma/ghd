@@ -157,8 +157,10 @@ Configuration rules:
 - `packages.name` is the installable package name within the repository.
 - `tag_pattern` is optional if the package uses the repository's normal release
   tags, such as `v${version}`.
+- `tag_pattern` must contain exactly one `${version}` token.
 - `[[packages.assets]]` maps OS and architecture to a GitHub release asset name
   pattern.
+- Asset patterns must contain exactly one `${version}` token.
 - `[[packages.binaries]] path` is the relative path to an executable inside the
   verified asset or extracted archive.
 - The exposed command name is `basename(path)`.
@@ -167,6 +169,10 @@ Configuration rules:
 The config does not include the GitHub owner/repository because `ghd` fetches
 the config from the repository the user selected. It also does not include an
 `immutable_release` setting because immutable release validation is mandatory.
+For download, install, check, and update trust decisions, `ghd.toml` must be
+present at the selected release tag. The default-branch manifest may discover a
+candidate tag, but release-tag metadata defines signer workflow, asset names,
+and binary paths.
 
 ## User Commands
 
@@ -271,19 +277,21 @@ ownership transfer or shim behavior can be introduced later.
 
 For `ghd install owner/repo/foo@1.2.3`:
 
-1. Fetch or refresh `ghd.toml` from `owner/repo`.
+1. Fetch or refresh `ghd.toml` from `owner/repo` to discover the candidate tag.
 2. Resolve package `foo`.
 3. Resolve version `1.2.3` to the expected release tag using `tag_pattern`.
-4. Resolve the GitHub release and matching asset for the current OS and
+4. Fetch `ghd.toml` from the resolved release tag and require it to map
+   `foo@1.2.3` back to that exact tag.
+5. Resolve the GitHub release and matching asset for the current OS and
    architecture.
-5. Download the asset into a temporary, non-executable location.
-6. Verify the immutable GitHub release attestation for the tag and asset.
-7. Verify the GitHub artifact provenance attestation for the local asset bytes.
-8. Present verified facts and require approval unless `--yes` was supplied.
-9. Extract the archive if needed.
-10. Copy or link only the configured binary paths into the store.
-11. Expose binary links from the managed bin directory.
-12. Record installed package metadata and verification evidence.
+6. Download the asset into a temporary, non-executable location.
+7. Verify the immutable GitHub release attestation for the tag and asset.
+8. Verify the GitHub artifact provenance attestation for the local asset bytes.
+9. Present verified facts and require approval unless `--yes` was supplied.
+10. Extract the archive if needed.
+11. Copy or link only the configured binary paths into the store.
+12. Expose binary links from the managed bin directory.
+13. Record installed package metadata and verification evidence.
 
 The temporary download should not be executable. Installation should only expose
 the final verified binary after all verification steps succeed.
