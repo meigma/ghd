@@ -53,7 +53,8 @@ func newRepositoryAddCommand(options Options) *cobra.Command {
 }
 
 func newRepositoryListCommand(options Options) *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List indexed repositories",
 		Args:  cobra.NoArgs,
@@ -67,10 +68,15 @@ func newRepositoryListCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if jsonOutput {
+				return writeRepositoryListJSON(options, repositories)
+			}
 			writeRepositoryList(options, repositories)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write indexed repositories as JSON")
+	return cmd
 }
 
 func newRepositoryRemoveCommand(options Options) *cobra.Command {

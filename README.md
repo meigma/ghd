@@ -34,7 +34,8 @@ moon run docs:build
 The prototype command surface currently supports package discovery, direct
 verified downloads, repository indexing, one-off verified installs,
 installed-state management, read-only update checks, batch re-verification,
-environment diagnostics, and batch updates:
+environment diagnostics, batch updates, and JSON output for result-oriented
+discovery and lifecycle commands:
 
 ```sh
 go run ./cmd/ghd download owner/repo/package@version --output ./out
@@ -56,13 +57,17 @@ go run ./cmd/ghd update --state-dir ./state --store-dir ./store --bin-dir ./bin 
 go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
 ```
 
+Commands that return stable row-style results support `--json`: `list`, `info`,
+`installed`, `check`, `verify`, `update`, `doctor`, and `repo list`.
+
 Start with the design document for the intended full product shape:
 
 - [Initial Design](docs/docs/design.md)
 
 `check`, `verify`, and `doctor` are intentionally read-only in the current
 prototype. Binary ownership collisions are refused early; richer ownership
-transfer or shim UX remains future work.
+transfer, shim UX, and structured output for mutating status-only commands
+remain future work.
 
 ## Documentation
 

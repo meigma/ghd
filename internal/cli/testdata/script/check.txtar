@@ -3,6 +3,16 @@ exec ghd --state-dir check-state check
 stdout 'owner/current/foo 1\.2\.3 up-to-date'
 stdout 'owner/repo/foo 1\.2\.3 update-available 1\.3\.0'
 ! stderr .
+exec ghd --state-dir check-state check --json
+stdout '"checks":\['
+stdout '"repository":"owner/current"'
+stdout '"target":"owner/current/foo"'
+stdout '"status":"up-to-date"'
+stdout '"repository":"owner/repo"'
+stdout '"target":"owner/repo/foo"'
+stdout '"status":"update-available"'
+stdout '"latest_version":"1\.3\.0"'
+! stderr .
 
 # --all is an explicit alias for checking every installed package.
 exec ghd --state-dir check-state check --all
@@ -27,6 +37,13 @@ stderr 'check target must be name or owner/repo/package'
 # Aggregated failures still print results and return non-zero.
 ! exec ghd --state-dir broken-state check --all
 stdout 'owner/broken/foo 1\.2\.3 cannot-determine'
+stderr 'could not determine updates for 1 installed package'
+! exec ghd --state-dir broken-state check --all --json
+stdout '"checks":\['
+stdout '"repository":"owner/broken"'
+stdout '"target":"owner/broken/foo"'
+stdout '"status":"cannot-determine"'
+stdout '"reason":"fetch ghd\.toml: missing"'
 stderr 'could not determine updates for 1 installed package'
 
 # Help is scriptable and quiet on stderr.

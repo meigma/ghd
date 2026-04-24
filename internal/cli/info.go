@@ -11,6 +11,7 @@ import (
 )
 
 func newInfoCommand(options Options) *cobra.Command {
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "info name|owner/repo|owner/repo/package",
 		Short: "Show one package's discovery details",
@@ -35,10 +36,14 @@ func newInfoCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if jsonOutput {
+				return writePackageInfoJSON(options, result)
+			}
 			writePackageInfo(options, result)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write package details as JSON")
 	return cmd
 }
 

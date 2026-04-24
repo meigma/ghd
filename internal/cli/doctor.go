@@ -17,6 +17,7 @@ type doctorOptions struct {
 
 func newDoctorCommand(options Options) *cobra.Command {
 	var doctor doctorOptions
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check local environment readiness",
@@ -36,13 +37,20 @@ func newDoctorCommand(options Options) *cobra.Command {
 				BinDir:          cfg.BinDir,
 				PathEnv:         os.Getenv("PATH"),
 			})
-			writeDoctorResults(options, results)
+			if jsonOutput {
+				if writeErr := writeDoctorResultsJSON(options, results); writeErr != nil {
+					return writeErr
+				}
+			} else {
+				writeDoctorResults(options, results)
+			}
 			if err != nil {
 				return err
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write doctor checks as JSON")
 	cmd.Flags().StringVar(&doctor.storeDir, "store-dir", "", "managed store directory")
 	cmd.Flags().StringVar(&doctor.binDir, "bin-dir", "", "managed binary link directory")
 	return cmd

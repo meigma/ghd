@@ -16,6 +16,7 @@ type updateOptions struct {
 
 func newUpdateCommand(options Options) *cobra.Command {
 	var all bool
+	var jsonOutput bool
 	var update updateOptions
 	cmd := &cobra.Command{
 		Use:   "update [name|owner/repo/package|--all] --store-dir DIR --bin-dir DIR",
@@ -49,7 +50,13 @@ func newUpdateCommand(options Options) *cobra.Command {
 				BinDir:   cfg.BinDir,
 				StateDir: cfg.StateDir,
 			})
-			writeUpdateResults(options, results)
+			if jsonOutput {
+				if writeErr := writeUpdateResultsJSON(options, results); writeErr != nil {
+					return writeErr
+				}
+			} else {
+				writeUpdateResults(options, results)
+			}
 			if err != nil {
 				return err
 			}
@@ -57,6 +64,7 @@ func newUpdateCommand(options Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "update all installed packages")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write update results as JSON")
 	cmd.Flags().StringVar(&update.storeDir, "store-dir", "", "managed store directory")
 	cmd.Flags().StringVar(&update.binDir, "bin-dir", "", "managed binary link directory")
 	return cmd

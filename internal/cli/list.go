@@ -12,6 +12,7 @@ import (
 )
 
 func newListCommand(options Options) *cobra.Command {
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "list [owner/repo]",
 		Short: "List available packages",
@@ -38,10 +39,14 @@ func newListCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if jsonOutput {
+				return writePackageListJSON(options, results)
+			}
 			writePackageList(options, results)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write package list as JSON")
 	return cmd
 }
 
