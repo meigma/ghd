@@ -1,26 +1,53 @@
 # Successful verify re-checks the installed package.
 exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
-stderr 'installed owner/repo/foo@1.2.3'
+stderr 'installed owner/repo/foo@1\.2\.3'
 exec ghd --state-dir state verify foo
-stderr 'verified owner/repo/foo@1\.2\.3'
+stdout 'owner/repo/foo 1\.2\.3 verified'
+! stderr .
+
+# --all verifies every installed package in normalized order.
+exec ghd --state-dir state install owner/alpha/bar@1.0.0 --store-dir store --bin-dir bin
+stderr 'installed owner/alpha/bar@1\.0\.0'
+exec ghd --state-dir state verify --all
+stdout 'owner/alpha/bar 1\.0\.0 verified'
+stdout 'owner/repo/foo 1\.2\.3 verified'
+! stderr .
 
 # Executable-bit drift is detected.
 exec chmod 0644 store/github.com/owner/repo/foo/1.2.3/sha256-abc123/extracted/foo
 ! exec ghd --state-dir state verify foo
-stderr 'is not executable'
+stdout 'owner/repo/foo 1\.2\.3 cannot-verify .*is not executable'
+stderr 'could not verify 1 installed package'
 exec chmod 0755 store/github.com/owner/repo/foo/1.2.3/sha256-abc123/extracted/foo
+
+# Target and --all cannot be combined.
+! exec ghd verify foo --all
+stderr 'verify accepts a target or --all, not both'
+
+# Missing targets fail cleanly.
+! exec ghd verify
+stderr 'verify target must be set'
+
+# Missing targets fail before runtime setup.
+! exec ghd --trusted-root /tmp/ghd-missing-trusted-root verify
+stderr 'verify target must be set'
+! stderr 'trusted-root'
 
 # Malformed verify targets fail cleanly.
 ! exec ghd verify owner/repo
 stderr 'verify target must be name or owner/repo/package'
 
-# Installed binary drift is detected.
+# Installed binary drift is detected, and batch verify reports all rows before failing.
 cp tampered.txt store/github.com/owner/repo/foo/1.2.3/sha256-abc123/extracted/foo
-! exec ghd --state-dir state verify foo
-stderr 'installed binary "foo" does not match verified artifact'
+! exec ghd --state-dir state verify --all
+stdout 'owner/alpha/bar 1\.0\.0 verified'
+stdout 'owner/repo/foo 1\.2\.3 cannot-verify installed binary "foo" does not match verified artifact'
+stderr 'could not verify 1 installed package'
 
 exec ghd verify --help
-stdout 'verify name\|owner/repo/package'
+stdout 'verify \[name\|owner/repo/package\|--all\]'
+stdout '--all'
+! stderr .
 
 -- tampered.txt --
 tampered

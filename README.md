@@ -33,7 +33,7 @@ moon run docs:build
 
 The prototype command surface currently supports package discovery, direct
 verified downloads, repository indexing, one-off verified installs,
-installed-state management, read-only update checks, re-verification,
+installed-state management, read-only update checks, batch re-verification,
 environment diagnostics, and single-target updates:
 
 ```sh
@@ -49,6 +49,7 @@ go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state
 go run ./cmd/ghd installed --state-dir ./state
 go run ./cmd/ghd check --state-dir ./state --all
 go run ./cmd/ghd verify package --state-dir ./state
+go run ./cmd/ghd verify --state-dir ./state --all
 go run ./cmd/ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd update package --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
@@ -59,8 +60,7 @@ Start with the design document for the intended full product shape:
 - [Initial Design](docs/docs/design.md)
 
 `check`, `verify`, and `doctor` are intentionally read-only in the current
-prototype. Bulk lifecycle flows and richer collision ownership UX remain future
-work.
+prototype. `update --all` and richer collision ownership UX remain future work.
 
 ## Documentation
 

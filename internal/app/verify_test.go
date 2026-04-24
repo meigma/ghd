@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,61 +22,61 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 
-		record, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
 		require.NoError(t, err)
-		assert.Equal(t, tc.record.Repository, record.Repository)
-		assert.Equal(t, tc.record.Package, record.Package)
+		require.Len(t, results, 1)
+		assert.Equal(t, VerifyInstalledResult{
+			Repository: tc.record.Repository,
+			Package:    tc.record.Package,
+			Version:    tc.record.Version,
+			Status:     VerifyStatusVerified,
+		}, results[0])
 	})
 
 	t.Run("missing artifact", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.Remove(tc.record.ArtifactPath))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "missing artifact")
+		assertSingleVerifyFailure(t, results, err, "missing artifact")
 	})
 
 	t.Run("missing verification record", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.Remove(tc.record.VerificationPath))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "read verification record")
+		assertSingleVerifyFailure(t, results, err, "read verification record")
 	})
 
 	t.Run("malformed verification record", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.WriteFile(tc.record.VerificationPath, []byte("{\n"), 0o600))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "decode verification record")
+		assertSingleVerifyFailure(t, results, err, "decode verification record")
 	})
 
 	t.Run("artifact digest mismatch", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		tc.verifier.evidence.AssetDigest = mustTestDigest(t, "bb")
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "re-verified artifact digest")
+		assertSingleVerifyFailure(t, results, err, "re-verified artifact digest")
 	})
 
 	t.Run("broken link", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.Remove(tc.record.Binaries[0].LinkPath))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "inspect managed binary link")
+		assertSingleVerifyFailure(t, results, err, "inspect managed binary link")
 	})
 
 	t.Run("non-symlink link", func(t *testing.T) {
@@ -83,10 +84,9 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 		require.NoError(t, os.Remove(tc.record.Binaries[0].LinkPath))
 		require.NoError(t, os.WriteFile(tc.record.Binaries[0].LinkPath, []byte("not a symlink"), 0o644))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "is not a symlink")
+		assertSingleVerifyFailure(t, results, err, "is not a symlink")
 	})
 
 	t.Run("target outside extracted path", func(t *testing.T) {
@@ -98,30 +98,129 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 		tc.record.Binaries[0].TargetPath = outsidePath
 		tc.state.index = mustStateIndex(t, tc.record)
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "escapes extracted path")
+		assertSingleVerifyFailure(t, results, err, "escapes extracted path")
 	})
 
 	t.Run("binary drift", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.WriteFile(tc.record.Binaries[0].TargetPath, []byte("tampered"), 0o755))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
 
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "does not match verified artifact")
+		assertSingleVerifyFailure(t, results, err, "does not match verified artifact")
 	})
 
 	t.Run("executable bit drift", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.Chmod(tc.record.Binaries[0].TargetPath, 0o644))
 
-		_, err := tc.subject.Verify(context.Background(), tc.request)
+		results, err := tc.subject.Verify(context.Background(), tc.request)
+
+		assertSingleVerifyFailure(t, results, err, "is not executable")
+	})
+}
+
+func TestInstalledPackageVerifierVerifyAll(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		tc := newInstalledPackageVerifierTestContext(t)
+		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "alpha"}, "bar", "1.0.0")
+		tc.state.index = mustStateIndex(t, tc.record, second)
+
+		results, err := tc.subject.Verify(context.Background(), VerifyInstalledRequest{
+			All:      true,
+			StateDir: tc.request.StateDir,
+		})
+
+		require.NoError(t, err)
+		require.Len(t, results, 2)
+		assert.Equal(t, VerifyInstalledResult{
+			Repository: "owner/alpha",
+			Package:    "bar",
+			Version:    "1.0.0",
+			Status:     VerifyStatusVerified,
+		}, results[0])
+		assert.Equal(t, VerifyInstalledResult{
+			Repository: "owner/repo",
+			Package:    "foo",
+			Version:    "1.2.3",
+			Status:     VerifyStatusVerified,
+		}, results[1])
+	})
+
+	t.Run("mixed failure", func(t *testing.T) {
+		tc := newInstalledPackageVerifierTestContext(t)
+		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "alpha"}, "bar", "1.0.0")
+		tc.state.index = mustStateIndex(t, tc.record, second)
+		require.NoError(t, os.WriteFile(tc.record.Binaries[0].TargetPath, []byte("tampered"), 0o755))
+
+		results, err := tc.subject.Verify(context.Background(), VerifyInstalledRequest{
+			All:      true,
+			StateDir: tc.request.StateDir,
+		})
 
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "is not executable")
+		var incomplete VerifyIncompleteError
+		require.ErrorAs(t, err, &incomplete)
+		assert.Equal(t, 1, incomplete.Failed)
+		require.Len(t, results, 2)
+		assert.Equal(t, VerifyStatusVerified, results[0].Status)
+		assert.Equal(t, VerifyStatusCannotVerify, results[1].Status)
+		assert.Contains(t, results[1].Reason, "does not match verified artifact")
+	})
+}
+
+func TestInstalledPackageVerifierVerifyRejectsInvalidRequests(t *testing.T) {
+	tc := newInstalledPackageVerifierTestContext(t)
+
+	results, err := tc.subject.Verify(context.Background(), VerifyInstalledRequest{
+		StateDir: tc.request.StateDir,
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, results)
+	assert.EqualError(t, err, "verify target must be set")
+}
+
+func TestInstalledPackageVerifierVerifyRejectsTargetAndAll(t *testing.T) {
+	tc := newInstalledPackageVerifierTestContext(t)
+
+	results, err := tc.subject.Verify(context.Background(), VerifyInstalledRequest{
+		Target:   "foo",
+		All:      true,
+		StateDir: tc.request.StateDir,
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, results)
+	assert.EqualError(t, err, "verify accepts a target or --all, not both")
+}
+
+func TestInstalledPackageVerifierVerifyReturnsPreflightErrorsWithoutResults(t *testing.T) {
+	t.Run("state load failure", func(t *testing.T) {
+		tc := newInstalledPackageVerifierTestContext(t)
+		tc.state.err = errors.New("boom")
+
+		results, err := tc.subject.Verify(context.Background(), tc.request)
+
+		require.Error(t, err)
+		assert.Nil(t, results)
+		assert.EqualError(t, err, "boom")
+	})
+
+	t.Run("ambiguous target", func(t *testing.T) {
+		tc := newInstalledPackageVerifierTestContext(t)
+		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "two"}, "bar", "1.0.0")
+		second.Binaries[0].Name = "foo"
+		tc.state.index = mustStateIndex(t, tc.record, second)
+
+		results, err := tc.subject.Verify(context.Background(), tc.request)
+
+		require.Error(t, err)
+		assert.Nil(t, results)
+		var ambiguous state.AmbiguousInstallError
+		require.ErrorAs(t, err, &ambiguous)
 	})
 }
 
@@ -136,65 +235,13 @@ type installedPackageVerifierTestContext struct {
 func newInstalledPackageVerifierTestContext(t *testing.T) *installedPackageVerifierTestContext {
 	t.Helper()
 
-	repository := verification.Repository{Owner: "owner", Name: "repo"}
-	storePath := filepath.Join(t.TempDir(), "store")
-	extractedPath := filepath.Join(storePath, "extracted")
-	require.NoError(t, os.MkdirAll(extractedPath, 0o755))
-
-	targetPath := filepath.Join(extractedPath, "foo")
-	require.NoError(t, os.WriteFile(targetPath, []byte("binary"), 0o755))
-
-	binDir := filepath.Join(t.TempDir(), "bin")
-	require.NoError(t, os.MkdirAll(binDir, 0o755))
-	linkPath := filepath.Join(binDir, "foo")
-	require.NoError(t, os.Symlink(targetPath, linkPath))
-
-	artifactPath := filepath.Join(storePath, "artifact.tar.gz")
-	require.NoError(t, os.WriteFile(artifactPath, []byte("artifact"), 0o600))
-
-	digest := mustTestDigest(t, "aa")
-	evidenceStore := fakeVerificationRecordStore{}
-	verificationPath, err := evidenceStore.WriteVerificationRecord(context.Background(), storePath, VerificationRecord{
-		SchemaVersion: 1,
-		Repository:    repository.String(),
-		Package:       "foo",
-		Version:       "1.2.3",
-		Tag:           "v1.2.3",
-		Asset:         "foo.tar.gz",
-		Evidence: verification.Evidence{
-			Repository:  repository,
-			Tag:         "v1.2.3",
-			AssetDigest: digest,
-			ProvenanceAttestation: verification.AttestationEvidence{
-				SignerWorkflow: verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
-			},
-		},
-	})
-	require.NoError(t, err)
-
-	record := state.Record{
-		Repository:       repository.String(),
-		Package:          "foo",
-		Version:          "1.2.3",
-		Tag:              "v1.2.3",
-		Asset:            "foo.tar.gz",
-		AssetDigest:      digest.String(),
-		StorePath:        storePath,
-		ArtifactPath:     artifactPath,
-		ExtractedPath:    extractedPath,
-		VerificationPath: verificationPath,
-		Binaries: []state.Binary{
-			{Name: "foo", LinkPath: linkPath, TargetPath: targetPath},
-		},
-		InstalledAt: time.Unix(1700000000, 0).UTC(),
-	}
-
+	record := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "repo"}, "foo", "1.2.3")
 	stateReader := &fakeInstalledStateReader{index: mustStateIndex(t, record)}
 	artifactVerifier := &fakeInstalledArtifactVerifier{
 		evidence: verification.Evidence{
-			Repository:  repository,
+			Repository:  verification.Repository{Owner: "owner", Name: "repo"},
 			Tag:         "v1.2.3",
-			AssetDigest: digest,
+			AssetDigest: mustTestDigest(t, "aa"),
 			ProvenanceAttestation: verification.AttestationEvidence{
 				SignerWorkflow: verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
 			},
@@ -203,7 +250,7 @@ func newInstalledPackageVerifierTestContext(t *testing.T) *installedPackageVerif
 	subject, err := NewInstalledPackageVerifier(InstalledPackageVerifierDependencies{
 		StateStore:    stateReader,
 		Verifier:      artifactVerifier,
-		EvidenceStore: evidenceStore,
+		EvidenceStore: fakeVerificationRecordStore{},
 		Archives:      fakeVerifyArchiveExtractor{contents: map[string][]byte{"foo": []byte("binary")}},
 		FileSystem:    fakeInstalledVerificationFileSystem{},
 	})
@@ -219,6 +266,75 @@ func newInstalledPackageVerifierTestContext(t *testing.T) *installedPackageVerif
 			StateDir: filepath.Join(t.TempDir(), "state"),
 		},
 	}
+}
+
+func newInstalledPackageVerifierRecordFixture(t *testing.T, repository verification.Repository, packageName string, version string) state.Record {
+	t.Helper()
+
+	storePath := filepath.Join(t.TempDir(), "store")
+	extractedPath := filepath.Join(storePath, "extracted")
+	require.NoError(t, os.MkdirAll(extractedPath, 0o755))
+
+	targetPath := filepath.Join(extractedPath, packageName)
+	require.NoError(t, os.WriteFile(targetPath, []byte("binary"), 0o755))
+
+	binDir := filepath.Join(t.TempDir(), "bin")
+	require.NoError(t, os.MkdirAll(binDir, 0o755))
+	linkPath := filepath.Join(binDir, packageName)
+	require.NoError(t, os.Symlink(targetPath, linkPath))
+
+	assetName := packageName + ".tar.gz"
+	artifactPath := filepath.Join(storePath, assetName)
+	require.NoError(t, os.WriteFile(artifactPath, []byte("artifact"), 0o600))
+
+	digest := mustTestDigest(t, "aa")
+	evidenceStore := fakeVerificationRecordStore{}
+	verificationPath, err := evidenceStore.WriteVerificationRecord(context.Background(), storePath, VerificationRecord{
+		SchemaVersion: 1,
+		Repository:    repository.String(),
+		Package:       packageName,
+		Version:       version,
+		Tag:           "v" + version,
+		Asset:         assetName,
+		Evidence: verification.Evidence{
+			Repository:  repository,
+			Tag:         verification.ReleaseTag("v" + version),
+			AssetDigest: digest,
+			ProvenanceAttestation: verification.AttestationEvidence{
+				SignerWorkflow: verification.WorkflowIdentity(repository.String() + "/.github/workflows/release.yml"),
+			},
+		},
+	})
+	require.NoError(t, err)
+
+	return state.Record{
+		Repository:       repository.String(),
+		Package:          packageName,
+		Version:          version,
+		Tag:              "v" + version,
+		Asset:            assetName,
+		AssetDigest:      digest.String(),
+		StorePath:        storePath,
+		ArtifactPath:     artifactPath,
+		ExtractedPath:    extractedPath,
+		VerificationPath: verificationPath,
+		Binaries: []state.Binary{
+			{Name: packageName, LinkPath: linkPath, TargetPath: targetPath},
+		},
+		InstalledAt: time.Unix(1700000000, 0).UTC(),
+	}
+}
+
+func assertSingleVerifyFailure(t *testing.T, results []VerifyInstalledResult, err error, contains string) {
+	t.Helper()
+
+	require.Error(t, err)
+	var incomplete VerifyIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	require.Len(t, results, 1)
+	assert.Equal(t, VerifyStatusCannotVerify, results[0].Status)
+	assert.Contains(t, results[0].Reason, contains)
 }
 
 type fakeInstalledStateReader struct {
@@ -361,10 +477,15 @@ func (fakeInstalledVerificationFileSystem) CompareFiles(_ context.Context, path 
 	return nil
 }
 
-func mustStateIndex(t *testing.T, record state.Record) state.Index {
+func mustStateIndex(t *testing.T, records ...state.Record) state.Index {
 	t.Helper()
-	index, err := state.NewIndex().AddRecord(record)
-	require.NoError(t, err)
+
+	index := state.NewIndex()
+	var err error
+	for _, record := range records {
+		index, err = index.AddRecord(record)
+		require.NoError(t, err)
+	}
 	return index
 }
 

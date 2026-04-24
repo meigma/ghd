@@ -166,10 +166,10 @@ func (r *Runtime) CheckInstalled(ctx context.Context, request app.CheckRequest) 
 	return r.checker.Check(ctx, request)
 }
 
-// VerifyInstalled re-verifies one active installed package.
-func (r *Runtime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) (state.Record, error) {
+// VerifyInstalled re-verifies selected active installed packages.
+func (r *Runtime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) ([]app.VerifyInstalledResult, error) {
 	if err := r.ensureVerifiedUseCases(ctx); err != nil {
-		return state.Record{}, err
+		return nil, err
 	}
 	return r.verifier.Verify(ctx, request)
 }

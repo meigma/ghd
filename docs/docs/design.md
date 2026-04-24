@@ -200,7 +200,7 @@ Installed package management:
 ghd installed
 ghd check [name | --all]
 ghd update <name | --all>
-ghd verify <name>
+ghd verify [name | owner/repo/package | --all]
 ghd uninstall <name>
 ghd doctor
 ```

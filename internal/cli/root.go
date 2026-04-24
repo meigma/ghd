@@ -38,8 +38,8 @@ type Runtime interface {
 	InfoPackage(ctx context.Context, request app.PackageInfoRequest) (app.PackageInfoResult, error)
 	// CheckInstalled reports update availability for installed packages.
 	CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error)
-	// VerifyInstalled re-verifies one active installed package.
-	VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) (state.Record, error)
+	// VerifyInstalled re-verifies selected active installed packages.
+	VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) ([]app.VerifyInstalledResult, error)
 	// Update upgrades one active installed package when a newer eligible version exists.
 	Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error)
 	// ListInstalled returns active installed packages.
