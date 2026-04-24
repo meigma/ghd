@@ -42,15 +42,55 @@ type InstalledPackageVerifierDependencies struct {
 	FileSystem InstalledVerificationFileSystem
 }
 
-// VerifyInstalledRequest describes one installed-package verification.
+// VerifyStatus is one installed-package verification outcome.
+type VerifyStatus string
+
+const (
+	// VerifyStatusVerified reports a successful re-verification.
+	VerifyStatusVerified VerifyStatus = "verified"
+	// VerifyStatusCannotVerify reports a failed re-verification.
+	VerifyStatusCannotVerify VerifyStatus = "cannot-verify"
+)
+
+// VerifyInstalledResult is one installed-package verification result.
+type VerifyInstalledResult struct {
+	// Repository is the GitHub repository that owns the package.
+	Repository string
+	// Package is the installed package name.
+	Package string
+	// Version is the installed package version.
+	Version string
+	// Status is the verification outcome.
+	Status VerifyStatus
+	// Reason explains why verification failed when Status is cannot-verify.
+	Reason string
+}
+
+// VerifyIncompleteError reports that one or more package verifications failed.
+type VerifyIncompleteError struct {
+	// Failed is the number of packages whose verification failed.
+	Failed int
+}
+
+// Error describes the aggregated verification failure.
+func (e VerifyIncompleteError) Error() string {
+	if e.Failed == 1 {
+		return "could not verify 1 installed package"
+	}
+	return fmt.Sprintf("could not verify %d installed packages", e.Failed)
+}
+
+// VerifyInstalledRequest describes installed-package verification.
 type VerifyInstalledRequest struct {
 	// Target is a package name, binary name, or owner/repo/package target.
 	Target string
+	// All verifies every active installed package.
+	All bool
 	// StateDir stores active installed package state.
 	StateDir string
 }
 
-// InstalledPackageVerifier re-verifies one installed package.
+// InstalledPackageVerifier re-verifies installed packages.
 type InstalledPackageVerifier struct {
 	state    InstalledStateReader
 	verify   Verifier
@@ -85,35 +125,55 @@ func NewInstalledPackageVerifier(deps InstalledPackageVerifierDependencies) (*In
 	}, nil
 }
 
-// Verify re-validates one active installed package and its managed binaries.
-func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyInstalledRequest) (state.Record, error) {
+// Verify re-validates selected active installed packages and their managed binaries.
+func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyInstalledRequest) ([]VerifyInstalledResult, error) {
 	if err := request.validate(); err != nil {
-		return state.Record{}, err
+		return nil, err
 	}
 	index, err := v.state.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
-		return state.Record{}, err
+		return nil, err
 	}
-	record, err := index.ResolveTarget(request.Target)
+	records, err := checkTargets(index.Normalize(), CheckRequest{
+		Target: request.Target,
+		All:    request.All,
+	})
 	if err != nil {
-		return state.Record{}, err
+		return nil, err
 	}
 
+	results := make([]VerifyInstalledResult, 0, len(records))
+	failures := 0
+	for _, record := range records {
+		if err := v.verifyRecord(ctx, record); err != nil {
+			results = append(results, cannotVerifyResult(record, err))
+			failures++
+			continue
+		}
+		results = append(results, verifiedResult(record))
+	}
+	if failures != 0 {
+		return results, VerifyIncompleteError{Failed: failures}
+	}
+	return results, nil
+}
+
+func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record state.Record) error {
 	verificationRecord, err := v.evidence.ReadVerificationRecord(ctx, record.VerificationPath)
 	if err != nil {
-		return state.Record{}, err
+		return err
 	}
 	if err := verifyInstalledRecordConsistency(record, verificationRecord); err != nil {
-		return state.Record{}, err
+		return err
 	}
 	signerWorkflow := verificationRecord.Evidence.ProvenanceAttestation.SignerWorkflow
 	if strings.TrimSpace(string(signerWorkflow)) == "" {
-		return state.Record{}, fmt.Errorf("verification evidence for %s/%s@%s has no trusted signer workflow", record.Repository, record.Package, record.Version)
+		return fmt.Errorf("verification evidence for %s/%s@%s has no trusted signer workflow", record.Repository, record.Package, record.Version)
 	}
 
 	repository, err := parseRecordRepository(record.Repository)
 	if err != nil {
-		return state.Record{}, err
+		return err
 	}
 	evidence, err := v.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: repository,
@@ -124,22 +184,22 @@ func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyIns
 		},
 	})
 	if err != nil {
-		return state.Record{}, err
+		return err
 	}
 	if evidence.AssetDigest.String() != record.AssetDigest {
-		return state.Record{}, fmt.Errorf("re-verified artifact digest %s does not match installed digest %s", evidence.AssetDigest, record.AssetDigest)
+		return fmt.Errorf("re-verified artifact digest %s does not match installed digest %s", evidence.AssetDigest, record.AssetDigest)
 	}
 	if evidence.AssetDigest.String() != verificationRecord.Evidence.AssetDigest.String() {
-		return state.Record{}, fmt.Errorf("re-verified artifact digest %s does not match persisted verification digest %s", evidence.AssetDigest, verificationRecord.Evidence.AssetDigest)
+		return fmt.Errorf("re-verified artifact digest %s does not match persisted verification digest %s", evidence.AssetDigest, verificationRecord.Evidence.AssetDigest)
 	}
 
 	declaredBinaries, installedByRelativePath, err := installedBinaryDeclarations(record)
 	if err != nil {
-		return state.Record{}, err
+		return err
 	}
 	tempDir, cleanup, err := v.files.CreateDownloadDir(ctx)
 	if err != nil {
-		return state.Record{}, err
+		return err
 	}
 	defer cleanup()
 
@@ -150,7 +210,7 @@ func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyIns
 		Binaries:       declaredBinaries,
 	})
 	if err != nil {
-		return state.Record{}, err
+		return err
 	}
 	extractedByRelativePath := map[string]ExtractedBinary{}
 	for _, binary := range extracted {
@@ -161,27 +221,49 @@ func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyIns
 	for relativePath, installedBinary := range installedByRelativePath {
 		extractedBinary, ok := extractedByRelativePath[relativePath]
 		if !ok {
-			return state.Record{}, fmt.Errorf("verified artifact did not extract installed binary %q at %s", installedBinary.Name, relativePath)
+			return fmt.Errorf("verified artifact did not extract installed binary %q at %s", installedBinary.Name, relativePath)
 		}
 		if err := v.files.VerifyManagedBinaryLink(ctx, installedBinary.LinkPath, installedBinary.TargetPath); err != nil {
-			return state.Record{}, err
+			return err
 		}
 		if err := v.files.CompareFiles(ctx, installedBinary.TargetPath, extractedBinary.Path); err != nil {
-			return state.Record{}, fmt.Errorf("installed binary %q does not match verified artifact: %w", installedBinary.Name, err)
+			return fmt.Errorf("installed binary %q does not match verified artifact: %w", installedBinary.Name, err)
 		}
 	}
 
-	return record, nil
+	return nil
 }
 
 func (r VerifyInstalledRequest) validate() error {
-	if strings.TrimSpace(r.Target) == "" {
-		return fmt.Errorf("verify target must be set")
-	}
 	if strings.TrimSpace(r.StateDir) == "" {
 		return fmt.Errorf("state directory must be set")
 	}
+	if r.All && strings.TrimSpace(r.Target) != "" {
+		return fmt.Errorf("verify accepts a target or --all, not both")
+	}
+	if !r.All && strings.TrimSpace(r.Target) == "" {
+		return fmt.Errorf("verify target must be set")
+	}
 	return nil
+}
+
+func verifiedResult(record state.Record) VerifyInstalledResult {
+	return VerifyInstalledResult{
+		Repository: record.Repository,
+		Package:    record.Package,
+		Version:    record.Version,
+		Status:     VerifyStatusVerified,
+	}
+}
+
+func cannotVerifyResult(record state.Record, err error) VerifyInstalledResult {
+	return VerifyInstalledResult{
+		Repository: record.Repository,
+		Package:    record.Package,
+		Version:    record.Version,
+		Status:     VerifyStatusCannotVerify,
+		Reason:     err.Error(),
+	}
 }
 
 func verifyInstalledRecordConsistency(record state.Record, verificationRecord VerificationRecord) error {

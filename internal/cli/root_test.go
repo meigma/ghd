@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -32,6 +33,36 @@ func TestCLI(t *testing.T) {
 	testscript.Run(t, testscript.Params{
 		Dir: "testdata/script",
 	})
+}
+
+func TestVerifyWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var called bool
+
+	root := NewRootCommand(Options{
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			called = true
+			return nil, fmt.Errorf("runtime should not be constructed")
+		},
+	})
+	root.SetArgs([]string{"verify"})
+
+	err := root.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("expected missing target error")
+	}
+	if err.Error() != "verify target must be set" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatalf("runtime factory should not have been called")
+	}
 }
 
 func runTestCommand() int {
@@ -266,7 +297,7 @@ func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.
 	return index.Normalize().Records, nil
 }
 
-func (testRuntime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) (state.Record, error) {
+func (testRuntime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) ([]app.VerifyInstalledResult, error) {
 	subject, err := app.NewInstalledPackageVerifier(app.InstalledPackageVerifierDependencies{
 		StateStore:    filesystem.NewInstalledStore(),
 		Verifier:      testReleaseVerifier{},
@@ -275,7 +306,7 @@ func (testRuntime) VerifyInstalled(ctx context.Context, request app.VerifyInstal
 		FileSystem:    filesystem.NewInstaller(),
 	})
 	if err != nil {
-		return state.Record{}, err
+		return nil, err
 	}
 	return subject.Verify(ctx, request)
 }
