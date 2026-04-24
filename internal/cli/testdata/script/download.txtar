@@ -17,7 +17,7 @@ stdout 'download owner/repo/package@version --output DIR'
 ! stderr .
 
 # Successful install command shape uses explicit safe roots.
-exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+exec ghd --state-dir state --yes --non-interactive install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
 stdout 'binary .*/bin/foo'
 stderr 'installed owner/repo/foo@1.2.3'
 exists bin/foo
@@ -30,7 +30,7 @@ stderr 'uninstalled owner/repo/foo@1.2.3'
 ! exists store/github.com/owner/repo/foo/1.2.3/sha256-abc123
 exec ghd --state-dir state installed
 ! stdout .
-exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+exec ghd --state-dir state --yes --non-interactive install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
 stdout 'binary .*/bin/foo'
 stderr 'installed owner/repo/foo@1.2.3'
 exec ghd --state-dir state uninstall owner/repo/foo --store-dir store --bin-dir bin

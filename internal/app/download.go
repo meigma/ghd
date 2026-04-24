@@ -24,7 +24,7 @@ type ReleaseAssetSource interface {
 // ArtifactDownloader downloads release assets.
 type ArtifactDownloader interface {
 	// DownloadReleaseAsset downloads asset into outputDir and returns the local artifact path.
-	DownloadReleaseAsset(ctx context.Context, asset ReleaseAsset, outputDir string) (string, error)
+	DownloadReleaseAsset(ctx context.Context, request DownloadReleaseAssetRequest) (string, error)
 }
 
 // EvidenceWriter records verification evidence.
@@ -45,6 +45,29 @@ type ReleaseAsset struct {
 	Name string
 	// DownloadURL is the URL used by an adapter to download the asset.
 	DownloadURL string
+}
+
+// DownloadProgress describes byte-level artifact download progress.
+type DownloadProgress struct {
+	// AssetName is the concrete GitHub release asset being downloaded.
+	AssetName string
+	// BytesDownloaded is the number of bytes durably written so far.
+	BytesDownloaded int64
+	// TotalBytes is the expected asset size. Zero means unknown.
+	TotalBytes int64
+}
+
+// DownloadProgressFunc receives byte-level artifact download progress.
+type DownloadProgressFunc func(DownloadProgress)
+
+// DownloadReleaseAssetRequest describes one artifact download.
+type DownloadReleaseAssetRequest struct {
+	// Asset is the concrete GitHub release asset to download.
+	Asset ReleaseAsset
+	// OutputDir receives the downloaded artifact.
+	OutputDir string
+	// Progress receives byte-level download progress. Nil disables progress reports.
+	Progress DownloadProgressFunc
 }
 
 // VerifiedDownloadDependencies contains the ports needed by VerifiedDownloader.
@@ -219,7 +242,10 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("resolve release asset %q: %w", selected.Name, err)
 	}
-	artifactPath, err := d.download.DownloadReleaseAsset(ctx, releaseAsset, request.OutputDir)
+	artifactPath, err := d.download.DownloadReleaseAsset(ctx, DownloadReleaseAssetRequest{
+		Asset:     releaseAsset,
+		OutputDir: request.OutputDir,
+	})
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
 	}

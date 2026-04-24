@@ -53,8 +53,13 @@ type Runtime interface {
 // RuntimeFactory constructs use cases from runtime configuration.
 type RuntimeFactory func(context.Context, config.Config) (Runtime, error)
 
+// InstallConfirmationFunc confirms whether a verified artifact should be installed.
+type InstallConfirmationFunc func(context.Context, app.InstallApproval) error
+
 // Options customizes root command construction.
 type Options struct {
+	// In receives interactive command input.
+	In io.Reader
 	// Out receives machine-readable command output.
 	Out io.Writer
 	// Err receives diagnostics and human-readable status.
@@ -63,10 +68,15 @@ type Options struct {
 	Viper *viper.Viper
 	// RuntimeFactory wires runtime dependencies for command execution.
 	RuntimeFactory RuntimeFactory
+	// InstallConfirmation overrides the default interactive install confirmation prompt.
+	InstallConfirmation InstallConfirmationFunc
 }
 
 // NewRootCommand creates the ghd Cobra command tree.
 func NewRootCommand(options Options) *cobra.Command {
+	if options.In == nil {
+		options.In = strings.NewReader("")
+	}
 	if options.Out == nil {
 		options.Out = io.Discard
 	}
@@ -91,12 +101,15 @@ func NewRootCommand(options Options) *cobra.Command {
 			return initializeConfig(cmd, options.Viper)
 		},
 	}
+	root.SetIn(options.In)
 	root.SetOut(options.Out)
 	root.SetErr(options.Err)
 	root.PersistentFlags().String("github-api-url", "", "GitHub REST API base URL")
 	root.PersistentFlags().String("trusted-root", "", "Sigstore trusted_root.json path")
 	root.PersistentFlags().String("index-dir", "", "local repository index directory")
 	root.PersistentFlags().String("state-dir", "", "local installed package state directory")
+	root.PersistentFlags().Bool("non-interactive", false, "disable prompts, colors, and transient terminal UI")
+	root.PersistentFlags().Bool("yes", false, "approve verified install actions without prompting")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
 	root.AddCommand(newListCommand(options))

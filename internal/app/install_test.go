@@ -57,6 +57,7 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "foo-v1.2.3", string(result.Tag))
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", result.AssetName)
+	assert.Nil(t, tc.downloader.request.Progress)
 	assert.Equal(t, assetDigest, tc.files.storeRequest.AssetDigest)
 	assert.Equal(t, tc.downloader.path, tc.files.storeRequest.ArtifactPath)
 	assert.Equal(t, tc.files.layout.ArtifactPath, tc.archives.request.ArchivePath)
@@ -75,6 +76,149 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	assert.Equal(t, []state.Binary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, tc.state.saved.Records[0].Binaries)
 	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, result.Binaries)
 	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "cleanup"}, tc.events)
+}
+
+func TestVerifiedInstallerReportsProgressInInstallOrder(t *testing.T) {
+	tc := newInstallTestContext(t)
+	givenSuccessfulInstallFixture(t, tc)
+	var stages []InstallProgressStage
+
+	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+		Progress: func(progress InstallProgress) {
+			stages = append(stages, progress.Stage)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []InstallProgressStage{
+		InstallProgressCheckingState,
+		InstallProgressFetchingManifest,
+		InstallProgressResolvingPackage,
+		InstallProgressResolvingAsset,
+		InstallProgressPreparingDownload,
+		InstallProgressDownloading,
+		InstallProgressVerifying,
+		InstallProgressAwaitingApproval,
+		InstallProgressPreparingStore,
+		InstallProgressExtracting,
+		InstallProgressWritingEvidence,
+		InstallProgressLinkingBinaries,
+		InstallProgressWritingMetadata,
+		InstallProgressRecordingState,
+	}, stages)
+}
+
+func TestVerifiedInstallerForwardsDownloadProgressBeforeVerification(t *testing.T) {
+	tc := newInstallTestContext(t)
+	givenSuccessfulInstallFixture(t, tc)
+	tc.verifier.events = &tc.events
+	tc.downloader.progress = []DownloadProgress{
+		{AssetName: "foo_1.2.3_darwin_arm64.tar.gz", BytesDownloaded: 0, TotalBytes: 100},
+		{AssetName: "foo_1.2.3_darwin_arm64.tar.gz", BytesDownloaded: 40, TotalBytes: 100},
+		{AssetName: "foo_1.2.3_darwin_arm64.tar.gz", BytesDownloaded: 100, TotalBytes: 100},
+	}
+	var downloads []DownloadProgress
+
+	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+		Progress: func(progress InstallProgress) {
+			if progress.Download == nil {
+				return
+			}
+			downloads = append(downloads, *progress.Download)
+			tc.events = append(tc.events, "download-progress")
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, tc.downloader.progress, downloads)
+	assert.Equal(t, []string{
+		"state-load",
+		"download-dir",
+		"download-progress",
+		"download-progress",
+		"download-progress",
+		"verify",
+		"store-layout",
+		"extract",
+		"evidence",
+		"link",
+		"metadata",
+		"state-add",
+		"cleanup",
+	}, tc.events)
+}
+
+func TestVerifiedInstallerApprovalReceivesVerifiedFacts(t *testing.T) {
+	tc := newInstallTestContext(t)
+	evidence := givenSuccessfulInstallFixture(t, tc)
+	var approval InstallApproval
+
+	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      "/managed/bin",
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+		Approve: func(_ context.Context, got InstallApproval) error {
+			approval = got
+			return nil
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
+	assert.Equal(t, "foo", approval.PackageName)
+	assert.Equal(t, "1.2.3", approval.Version)
+	assert.Equal(t, verification.ReleaseTag("foo-v1.2.3"), approval.Tag)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", approval.AssetName)
+	assert.Equal(t, evidence.AssetDigest, approval.AssetDigest)
+	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
+	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.SignerWorkflow)
+	assert.Equal(t, "/managed/bin", approval.BinDir)
+	assert.Equal(t, []string{"foo"}, approval.Binaries)
+}
+
+func TestVerifiedInstallerDoesNotMutateWhenApprovalDeclines(t *testing.T) {
+	tc := newInstallTestContext(t)
+	givenSuccessfulInstallFixture(t, tc)
+
+	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+		Approve: func(context.Context, InstallApproval) error {
+			tc.events = append(tc.events, "approval")
+			return ErrInstallNotApproved
+		},
+	})
+
+	require.ErrorIs(t, err, ErrInstallNotApproved)
+	assert.False(t, tc.files.storeCalled)
+	assert.False(t, tc.archives.called)
+	assert.Nil(t, tc.evidence.record)
+	assert.Nil(t, tc.files.metadata)
+	assert.Equal(t, []string{"state-load", "download-dir", "approval", "cleanup"}, tc.events)
 }
 
 func TestVerifiedInstallerDoesNotExtractOrWriteWhenVerificationFails(t *testing.T) {
@@ -356,6 +500,41 @@ func newInstallTestContext(t *testing.T) *installTestContext {
 	require.NoError(t, err)
 	tc.subject = subject
 	return tc
+}
+
+func givenSuccessfulInstallFixture(t *testing.T, tc *installTestContext) verification.Evidence {
+	t.Helper()
+
+	assetDigest := mustDigest(t, "sha256", repeatHex("aa", 32))
+	releaseDigest := mustDigest(t, "sha1", repeatHex("bb", 20))
+	evidence := verification.Evidence{
+		Repository:       verification.Repository{Owner: "owner", Name: "repo"},
+		Tag:              "foo-v1.2.3",
+		AssetDigest:      assetDigest,
+		ReleaseTagDigest: releaseDigest,
+		ReleaseAttestation: verification.AttestationEvidence{
+			AttestationID: "release",
+			PredicateType: verification.ReleasePredicateV02,
+		},
+		ProvenanceAttestation: verification.AttestationEvidence{
+			AttestationID:  "provenance",
+			PredicateType:  verification.SLSAPredicateV1,
+			SignerWorkflow: "owner/repo/.github/workflows/release.yml",
+		},
+	}
+	tc.manifests.data = []byte(testManifest())
+	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
+	tc.verifier.evidence = evidence
+	tc.files.downloadDir = t.TempDir()
+	tc.files.layout = StoreLayout{
+		StorePath:    filepath.Join(t.TempDir(), "store"),
+		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
+		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
+	}
+	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
+	return evidence
 }
 
 type eventEvidenceWriter struct {

@@ -230,10 +230,13 @@ func TestClientDownloadReleaseAssetDoesNotSendGitHubTokenToAssetURL(t *testing.T
 	client := newTestClient(t, server.URL, WithToken("token-123"), WithUserAgent("ghd-test"))
 	outputDir := t.TempDir()
 
-	path, err := client.DownloadReleaseAsset(context.Background(), app.ReleaseAsset{
-		Name:        "foo.tar.gz",
-		DownloadURL: server.URL + "/asset/foo.tar.gz",
-	}, outputDir)
+	path, err := client.DownloadReleaseAsset(context.Background(), app.DownloadReleaseAssetRequest{
+		Asset: app.ReleaseAsset{
+			Name:        "foo.tar.gz",
+			DownloadURL: server.URL + "/asset/foo.tar.gz",
+		},
+		OutputDir: outputDir,
+	})
 
 	require.NoError(t, err)
 	assert.Equal(t, filepath.Join(outputDir, "foo.tar.gz"), path)
@@ -242,6 +245,55 @@ func TestClientDownloadReleaseAssetDoesNotSendGitHubTokenToAssetURL(t *testing.T
 	assert.Equal(t, "artifact bytes", string(data))
 	assert.Empty(t, gotHeader.Get("Authorization"), "asset URL requests must not receive the GitHub token")
 	assert.Equal(t, "ghd-test", gotHeader.Get("User-Agent"))
+}
+
+func TestClientDownloadReleaseAssetReportsProgress(t *testing.T) {
+	payload := make([]byte, 70*1024)
+	for i := range payload {
+		payload[i] = byte('a' + i%26)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+		_, _ = w.Write(payload)
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestClient(t, server.URL)
+	outputDir := t.TempDir()
+	var progress []app.DownloadProgress
+	path, err := client.DownloadReleaseAsset(context.Background(), app.DownloadReleaseAssetRequest{
+		Asset: app.ReleaseAsset{
+			Name:        "foo.tar.gz",
+			DownloadURL: server.URL + "/asset/foo.tar.gz",
+		},
+		OutputDir: outputDir,
+		Progress: func(got app.DownloadProgress) {
+			progress = append(progress, got)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outputDir, "foo.tar.gz"), path)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, payload, data)
+	require.NotEmpty(t, progress)
+	assert.Equal(t, app.DownloadProgress{
+		AssetName:       "foo.tar.gz",
+		BytesDownloaded: 0,
+		TotalBytes:      int64(len(payload)),
+	}, progress[0])
+	last := progress[len(progress)-1]
+	assert.Equal(t, "foo.tar.gz", last.AssetName)
+	assert.Equal(t, int64(len(payload)), last.BytesDownloaded)
+	assert.Equal(t, int64(len(payload)), last.TotalBytes)
+	var sawIntermediate bool
+	for _, event := range progress {
+		if event.BytesDownloaded > 0 && event.BytesDownloaded < int64(len(payload)) {
+			sawIntermediate = true
+		}
+	}
+	assert.True(t, sawIntermediate, "expected at least one progress event before completion")
 }
 
 func TestClientReleaseAssetOperationsFailClosed(t *testing.T) {
@@ -287,10 +339,13 @@ func TestClientReleaseAssetOperationsFailClosed(t *testing.T) {
 	t.Run("download rejects unsafe asset name", func(t *testing.T) {
 		client := newTestClient(t, "https://api.github.test")
 
-		_, err := client.DownloadReleaseAsset(context.Background(), app.ReleaseAsset{
-			Name:        "../foo.tar.gz",
-			DownloadURL: "https://example.test/foo.tar.gz",
-		}, t.TempDir())
+		_, err := client.DownloadReleaseAsset(context.Background(), app.DownloadReleaseAssetRequest{
+			Asset: app.ReleaseAsset{
+				Name:        "../foo.tar.gz",
+				DownloadURL: "https://example.test/foo.tar.gz",
+			},
+			OutputDir: t.TempDir(),
+		})
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "path separators")

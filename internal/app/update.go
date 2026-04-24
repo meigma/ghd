@@ -286,7 +286,10 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	}
 	defer cleanup()
 
-	artifactPath, err := u.download.DownloadReleaseAsset(ctx, releaseAsset, downloadDir)
+	artifactPath, err := u.download.DownloadReleaseAsset(ctx, DownloadReleaseAssetRequest{
+		Asset:     releaseAsset,
+		OutputDir: downloadDir,
+	})
 	if err != nil {
 		return result, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
 	}

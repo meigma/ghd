@@ -76,6 +76,85 @@ type VerifiedInstaller struct {
 	now       func() time.Time
 }
 
+// ErrInstallNotApproved means installation stopped because the verified artifact was not approved.
+var ErrInstallNotApproved = errors.New("install was not approved")
+
+// InstallProgressStage identifies one user-visible install step.
+type InstallProgressStage string
+
+const (
+	// InstallProgressCheckingState means install is reading active installed package state.
+	InstallProgressCheckingState InstallProgressStage = "checking-state"
+	// InstallProgressFetchingManifest means install is fetching repository manifest data.
+	InstallProgressFetchingManifest InstallProgressStage = "fetching-manifest"
+	// InstallProgressResolvingPackage means install is selecting package, version, and platform asset metadata.
+	InstallProgressResolvingPackage InstallProgressStage = "resolving-package"
+	// InstallProgressResolvingAsset means install is resolving the concrete GitHub release asset.
+	InstallProgressResolvingAsset InstallProgressStage = "resolving-asset"
+	// InstallProgressPreparingDownload means install is preparing temporary download storage.
+	InstallProgressPreparingDownload InstallProgressStage = "preparing-download"
+	// InstallProgressDownloading means install is downloading the selected release asset.
+	InstallProgressDownloading InstallProgressStage = "downloading"
+	// InstallProgressVerifying means install is verifying release and provenance attestations.
+	InstallProgressVerifying InstallProgressStage = "verifying"
+	// InstallProgressAwaitingApproval means install has verified the asset and is waiting for approval.
+	InstallProgressAwaitingApproval InstallProgressStage = "awaiting-approval"
+	// InstallProgressPreparingStore means install is creating the managed store layout.
+	InstallProgressPreparingStore InstallProgressStage = "preparing-store"
+	// InstallProgressExtracting means install is extracting configured binaries.
+	InstallProgressExtracting InstallProgressStage = "extracting"
+	// InstallProgressWritingEvidence means install is writing verification evidence.
+	InstallProgressWritingEvidence InstallProgressStage = "writing-evidence"
+	// InstallProgressLinkingBinaries means install is exposing binaries in the managed bin directory.
+	InstallProgressLinkingBinaries InstallProgressStage = "linking-binaries"
+	// InstallProgressWritingMetadata means install is writing package install metadata.
+	InstallProgressWritingMetadata InstallProgressStage = "writing-metadata"
+	// InstallProgressRecordingState means install is recording active installed package state.
+	InstallProgressRecordingState InstallProgressStage = "recording-state"
+)
+
+// InstallProgress describes one user-visible install step.
+type InstallProgress struct {
+	// Stage identifies the step underway.
+	Stage InstallProgressStage
+	// Message is a concise human-readable status line.
+	Message string
+	// Download carries byte-level download progress when Stage is InstallProgressDownloading.
+	Download *DownloadProgress
+}
+
+// InstallProgressFunc receives user-visible install progress.
+type InstallProgressFunc func(InstallProgress)
+
+// InstallApproval contains verified artifact facts for the install approval decision.
+type InstallApproval struct {
+	// Repository is the verified GitHub repository.
+	Repository verification.Repository
+	// PackageName is the package name within the repository manifest.
+	PackageName string
+	// Version is the requested package version.
+	Version string
+	// Tag is the resolved GitHub release tag.
+	Tag verification.ReleaseTag
+	// AssetName is the concrete release asset name.
+	AssetName string
+	// AssetDigest is the verified local asset digest.
+	AssetDigest verification.Digest
+	// ReleasePredicateType is the accepted immutable release predicate type.
+	ReleasePredicateType string
+	// ProvenancePredicateType is the accepted provenance predicate type.
+	ProvenancePredicateType string
+	// SignerWorkflow is the accepted provenance signer workflow.
+	SignerWorkflow verification.WorkflowIdentity
+	// BinDir receives exposed binary links if the install proceeds.
+	BinDir string
+	// Binaries are the binary names that will be exposed if the install proceeds.
+	Binaries []string
+}
+
+// InstallApprovalFunc approves or rejects a verified install before local mutation.
+type InstallApprovalFunc func(context.Context, InstallApproval) error
+
 // VerifiedInstallRequest describes one verified install.
 type VerifiedInstallRequest struct {
 	// Repository is the GitHub repository that owns the package.
@@ -92,6 +171,10 @@ type VerifiedInstallRequest struct {
 	StateDir string
 	// Platform optionally overrides the current OS/architecture.
 	Platform manifest.Platform
+	// Progress receives user-visible install progress. Nil disables progress reports.
+	Progress InstallProgressFunc
+	// Approve approves a verified artifact before extraction, linking, or state writes. Nil approves automatically.
+	Approve InstallApprovalFunc
 }
 
 // VerifiedInstallResult describes a completed verified install.
@@ -277,6 +360,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, err
 	}
 	platform := request.Platform.WithDefaults()
+	request.report(InstallProgressCheckingState, "Checking installed packages")
 	installedState, err := i.state.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
 		return VerifiedInstallResult{}, err
@@ -285,6 +369,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, state.DuplicateInstallError{Repository: request.Repository.String(), Package: request.PackageName}
 	}
 
+	request.report(InstallProgressFetchingManifest, "Fetching ghd.toml")
 	manifestBytes, err := i.manifests.FetchManifest(ctx, request.Repository)
 	if err != nil {
 		return VerifiedInstallResult{}, fmt.Errorf("fetch ghd.toml: %w", err)
@@ -293,6 +378,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
+	request.report(InstallProgressResolvingPackage, "Resolving package and platform asset")
 	pkg, err := cfg.Package(request.PackageName)
 	if err != nil {
 		return VerifiedInstallResult{}, err
@@ -311,21 +397,34 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}, manifestBinaryNames(pkg.Binaries), state.PackageRef{}); err != nil {
 		return VerifiedInstallResult{}, err
 	}
+	request.report(InstallProgressResolvingAsset, "Resolving GitHub release asset")
 	releaseAsset, err := i.assets.ResolveReleaseAsset(ctx, request.Repository, tag, selected.Name)
 	if err != nil {
 		return VerifiedInstallResult{}, fmt.Errorf("resolve release asset %q: %w", selected.Name, err)
 	}
 
+	request.report(InstallProgressPreparingDownload, "Preparing download")
 	downloadDir, cleanup, err := i.files.CreateDownloadDir(ctx)
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
 	defer cleanup()
 
-	artifactPath, err := i.download.DownloadReleaseAsset(ctx, releaseAsset, downloadDir)
+	request.report(InstallProgressDownloading, fmt.Sprintf("Downloading %s", releaseAsset.Name))
+	downloadRequest := DownloadReleaseAssetRequest{
+		Asset:     releaseAsset,
+		OutputDir: downloadDir,
+	}
+	if request.Progress != nil {
+		downloadRequest.Progress = func(progress DownloadProgress) {
+			request.reportDownload(progress)
+		}
+	}
+	artifactPath, err := i.download.DownloadReleaseAsset(ctx, downloadRequest)
 	if err != nil {
 		return VerifiedInstallResult{}, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
 	}
+	request.report(InstallProgressVerifying, "Verifying release and provenance")
 	evidence, err := i.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: request.Repository,
 		Tag:        tag,
@@ -338,6 +437,24 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, err
 	}
 
+	request.report(InstallProgressAwaitingApproval, "Reviewing verified install")
+	if err := request.approve(ctx, InstallApproval{
+		Repository:              request.Repository,
+		PackageName:             request.PackageName,
+		Version:                 request.Version,
+		Tag:                     tag,
+		AssetName:               selected.Name,
+		AssetDigest:             evidence.AssetDigest,
+		ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
+		ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
+		SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
+		BinDir:                  request.BinDir,
+		Binaries:                manifestBinaryNames(pkg.Binaries),
+	}); err != nil {
+		return VerifiedInstallResult{}, err
+	}
+
+	request.report(InstallProgressPreparingStore, "Preparing managed store")
 	layout, err := i.files.CreateStoreLayout(ctx, StoreLayoutRequest{
 		StoreRoot:    request.StoreDir,
 		Repository:   request.Repository,
@@ -350,6 +467,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, err
 	}
 
+	request.report(InstallProgressExtracting, "Extracting configured binaries")
 	extracted, err := i.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
 		ArchivePath:    layout.ArtifactPath,
 		ArchiveName:    selected.Name,
@@ -373,6 +491,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		Asset:         selected.Name,
 		Evidence:      evidence,
 	}
+	request.report(InstallProgressWritingEvidence, "Writing verification evidence")
 	evidencePath, err := i.evidence.WriteVerificationEvidence(ctx, layout.StorePath, verificationRecord)
 	if err != nil {
 		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
@@ -382,6 +501,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		}, fmt.Errorf("write verification evidence: %w", err))
 	}
 
+	request.report(InstallProgressLinkingBinaries, "Linking binaries")
 	links, err := i.files.LinkBinaries(ctx, LinkBinariesRequest{
 		BinDir:   request.BinDir,
 		Binaries: extracted,
@@ -408,6 +528,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		VerificationPath: evidencePath,
 		Binaries:         links,
 	}
+	request.report(InstallProgressWritingMetadata, "Writing install metadata")
 	metadataPath, err := i.files.WriteInstallMetadata(ctx, layout.StorePath, installRecord)
 	if err != nil {
 		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
@@ -431,6 +552,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		Binaries:         stateBinaries(links),
 		InstalledAt:      i.now().UTC(),
 	}
+	request.report(InstallProgressRecordingState, "Recording installed state")
 	if _, err := i.state.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
 		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
 			StoreRoot: request.StoreDir,
@@ -461,6 +583,39 @@ func (i *VerifiedInstaller) cleanupManagedInstall(ctx context.Context, request R
 		return errors.Join(err, fmt.Errorf("cleanup managed install: %w", cleanupErr))
 	}
 	return err
+}
+
+func (r VerifiedInstallRequest) report(stage InstallProgressStage, message string) {
+	if r.Progress == nil {
+		return
+	}
+	r.Progress(InstallProgress{
+		Stage:   stage,
+		Message: message,
+	})
+}
+
+func (r VerifiedInstallRequest) reportDownload(progress DownloadProgress) {
+	if r.Progress == nil {
+		return
+	}
+	copied := progress
+	message := "Downloading"
+	if strings.TrimSpace(copied.AssetName) != "" {
+		message = fmt.Sprintf("Downloading %s", copied.AssetName)
+	}
+	r.Progress(InstallProgress{
+		Stage:    InstallProgressDownloading,
+		Message:  message,
+		Download: &copied,
+	})
+}
+
+func (r VerifiedInstallRequest) approve(ctx context.Context, approval InstallApproval) error {
+	if r.Approve == nil {
+		return nil
+	}
+	return r.Approve(ctx, approval)
 }
 
 func (r VerifiedInstallRequest) validate() error {
