@@ -222,6 +222,9 @@ Behavior notes:
   adding it.
 - `info owner/repo` selects the only declared package when the repository has
   exactly one package; otherwise the user must qualify `owner/repo/package`.
+- When stdout is a terminal, `list` and `info` present grouped human-oriented
+  views while keeping `--json` and `--non-interactive` on the plain output
+  contract.
 - `install owner/repo/foo` can be a one-off install without adding the
   repository to the index.
 - `install` refuses binary-name collisions against active installed packages
@@ -233,6 +236,9 @@ Behavior notes:
   and transient UI while explicitly approving the verified install. The stable
   stdout `binary PATH` contract is reserved for non-interactive installs.
 - `check` is read-only and reports available updates for installed packages.
+- `check` uses the same TTY rule as `list` and `info`: richer grouped human
+  output on a terminal, plain rows for `--non-interactive`, and unchanged JSON
+  output for automation.
 - `update` applies an available update through the same verification path as
   install and refuses updates that would expose a binary owned by another
   installed package. Interactive update uses transient status, byte-level

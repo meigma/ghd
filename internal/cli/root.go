@@ -75,6 +75,14 @@ type Options struct {
 	InstallConfirmation InstallConfirmationFunc
 	// UpdateConfirmation overrides the default interactive update confirmation prompt.
 	UpdateConfirmation UpdateConfirmationFunc
+	// StdinTTY overrides terminal detection for stdin in tests.
+	StdinTTY *bool
+	// StdoutTTY overrides terminal detection for stdout in tests.
+	StdoutTTY *bool
+	// StderrTTY overrides terminal detection for stderr in tests.
+	StderrTTY *bool
+	// ColorEnabled overrides color detection in tests.
+	ColorEnabled *bool
 }
 
 // NewRootCommand creates the ghd Cobra command tree.

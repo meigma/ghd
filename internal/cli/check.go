@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -15,7 +16,12 @@ func newCheckCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "check [name|owner/repo/package|--all]",
 		Short: "Check installed packages for available updates",
-		Args:  cobra.MaximumNArgs(1),
+		Example: strings.TrimSpace(`
+ghd check --state-dir ./state
+ghd check foo --state-dir ./state
+ghd --non-interactive check --all --state-dir ./state
+`),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && len(args) > 0 {
 				return fmt.Errorf("check accepts a target or --all, not both")
@@ -28,23 +34,39 @@ func newCheckCommand(options Options) *cobra.Command {
 					return err
 				}
 			}
+			mode := detectReadOnlyPresentationMode(options, jsonOutput)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 
 			cfg := config.Load(options.Viper)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				status.Show("Checking installed packages for updates")
+			}
 			results, err := runtime.CheckInstalled(cmd.Context(), app.CheckRequest{
 				Target:   target,
 				All:      all || len(args) == 0,
 				StateDir: cfg.StateDir,
 			})
+			if status != nil {
+				status.Clear()
+			}
 			if jsonOutput {
 				if writeErr := writeCheckResultsJSON(options, results); writeErr != nil {
 					return writeErr
 				}
 			} else {
-				writeCheckResults(options, results)
+				if mode.richOutput {
+					writeCheckResultsTTY(options.Out, results, mode.color)
+				} else {
+					writeCheckResults(options, results)
+				}
 			}
 			if err != nil {
 				return err

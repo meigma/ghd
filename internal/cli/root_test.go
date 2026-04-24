@@ -457,6 +457,148 @@ func TestUpdateApprovalDeclineDoesNotMutateState(t *testing.T) {
 	assert.Equal(t, "1.2.3", record.Version)
 }
 
+func TestListTTYRendersGroupedViewAndStaticStatus(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "list")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "indexed packages")
+	assert.Contains(t, stdout.String(), "owner/repo")
+	assert.Contains(t, stdout.String(), "package")
+	assert.Contains(t, stdout.String(), "foo")
+	assert.Equal(t, "\r\033[KLoading indexed packages\r\033[K", stderr.String())
+}
+
+func TestListNonInteractiveKeepsPlainRowsOnTTY(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--non-interactive", "--index-dir", indexDir, "list")
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/repo/foo foo\n", stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+func TestInfoTTYRendersPackageViewAndStaticStatuses(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "info", "foo")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "package owner/repo/foo")
+	assert.Contains(t, stdout.String(), "Signer:")
+	assert.Contains(t, stdout.String(), "assets")
+	assert.Contains(t, stdout.String(), "darwin/arm64")
+	assert.Equal(t, "\r\033[KResolving foo from the local index\r\033[KFetching package details from owner/repo\r\033[K", stderr.String())
+}
+
+func TestInfoJSONKeepsStructuredOutputOnTTY(t *testing.T) {
+	t.Helper()
+
+	indexDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--index-dir", indexDir, "repo", "add", "owner/repo"))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--index-dir", indexDir, "info", "foo", "--json")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), `"package":{"repository":"owner/repo"`)
+	assert.NotContains(t, stdout.String(), "package owner/repo/foo")
+	assert.Empty(t, stderr.String())
+}
+
+func TestCheckTTYRendersSummaryAndStaticStatus(t *testing.T) {
+	t.Helper()
+
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		Out:            io.Discard,
+		Err:            io.Discard,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--state-dir", stateDir, "check")
+
+	require.NoError(t, err)
+	assert.Contains(t, stdout.String(), "update check")
+	assert.Contains(t, stdout.String(), "updates available")
+	assert.Contains(t, stdout.String(), "owner/repo/foo  1.2.3 -> 1.3.0")
+	assert.Contains(t, stdout.String(), "summary")
+	assert.Equal(t, "\r\033[KChecking installed packages for updates\r\033[K", stderr.String())
+}
+
 func runTestCommand() int {
 	vp := viper.New()
 	root := NewRootCommand(Options{
@@ -487,6 +629,10 @@ func executeTestRoot(options Options, args ...string) error {
 
 func testRuntimeFactory(context.Context, config.Config) (Runtime, error) {
 	return testRuntime{}, nil
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func requireInstalledRecord(t *testing.T, stateDir string, repository string, packageName string) state.Record {
