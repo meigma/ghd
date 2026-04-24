@@ -47,6 +47,7 @@ go run ./cmd/ghd info package --index-dir ./index
 go run ./cmd/ghd info owner/repo/package
 go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd --yes --non-interactive install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd installed --state-dir ./state
 go run ./cmd/ghd check --state-dir ./state --all
 go run ./cmd/ghd verify package --state-dir ./state
@@ -59,6 +60,15 @@ go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin
 
 Commands that return stable row-style results support `--json`: `list`, `info`,
 `installed`, `check`, `verify`, `update`, `doctor`, and `repo list`.
+
+Interactive `install` runs with transient terminal status, shows byte-level
+download progress when GitHub reports an asset size, and asks for approval after
+verification but before exposing binaries. The approval prompt summarizes the
+source, destination, and trust result, with full provenance facts behind
+`View details`. Automation should pass
+`--yes --non-interactive` to keep output plain and approve the verified install
+without prompting; the stable `binary PATH` stdout lines are emitted only in
+non-interactive mode.
 
 Start with the design document for the intended full product shape:
 

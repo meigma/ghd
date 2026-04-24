@@ -272,7 +272,9 @@ func (c *Client) CheckRateLimit(ctx context.Context) (app.GitHubRateLimitStatus,
 }
 
 // DownloadReleaseAsset downloads asset into outputDir without setting executable bits.
-func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsset, outputDir string) (string, error) {
+func (c *Client) DownloadReleaseAsset(ctx context.Context, request app.DownloadReleaseAssetRequest) (string, error) {
+	asset := request.Asset
+	outputDir := request.OutputDir
 	if asset.Name == "" {
 		return "", fmt.Errorf("release asset name must be set")
 	}
@@ -305,6 +307,17 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsse
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", httpStatusError(resp)
 	}
+	totalBytes := resp.ContentLength
+	if totalBytes < 0 {
+		totalBytes = 0
+	}
+	if request.Progress != nil {
+		request.Progress(app.DownloadProgress{
+			AssetName:       asset.Name,
+			BytesDownloaded: 0,
+			TotalBytes:      totalBytes,
+		})
+	}
 
 	temp, err := os.CreateTemp(outputDir, "."+asset.Name+".*.tmp")
 	if err != nil {
@@ -318,7 +331,17 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsse
 		}
 	}()
 
-	if _, err := io.Copy(temp, resp.Body); err != nil {
+	writer := io.Writer(temp)
+	progressWriter := &downloadProgressWriter{
+		writer:    temp,
+		progress:  request.Progress,
+		assetName: asset.Name,
+		total:     totalBytes,
+	}
+	if request.Progress != nil {
+		writer = progressWriter
+	}
+	if _, err := io.Copy(writer, resp.Body); err != nil {
 		_ = temp.Close()
 		return "", fmt.Errorf("write temporary artifact: %w", err)
 	}
@@ -330,8 +353,36 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, asset app.ReleaseAsse
 	if err := os.Rename(tempPath, finalPath); err != nil {
 		return "", fmt.Errorf("commit artifact: %w", err)
 	}
+	if request.Progress != nil {
+		request.Progress(app.DownloadProgress{
+			AssetName:       asset.Name,
+			BytesDownloaded: progressWriter.downloaded,
+			TotalBytes:      totalBytes,
+		})
+	}
 	removeTemp = false
 	return finalPath, nil
+}
+
+type downloadProgressWriter struct {
+	writer     io.Writer
+	progress   app.DownloadProgressFunc
+	assetName  string
+	total      int64
+	downloaded int64
+}
+
+func (w *downloadProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.writer.Write(p)
+	if n > 0 {
+		w.downloaded += int64(n)
+		w.progress(app.DownloadProgress{
+			AssetName:       w.assetName,
+			BytesDownloaded: w.downloaded,
+			TotalBytes:      w.total,
+		})
+	}
+	return n, err
 }
 
 // FetchReleaseAttestations returns GitHub release attestations for a tag ref digest.

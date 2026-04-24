@@ -21,6 +21,15 @@ func newInstallCommand(options Options) *cobra.Command {
 		Short: "Install and verify one GitHub release package",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectInstallPresentationMode(options)
+			var status *statusLine
+			var progress app.InstallProgressFunc
+			if mode.statusLine {
+				status = newStatusLine(options.Err, mode.color)
+				defer status.Clear()
+				progress = status.UpdateInstallProgress
+			}
+
 			target, err := parseInstallTarget(args[0])
 			if err != nil {
 				return err
@@ -32,11 +41,17 @@ func newInstallCommand(options Options) *cobra.Command {
 				return err
 			}
 			if !target.qualified {
+				if status != nil {
+					status.Update("Refreshing repository index")
+				}
 				if _, err := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
 					All:      true,
 					IndexDir: cfg.IndexDir,
 				}); err != nil {
 					return err
+				}
+				if status != nil {
+					status.Update("Resolving package")
 				}
 				resolved, err := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
 					PackageName: target.packageName,
@@ -55,14 +70,21 @@ func newInstallCommand(options Options) *cobra.Command {
 				StoreDir:    cfg.StoreDir,
 				BinDir:      cfg.BinDir,
 				StateDir:    cfg.StateDir,
+				Progress:    progress,
+				Approve:     installApprovalCallback(options, mode, status),
 			})
 			if err != nil {
 				return err
 			}
 
-			fmt.Fprintf(options.Err, "installed %s/%s@%s\n", result.Repository, result.PackageName, result.Version)
-			for _, binary := range result.Binaries {
-				fmt.Fprintf(options.Out, "binary %s\n", binary.LinkPath)
+			if status != nil {
+				status.Clear()
+			}
+			writeInstallSummary(options.Err, result, mode.enhanced, mode.color)
+			if mode.nonInteractive {
+				for _, binary := range result.Binaries {
+					fmt.Fprintf(options.Out, "binary %s\n", binary.LinkPath)
+				}
 			}
 			return nil
 		},

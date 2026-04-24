@@ -54,6 +54,7 @@ func TestPackageUpdaterUpdateSingleTargetUpdatedRowAfterSuccessfulStaging(t *tes
 	assert.Equal(t, tc.files.layout.StorePath, tc.state.replacedRecord.StorePath)
 	assert.Equal(t, storeDir, tc.files.removedStoreRoot)
 	assert.Equal(t, record.StorePath, tc.files.removedStorePath)
+	assert.Nil(t, tc.downloader.request.Progress)
 	assert.Equal(t, []string{"state-load", "state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "remove-store", "cleanup"}, tc.events)
 }
 

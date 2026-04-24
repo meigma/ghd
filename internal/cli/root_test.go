@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"github.com/pelletier/go-toml/v2"
 	"github.com/rogpeppe/go-internal/testscript"
 	"github.com/spf13/viper"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/meigma/ghd/internal/adapters/filesystem"
 	"github.com/meigma/ghd/internal/app"
@@ -96,9 +99,191 @@ func TestUpdateWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
 	}
 }
 
+func TestInstallYesNonInteractiveKeepsPlainOutput(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	root := NewRootCommand(Options{
+		In:    strings.NewReader(""),
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+	})
+	root.SetArgs([]string{
+		"--state-dir", stateDir,
+		"--yes",
+		"--non-interactive",
+		"install", "owner/repo/foo@1.2.3",
+		"--store-dir", storeDir,
+		"--bin-dir", binDir,
+	})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "installed owner/repo/foo@1.2.3\n", stderr.String())
+	assert.Equal(t, fmt.Sprintf("binary %s\n", filepath.Join(binDir, "foo")), stdout.String())
+}
+
+func TestInstallInteractiveDoesNotWriteBinaryStdout(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	root := NewRootCommand(Options{
+		In:    strings.NewReader(""),
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+		InstallConfirmation: func(context.Context, app.InstallApproval) error {
+			return nil
+		},
+	})
+	root.SetArgs([]string{
+		"--state-dir", stateDir,
+		"install", "owner/repo/foo@1.2.3",
+		"--store-dir", storeDir,
+		"--bin-dir", binDir,
+	})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "installed owner/repo/foo@1.2.3\n", stderr.String())
+	assert.Empty(t, stdout.String())
+	assert.FileExists(t, filepath.Join(binDir, "foo"))
+}
+
+func TestInstallNonInteractiveWithoutYesFailsAfterVerification(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	root := NewRootCommand(Options{
+		In:    strings.NewReader(""),
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+	})
+	root.SetArgs([]string{
+		"--state-dir", stateDir,
+		"--non-interactive",
+		"install", "owner/repo/foo@1.2.3",
+		"--store-dir", storeDir,
+		"--bin-dir", binDir,
+	})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.Error(t, err)
+	assert.Equal(t, "install requires approval after verification; rerun with --yes to approve non-interactively", err.Error())
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
+	assert.NoFileExists(t, filepath.Join(binDir, "foo"))
+}
+
+func TestInstallApprovalDeclineDoesNotMutateState(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	root := NewRootCommand(Options{
+		In:    strings.NewReader(""),
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+		InstallConfirmation: func(context.Context, app.InstallApproval) error {
+			return app.ErrInstallNotApproved
+		},
+	})
+	root.SetArgs([]string{
+		"--state-dir", stateDir,
+		"install", "owner/repo/foo@1.2.3",
+		"--store-dir", storeDir,
+		"--bin-dir", binDir,
+	})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.ErrorIs(t, err, app.ErrInstallNotApproved)
+	assert.Empty(t, stdout.String())
+	assert.Empty(t, stderr.String())
+	assert.NoFileExists(t, filepath.Join(binDir, "foo"))
+	assert.NoFileExists(t, filepath.Join(stateDir, "installed.json"))
+}
+
+func TestInstallApprovalFactsIncludeVerificationFields(t *testing.T) {
+	t.Helper()
+
+	var approval app.InstallApproval
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	root := NewRootCommand(Options{
+		In:    strings.NewReader(""),
+		Out:   io.Discard,
+		Err:   io.Discard,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+		InstallConfirmation: func(_ context.Context, got app.InstallApproval) error {
+			approval = got
+			return nil
+		},
+	})
+	root.SetArgs([]string{
+		"--state-dir", stateDir,
+		"install", "owner/repo/foo@1.2.3",
+		"--store-dir", storeDir,
+		"--bin-dir", binDir,
+	})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
+	assert.Equal(t, "foo", approval.PackageName)
+	assert.Equal(t, "1.2.3", approval.Version)
+	assert.Equal(t, verification.ReleaseTag("v1.2.3"), approval.Tag)
+	assert.Equal(t, "foo.tar.gz", approval.AssetName)
+	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), approval.AssetDigest.String())
+	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
+	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.SignerWorkflow)
+	assert.Equal(t, binDir, approval.BinDir)
+	assert.Equal(t, []string{"foo"}, approval.Binaries)
+}
+
 func runTestCommand() int {
 	vp := viper.New()
 	root := NewRootCommand(Options{
+		In:    os.Stdin,
 		Out:   os.Stdout,
 		Err:   os.Stderr,
 		Viper: vp,
@@ -466,6 +651,9 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 }
 
 func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
+	if request.Progress != nil {
+		request.Progress(app.InstallProgress{Stage: app.InstallProgressCheckingState, Message: "Checking installed packages"})
+	}
 	store := filesystem.NewInstalledStore()
 	index, err := store.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
@@ -476,6 +664,51 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		Package:    request.PackageName,
 	}, []string{request.PackageName}, state.PackageRef{}); err != nil {
 		return app.VerifiedInstallResult{}, err
+	}
+	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	evidence := verification.Evidence{
+		Repository:  request.Repository,
+		Tag:         verification.ReleaseTag("v" + request.Version),
+		AssetDigest: digest,
+		ReleaseTagDigest: func() verification.Digest {
+			releaseDigest, _ := verification.NewDigest("sha1", strings.Repeat("b", 40))
+			return releaseDigest
+		}(),
+		ReleaseAttestation: verification.AttestationEvidence{
+			AttestationID: "release",
+			PredicateType: verification.ReleasePredicateV02,
+		},
+		ProvenanceAttestation: verification.AttestationEvidence{
+			AttestationID:  "provenance",
+			PredicateType:  verification.SLSAPredicateV1,
+			SignerWorkflow: verification.WorkflowIdentity(request.Repository.String() + "/.github/workflows/release.yml"),
+		},
+	}
+	if request.Progress != nil {
+		request.Progress(app.InstallProgress{Stage: app.InstallProgressVerifying, Message: "Verifying release and provenance"})
+	}
+	if request.Approve != nil {
+		if err := request.Approve(ctx, app.InstallApproval{
+			Repository:              request.Repository,
+			PackageName:             request.PackageName,
+			Version:                 request.Version,
+			Tag:                     evidence.Tag,
+			AssetName:               request.PackageName + ".tar.gz",
+			AssetDigest:             evidence.AssetDigest,
+			ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
+			ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
+			SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
+			BinDir:                  request.BinDir,
+			Binaries:                []string{request.PackageName},
+		}); err != nil {
+			return app.VerifiedInstallResult{}, err
+		}
+	}
+	if request.Progress != nil {
+		request.Progress(app.InstallProgress{Stage: app.InstallProgressPreparingStore, Message: "Preparing managed store"})
 	}
 	binDir, err := filepath.Abs(filepath.Clean(request.BinDir))
 	if err != nil {
@@ -522,9 +755,9 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		Repository:       request.Repository.String(),
 		Package:          request.PackageName,
 		Version:          request.Version,
-		Tag:              "v" + request.Version,
+		Tag:              string(evidence.Tag),
 		Asset:            request.PackageName + ".tar.gz",
-		AssetDigest:      "sha256:" + strings.Repeat("a", 64),
+		AssetDigest:      evidence.AssetDigest.String(),
 		StorePath:        storePath,
 		ArtifactPath:     artifactPath,
 		ExtractedPath:    extractedPath,
@@ -539,6 +772,9 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		Repository:  request.Repository,
 		PackageName: request.PackageName,
 		Version:     request.Version,
+		Tag:         evidence.Tag,
+		AssetName:   request.PackageName + ".tar.gz",
+		Evidence:    evidence,
 		Binaries: []app.InstalledBinary{
 			{Name: request.PackageName, LinkPath: linkPath, TargetPath: linkTarget},
 		},

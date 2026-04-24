@@ -220,6 +220,12 @@ Behavior notes:
   repository to the index.
 - `install` refuses binary-name collisions against active installed packages
   before downloading release assets.
+- Interactive `install` shows transient status with byte-level download progress
+  when the asset size is known, presents verified release and provenance facts
+  after verification behind `View details`, and asks before exposing binaries.
+  `--yes --non-interactive` is the automation path: it disables prompts, color,
+  and transient UI while explicitly approving the verified install. The stable
+  stdout `binary PATH` contract is reserved for non-interactive installs.
 - `check` is read-only and reports available updates for installed packages.
 - `update` applies an available update through the same verification path as
   install and refuses updates that would expose a binary owned by another
@@ -271,10 +277,11 @@ For `ghd install owner/repo/foo@1.2.3`:
 5. Download the asset into a temporary, non-executable location.
 6. Verify the immutable GitHub release attestation for the tag and asset.
 7. Verify the GitHub artifact provenance attestation for the local asset bytes.
-8. Extract the archive if needed.
-9. Copy or link only the configured binary paths into the store.
-10. Expose binary links from the managed bin directory.
-11. Record installed package metadata and verification evidence.
+8. Present verified facts and require approval unless `--yes` was supplied.
+9. Extract the archive if needed.
+10. Copy or link only the configured binary paths into the store.
+11. Expose binary links from the managed bin directory.
+12. Record installed package metadata and verification evidence.
 
 The temporary download should not be executable. Installation should only expose
 the final verified binary after all verification steps succeed.
@@ -445,9 +452,10 @@ The first vertical slice should prove the complete path for one real repository:
 8. Record `verification.json`.
 
 After the verified install, indexing, installed-state, uninstall, read-only
-check, package-discovery, collision preflight, broader lifecycle slices, and
-structured output for result-oriented commands work, the next slices should
-focus on remaining polish and release-readiness gaps.
+check, package-discovery, collision preflight, broader lifecycle slices,
+structured output for result-oriented commands, and the first interactive
+install UX pass work, the next slices should focus on remaining polish and
+release-readiness gaps. Byte-level download progress is still deferred.
 
 ## Open Questions
 

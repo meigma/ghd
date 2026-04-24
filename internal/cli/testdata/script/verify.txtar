@@ -1,5 +1,5 @@
 # Successful verify re-checks the installed package.
-exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
+exec ghd --state-dir state --yes --non-interactive install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
 stderr 'installed owner/repo/foo@1\.2\.3'
 exec ghd --state-dir state verify foo
 stdout 'owner/repo/foo 1\.2\.3 verified'
@@ -14,7 +14,7 @@ stdout '"status":"verified"'
 ! stderr .
 
 # --all verifies every installed package in normalized order.
-exec ghd --state-dir state install owner/alpha/bar@1.0.0 --store-dir store --bin-dir bin
+exec ghd --state-dir state --yes --non-interactive install owner/alpha/bar@1.0.0 --store-dir store --bin-dir bin
 stderr 'installed owner/alpha/bar@1\.0\.0'
 exec ghd --state-dir state verify --all
 stdout 'owner/alpha/bar 1\.0\.0 verified'

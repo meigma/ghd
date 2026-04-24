@@ -19,6 +19,7 @@ func run() int {
 	defer stop()
 
 	root := cli.NewRootCommand(cli.Options{
+		In:  os.Stdin,
 		Out: os.Stdout,
 		Err: os.Stderr,
 	})

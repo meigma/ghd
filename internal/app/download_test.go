@@ -57,6 +57,7 @@ func TestVerifiedDownloaderWritesEvidenceAfterSuccessfulVerification(t *testing.
 	assert.Equal(t, assetDigest, tc.writer.record.Evidence.AssetDigest)
 	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
 	assert.True(t, tc.verifier.request.Policy.ExpectedSourceRepository.IsZero(), "core verifier should apply the repository default")
+	assert.Nil(t, tc.downloader.request.Progress)
 }
 
 func TestVerifiedDownloaderDoesNotWriteEvidenceWhenVerificationFails(t *testing.T) {
@@ -171,11 +172,19 @@ func (f *fakeReleaseAssetSource) ResolveReleaseAsset(context.Context, verificati
 }
 
 type fakeArtifactDownloader struct {
-	path string
-	err  error
+	path     string
+	err      error
+	request  DownloadReleaseAssetRequest
+	progress []DownloadProgress
 }
 
-func (f *fakeArtifactDownloader) DownloadReleaseAsset(context.Context, ReleaseAsset, string) (string, error) {
+func (f *fakeArtifactDownloader) DownloadReleaseAsset(_ context.Context, request DownloadReleaseAssetRequest) (string, error) {
+	f.request = request
+	for _, progress := range f.progress {
+		if request.Progress != nil {
+			request.Progress(progress)
+		}
+	}
 	return f.path, f.err
 }
 
@@ -183,10 +192,14 @@ type fakeVerifier struct {
 	request  verification.Request
 	evidence verification.Evidence
 	err      error
+	events   *[]string
 }
 
 func (f *fakeVerifier) VerifyReleaseAsset(_ context.Context, request verification.Request) (verification.Evidence, error) {
 	f.request = request
+	if f.events != nil {
+		*f.events = append(*f.events, "verify")
+	}
 	if f.err != nil {
 		return verification.Evidence{}, f.err
 	}
