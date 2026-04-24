@@ -35,6 +35,14 @@ type EvidenceWriter interface {
 	WriteVerificationEvidence(ctx context.Context, outputDir string, record VerificationRecord) (string, error)
 }
 
+// DownloadFileSystem manages verified download staging and publication.
+type DownloadFileSystem interface {
+	// CreateDownloadDir creates a private temporary directory for untrusted download bytes.
+	CreateDownloadDir(ctx context.Context) (string, func(), error)
+	// PublishVerifiedArtifact copies a verified artifact into outputDir and returns its final path.
+	PublishVerifiedArtifact(ctx context.Context, sourcePath string, outputDir string, assetName string) (string, error)
+}
+
 // Verifier verifies downloaded release assets.
 type Verifier interface {
 	// VerifyReleaseAsset verifies one downloaded release asset.
@@ -84,6 +92,8 @@ type VerifiedDownloadDependencies struct {
 	Verifier Verifier
 	// EvidenceWriter records verification evidence.
 	EvidenceWriter EvidenceWriter
+	// FileSystem stages untrusted downloads and publishes verified artifacts.
+	FileSystem DownloadFileSystem
 }
 
 // VerifiedDownloader implements the verified download use case.
@@ -93,6 +103,7 @@ type VerifiedDownloader struct {
 	download  ArtifactDownloader
 	verify    Verifier
 	evidence  EvidenceWriter
+	files     DownloadFileSystem
 }
 
 // VerifiedDownloadRequest describes one verified download.
@@ -204,12 +215,16 @@ func NewVerifiedDownloader(deps VerifiedDownloadDependencies) (*VerifiedDownload
 	if deps.EvidenceWriter == nil {
 		return nil, fmt.Errorf("evidence writer must be set")
 	}
+	if deps.FileSystem == nil {
+		return nil, fmt.Errorf("download filesystem must be set")
+	}
 	return &VerifiedDownloader{
 		manifests: deps.Manifests,
 		assets:    deps.Assets,
 		download:  deps.Downloader,
 		verify:    deps.Verifier,
 		evidence:  deps.EvidenceWriter,
+		files:     deps.FileSystem,
 	}, nil
 }
 
@@ -248,9 +263,15 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("resolve release asset %q: %w", selected.Name, err)
 	}
+	downloadDir, cleanup, err := d.files.CreateDownloadDir(ctx)
+	if err != nil {
+		return VerifiedDownloadResult{}, err
+	}
+	defer cleanup()
+
 	artifactPath, err := d.download.DownloadReleaseAsset(ctx, DownloadReleaseAssetRequest{
 		Asset:     releaseAsset,
-		OutputDir: request.OutputDir,
+		OutputDir: downloadDir,
 	})
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
@@ -265,6 +286,10 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	})
 	if err != nil {
 		return VerifiedDownloadResult{}, err
+	}
+	publishedArtifactPath, err := d.files.PublishVerifiedArtifact(ctx, artifactPath, request.OutputDir, releaseAsset.Name)
+	if err != nil {
+		return VerifiedDownloadResult{}, fmt.Errorf("publish verified artifact %q: %w", releaseAsset.Name, err)
 	}
 
 	record := VerificationRecord{
@@ -287,7 +312,7 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 		Version:      request.Version,
 		Tag:          tag,
 		AssetName:    selected.Name,
-		ArtifactPath: artifactPath,
+		ArtifactPath: publishedArtifactPath,
 		EvidencePath: evidencePath,
 		Evidence:     evidence,
 	}, nil

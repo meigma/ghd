@@ -14,6 +14,73 @@ import (
 	"github.com/meigma/ghd/internal/verification"
 )
 
+func TestInstallerPublishesVerifiedArtifactExclusively(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	require.NoError(t, os.WriteFile(source, []byte("verified"), 0o600))
+	outputDir := t.TempDir()
+
+	path, err := NewInstaller().PublishVerifiedArtifact(context.Background(), source, outputDir, "foo.tar.gz")
+
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(outputDir, "foo.tar.gz"), path)
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	assert.Equal(t, "verified", string(data))
+	info, err := os.Stat(path)
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+}
+
+func TestInstallerPublishVerifiedArtifactFailsIfDestinationExists(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	require.NoError(t, os.WriteFile(source, []byte("verified"), 0o600))
+	outputDir := t.TempDir()
+	destination := filepath.Join(outputDir, "foo.tar.gz")
+	require.NoError(t, os.WriteFile(destination, []byte("original"), 0o600))
+
+	_, err := NewInstaller().PublishVerifiedArtifact(context.Background(), source, outputDir, "foo.tar.gz")
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "already exists")
+	data, err := os.ReadFile(destination)
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(data))
+}
+
+func TestInstallerPublishVerifiedArtifactRejectsUnsafeNames(t *testing.T) {
+	source := filepath.Join(t.TempDir(), "artifact.tar.gz")
+	require.NoError(t, os.WriteFile(source, []byte("verified"), 0o600))
+
+	tests := []struct {
+		name      string
+		assetName string
+	}{
+		{name: "empty", assetName: ""},
+		{name: "parent", assetName: "../foo.tar.gz"},
+		{name: "backslash", assetName: `foo\bar.tar.gz`},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewInstaller().PublishVerifiedArtifact(context.Background(), source, t.TempDir(), tt.assetName)
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestInstallerPublishVerifiedArtifactRemovesPartialCopy(t *testing.T) {
+	sourceDir := t.TempDir()
+	outputDir := t.TempDir()
+	destination := filepath.Join(outputDir, "foo.tar.gz")
+
+	_, err := NewInstaller().PublishVerifiedArtifact(context.Background(), sourceDir, outputDir, "foo.tar.gz")
+
+	require.Error(t, err)
+	assert.NoFileExists(t, destination)
+}
+
 func TestInstallerCreatesDigestKeyedStoreLayout(t *testing.T) {
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
