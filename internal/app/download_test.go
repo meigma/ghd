@@ -68,6 +68,52 @@ func TestVerifiedDownloaderWritesEvidenceAfterSuccessfulVerification(t *testing.
 	assert.Nil(t, tc.downloader.request.Progress)
 }
 
+func TestVerifiedDownloaderReportsProgressInOrder(t *testing.T) {
+	repository := verification.Repository{Owner: "owner", Name: "repo"}
+	tc := newDownloadTestContext(t)
+	tc.manifests.data = []byte(testManifest())
+	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
+	tc.downloader.progress = []DownloadProgress{
+		{AssetName: "foo_1.2.3_darwin_arm64.tar.gz", BytesDownloaded: 128, TotalBytes: 512},
+		{AssetName: "foo_1.2.3_darwin_arm64.tar.gz", BytesDownloaded: 512, TotalBytes: 512},
+	}
+	tc.verifier.evidence = verification.Evidence{
+		Repository:       repository,
+		Tag:              "foo-v1.2.3",
+		AssetDigest:      mustDigest(t, "sha256", repeatHex("aa", 32)),
+		ReleaseTagDigest: mustDigest(t, "sha1", repeatHex("bb", 20)),
+	}
+
+	var stages []VerifiedDownloadProgressStage
+	var downloads []DownloadProgress
+	_, err := tc.subject.Download(context.Background(), VerifiedDownloadRequest{
+		Repository:  repository,
+		PackageName: "foo",
+		Version:     "1.2.3",
+		OutputDir:   t.TempDir(),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+		Progress: func(progress VerifiedDownloadProgress) {
+			stages = append(stages, progress.Stage)
+			if progress.Download != nil {
+				downloads = append(downloads, *progress.Download)
+			}
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []VerifiedDownloadProgressStage{
+		VerifiedDownloadProgressResolvingManifest,
+		VerifiedDownloadProgressResolvingAsset,
+		VerifiedDownloadProgressDownloading,
+		VerifiedDownloadProgressDownloading,
+		VerifiedDownloadProgressVerifying,
+		VerifiedDownloadProgressWritingEvidence,
+	}, stages)
+	assert.Equal(t, tc.downloader.progress, downloads)
+	require.NotNil(t, tc.downloader.request.Progress)
+}
+
 func TestVerifiedDownloaderDoesNotWriteEvidenceWhenVerificationFails(t *testing.T) {
 	tc := newDownloadTestContext(t)
 	tc.manifests.data = []byte(testManifest())

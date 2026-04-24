@@ -40,6 +40,31 @@ func TestPackageUninstallerRemovesLinksStateAndStore(t *testing.T) {
 	assert.Equal(t, []string{"state-load", "remove-managed", "state-remove"}, tc.events)
 }
 
+func TestPackageUninstallerReportsProgressInOrder(t *testing.T) {
+	tc := newUninstallTestContext(t)
+	var err error
+	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+
+	var stages []UninstallProgressStage
+	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Progress: func(progress UninstallProgress) {
+			stages = append(stages, progress.Stage)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []UninstallProgressStage{
+		UninstallProgressLoadingState,
+		UninstallProgressRemovingManaged,
+		UninstallProgressRemovingState,
+	}, stages)
+}
+
 func TestPackageUninstallerRejectsAmbiguousTargetsBeforeRemovingLinks(t *testing.T) {
 	tc := newUninstallTestContext(t)
 	var err error

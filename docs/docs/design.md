@@ -235,6 +235,11 @@ Behavior notes:
   `--yes --non-interactive` is the automation path: it disables prompts, color,
   and transient UI while explicitly approving the verified install. The stable
   stdout `binary PATH` contract is reserved for non-interactive installs.
+- Interactive `download` uses stderr-first terminal UX: transient status,
+  byte-level download progress when the asset size is known, and a final
+  verified summary on stderr. The stable stdout `artifact PATH` and
+  `verification PATH` lines stay on stdout only in the plain automation path,
+  including non-TTY and `--non-interactive` usage.
 - `check` is read-only and reports available updates for installed packages.
 - `check` uses the same TTY rule as `list` and `info`: richer grouped human
   output on a terminal, plain rows for `--non-interactive`, and unchanged JSON
@@ -244,6 +249,9 @@ Behavior notes:
   installed package. Interactive update uses transient status, byte-level
   download progress, and verified-artifact approval before swapping binaries;
   `--yes --non-interactive` keeps result output plain for automation.
+- Interactive `uninstall` uses transient terminal status plus a final stderr
+  summary of what was removed, but it remains immediate and non-confirming by
+  design. `--non-interactive` keeps the existing one-line stderr result.
 - `doctor` checks PATH setup, local directory permissions, GitHub connectivity,
   and authentication/rate-limit readiness.
 - `list`, `info`, `installed`, `check`, `verify`, `update`, `doctor`, and

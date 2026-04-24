@@ -67,6 +67,12 @@ tag contains a root `ghd.toml`. The default-branch manifest is only used to
 discover a candidate release tag; signer workflow, asset pattern, and binary
 path policy come from the manifest at that tag.
 
+Interactive `download` now uses stderr-first terminal UX: transient status,
+byte-level download progress when GitHub reports an asset size, and a final
+verified summary on stderr. Machine-readable `artifact PATH` and
+`verification PATH` lines stay on stdout only in the plain automation path,
+including non-TTY and `--non-interactive` usage.
+
 Interactive `install` and `update` run with transient terminal status, show
 byte-level download progress when GitHub reports an asset size, and ask for
 approval after verification but before exposing or swapping binaries. The
@@ -76,6 +82,11 @@ provenance facts behind `View details`. Automation should pass
 without prompting; `install` emits the stable `binary PATH` stdout lines only in
 non-interactive mode, while `update` preserves its result rows and `--json`
 output.
+
+Interactive `uninstall` now uses transient terminal status plus a final stderr
+summary of what was removed, but it remains immediate and non-confirming by
+design. `--non-interactive` keeps the existing one-line stderr result without
+any richer terminal framing.
 
 `list`, `info`, and `check` now render richer human-oriented views when stdout
 is a terminal. Their automation-facing contracts stay unchanged: `--json`
@@ -89,7 +100,7 @@ Start with the design document for the intended full product shape:
 `check`, `verify`, and `doctor` are intentionally read-only in the current
 prototype. Binary ownership collisions are refused early; richer ownership
 transfer, shim UX, and structured output for mutating status-only commands
-remain future work.
+beyond the current human-facing terminal summaries remain future work.
 
 ## Documentation
 
