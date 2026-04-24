@@ -4,6 +4,14 @@ stderr 'installed owner/repo/foo@1\.2\.3'
 exec ghd --state-dir state verify foo
 stdout 'owner/repo/foo 1\.2\.3 verified'
 ! stderr .
+exec ghd --state-dir state verify foo --json
+stdout '"verifications":\['
+stdout '"repository":"owner/repo"'
+stdout '"package":"foo"'
+stdout '"target":"owner/repo/foo"'
+stdout '"version":"1\.2\.3"'
+stdout '"status":"verified"'
+! stderr .
 
 # --all verifies every installed package in normalized order.
 exec ghd --state-dir state install owner/alpha/bar@1.0.0 --store-dir store --bin-dir bin

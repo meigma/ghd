@@ -11,6 +11,7 @@ import (
 
 func newCheckCommand(options Options) *cobra.Command {
 	var all bool
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "check [name|owner/repo/package|--all]",
 		Short: "Check installed packages for available updates",
@@ -38,7 +39,13 @@ func newCheckCommand(options Options) *cobra.Command {
 				All:      all || len(args) == 0,
 				StateDir: cfg.StateDir,
 			})
-			writeCheckResults(options, results)
+			if jsonOutput {
+				if writeErr := writeCheckResultsJSON(options, results); writeErr != nil {
+					return writeErr
+				}
+			} else {
+				writeCheckResults(options, results)
+			}
 			if err != nil {
 				return err
 			}
@@ -46,6 +53,7 @@ func newCheckCommand(options Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "check all installed packages")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write update checks as JSON")
 	return cmd
 }
 

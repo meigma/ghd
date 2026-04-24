@@ -3,6 +3,13 @@ exec ghd --index-dir index repo add owner/repo
 stderr 'indexed owner/repo'
 exec ghd --index-dir index repo list
 stdout 'owner/repo foo'
+exec ghd --index-dir index repo list --json
+stdout '"repositories":\['
+stdout '"repository":"owner/repo"'
+stdout '"packages":\[\{"name":"foo"'
+stdout '"binaries":\["foo"\]'
+stdout '"refreshed_at":"'
+! stderr .
 
 # Refresh can target one repository.
 exec ghd --index-dir index repo refresh owner/repo
@@ -15,6 +22,14 @@ stderr 'installed owner/repo/foo@1.2.3'
 exists bin/foo
 exec ghd --state-dir state installed
 stdout 'owner/repo/foo 1.2.3 foo'
+exec ghd --state-dir state installed --json
+stdout '"installed":\['
+stdout '"repository":"owner/repo"'
+stdout '"package":"foo"'
+stdout '"target":"owner/repo/foo"'
+stdout '"version":"1.2.3"'
+stdout '"binaries":\[\{"name":"foo"'
+! stderr .
 
 # Remove only updates the local index.
 exec ghd --index-dir index repo remove owner/repo

@@ -11,7 +11,8 @@ import (
 )
 
 func newInstalledCommand(options Options) *cobra.Command {
-	return &cobra.Command{
+	var jsonOutput bool
+	cmd := &cobra.Command{
 		Use:   "installed",
 		Short: "List installed packages",
 		Args:  cobra.NoArgs,
@@ -25,10 +26,15 @@ func newInstalledCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if jsonOutput {
+				return writeInstalledListJSON(options, records)
+			}
 			writeInstalledList(options, records)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write installed packages as JSON")
+	return cmd
 }
 
 func writeInstalledList(options Options, records []state.Record) {

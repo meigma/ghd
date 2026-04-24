@@ -3,11 +3,23 @@ exec ghd --index-dir index repo add owner/repo
 exec ghd --index-dir index list
 stdout 'owner/repo/foo foo'
 ! stderr .
+exec ghd --index-dir index list --json
+stdout '"packages":\['
+stdout '"repository":"owner/repo"'
+stdout '"package":"foo"'
+stdout '"target":"owner/repo/foo"'
+stdout '"binaries":\["foo"\]'
+! stderr .
 
 # Live list fetches a repository manifest without indexing it.
 exec ghd --index-dir empty list owner/multi
 stdout 'owner/multi/bar bar'
 stdout 'owner/multi/foo foo'
+! stderr .
+exec ghd --index-dir empty list owner/multi --json
+stdout '"repository":"owner/multi"'
+stdout '"target":"owner/multi/bar"'
+stdout '"target":"owner/multi/foo"'
 ! stderr .
 
 # Version-suffixed discovery targets are rejected at parse time.

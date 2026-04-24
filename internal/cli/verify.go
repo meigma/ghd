@@ -11,6 +11,7 @@ import (
 
 func newVerifyCommand(options Options) *cobra.Command {
 	var all bool
+	var jsonOutput bool
 	cmd := &cobra.Command{
 		Use:   "verify [name|owner/repo/package|--all]",
 		Short: "Re-verify active installed packages",
@@ -40,7 +41,13 @@ func newVerifyCommand(options Options) *cobra.Command {
 				All:      all,
 				StateDir: cfg.StateDir,
 			})
-			writeVerifyResults(options, results)
+			if jsonOutput {
+				if writeErr := writeVerifyResultsJSON(options, results); writeErr != nil {
+					return writeErr
+				}
+			} else {
+				writeVerifyResults(options, results)
+			}
 			if err != nil {
 				return err
 			}
@@ -48,6 +55,7 @@ func newVerifyCommand(options Options) *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "verify all installed packages")
+	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write verification results as JSON")
 	return cmd
 }
 

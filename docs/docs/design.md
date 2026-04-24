@@ -9,8 +9,9 @@ Status: initial design. This document describes the first coherent shape of the
 project, not a frozen architecture.
 
 Prototype status: `list`, `info`, `download`, `install`, repository indexing,
-installed-state, `check`, `verify`, `doctor`, `update`, `uninstall`, and
-binary ownership collision preflight now exist as working slices.
+installed-state, `check`, `verify`, `doctor`, `update`, `uninstall`, binary
+ownership collision preflight, and JSON output for result-oriented commands now
+exist as working slices.
 
 GitHub Downloader (`ghd`) is a CLI for securely installing binaries from GitHub
 releases. It is intentionally opinionated: a compatible repository must publish
@@ -225,6 +226,8 @@ Behavior notes:
   installed package.
 - `doctor` checks PATH setup, local directory permissions, GitHub connectivity,
   and authentication/rate-limit readiness.
+- `list`, `info`, `installed`, `check`, `verify`, `update`, `doctor`, and
+  `repo list` support `--json` for scriptable result output.
 
 ## Local State
 
@@ -442,9 +445,9 @@ The first vertical slice should prove the complete path for one real repository:
 8. Record `verification.json`.
 
 After the verified install, indexing, installed-state, uninstall, read-only
-check, package-discovery, collision preflight, and broader lifecycle slices
-work, the next slices should focus on remaining polish and release-readiness
-gaps.
+check, package-discovery, collision preflight, broader lifecycle slices, and
+structured output for result-oriented commands work, the next slices should
+focus on remaining polish and release-readiness gaps.
 
 ## Open Questions
 

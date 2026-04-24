@@ -9,6 +9,14 @@ stdout 'binaries foo'
 stdout 'asset darwin/arm64 foo_\$\{version\}_darwin_arm64\.tar\.gz'
 stdout 'asset linux/amd64 foo_\$\{version\}_linux_amd64\.tar\.gz'
 ! stderr .
+exec ghd --index-dir index info foo --json
+stdout '"package":\{"repository":"owner/repo"'
+stdout '"target":"owner/repo/foo"'
+stdout '"signer_workflow":"owner/repo/\.github/workflows/release\.yml"'
+stdout '"tag_pattern":"v\$\{version\}"'
+stdout '"binaries":\["foo"\]'
+stdout '"assets":\['
+! stderr .
 
 # Repo-only info requires qualification for multi-package manifests.
 ! exec ghd info owner/multi
@@ -23,6 +31,12 @@ stdout 'tag-pattern bar-v\$\{version\}'
 stdout 'binaries bar'
 stdout 'asset darwin/arm64 bar_\$\{version\}_darwin_arm64\.tar\.gz'
 stdout 'asset linux/amd64 bar_\$\{version\}_linux_amd64\.tar\.gz'
+! stderr .
+exec ghd info owner/multi/bar --json
+stdout '"repository":"owner/multi"'
+stdout '"package":"bar"'
+stdout '"target":"owner/multi/bar"'
+stdout '"tag_pattern":"bar-v\$\{version\}"'
 ! stderr .
 
 # Version-suffixed discovery targets are rejected at parse time.
