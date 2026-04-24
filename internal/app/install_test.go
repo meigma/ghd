@@ -374,6 +374,7 @@ type fakeInstallFileSystem struct {
 	replaceErr       error
 	replaceErrs      []error
 	removeStoreErr   error
+	removeStoreErrs  []error
 	removeManagedErr error
 	removedManaged   *RemoveManagedInstallRequest
 	replaceRequests  []ReplaceManagedBinariesRequest
@@ -435,6 +436,11 @@ func (f *fakeInstallFileSystem) RemoveManagedStore(_ context.Context, storeRoot 
 	*f.events = append(*f.events, "remove-store")
 	f.removedStoreRoot = storeRoot
 	f.removedStorePath = storePath
+	if len(f.removeStoreErrs) > 0 {
+		err := f.removeStoreErrs[0]
+		f.removeStoreErrs = f.removeStoreErrs[1:]
+		return err
+	}
 	return f.removeStoreErr
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,32 +15,18 @@ import (
 	"github.com/meigma/ghd/internal/verification"
 )
 
-func TestPackageUpdaterUpdatesInstalledPackageAfterSuccessfulStaging(t *testing.T) {
+func TestPackageUpdaterUpdateSingleTargetUpdatedRowAfterSuccessfulStaging(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
 	require.NoError(t, err)
-	tc.manifests.data["owner/repo"] = []byte(testManifest())
-	tc.releases.data["owner/repo"] = []RepositoryRelease{
-		{TagName: "foo-v1.2.3", AssetNames: []string{"foo_1.2.3_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-	}
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
-	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
-	tc.verifier.evidence = verification.Evidence{
-		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
-	}
-	tc.files.downloadDir = t.TempDir()
-	tc.files.layout = StoreLayout{
-		StorePath:    filepath.Join(t.TempDir(), "store"),
-		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
-		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
-	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/new/extracted/bin/foo"}}
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 	storeDir := filepath.Join(t.TempDir(), "store-root")
 	binDir := filepath.Join(t.TempDir(), "bin")
 
-	result, err := tc.subject.Update(context.Background(), UpdateRequest{
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: storeDir,
 		BinDir:   binDir,
@@ -47,40 +34,38 @@ func TestPackageUpdaterUpdatesInstalledPackageAfterSuccessfulStaging(t *testing.
 	})
 
 	require.NoError(t, err)
-	require.True(t, result.Updated)
-	assert.Equal(t, "1.2.3", result.Previous.Version)
-	assert.Equal(t, "1.3.0", result.Current.Version)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateInstalledResult{
+		Repository:      "owner/repo",
+		Package:         "foo",
+		PreviousVersion: "1.2.3",
+		CurrentVersion:  "1.3.0",
+		Status:          UpdateStatusUpdated,
+	}, results[0])
 	require.NotNil(t, tc.files.metadata)
 	assert.Equal(t, "1.3.0", tc.files.metadata.Version)
 	assert.Equal(t, "foo_1.3.0_darwin_arm64.tar.gz", tc.files.metadata.Asset)
 	require.Len(t, tc.files.replaceRequests, 1)
-	assert.Equal(t, "/bin/foo", tc.files.replaceRequests[0].Previous[0].LinkPath)
+	assert.Equal(t, record.Binaries[0].LinkPath, tc.files.replaceRequests[0].Previous[0].LinkPath)
 	expectedLinkPath, err := filepath.Abs(filepath.Join(binDir, "foo"))
 	require.NoError(t, err)
 	assert.Equal(t, expectedLinkPath, tc.files.replaceRequests[0].Next[0].LinkPath)
 	assert.Equal(t, "1.3.0", tc.state.replacedRecord.Version)
 	assert.Equal(t, tc.files.layout.StorePath, tc.state.replacedRecord.StorePath)
 	assert.Equal(t, storeDir, tc.files.removedStoreRoot)
-	assert.Equal(t, "/store/foo", tc.files.removedStorePath)
+	assert.Equal(t, record.StorePath, tc.files.removedStorePath)
 	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "remove-store", "cleanup"}, tc.events)
 }
 
-func TestPackageUpdaterReturnsNoOpWhenNoNewerStableReleaseExists(t *testing.T) {
+func TestPackageUpdaterUpdateSingleTargetAlreadyUpToDate(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	var err error
-	record := installedRecord("owner/repo", "foo")
-	record.Version = "1.3.0"
-	record.Tag = "foo-v1.3.0"
-	record.Asset = "foo_1.3.0_darwin_arm64.tar.gz"
-	tc.state.index, err = tc.state.index.AddRecord(record)
+	record := updateInstalledRecord("owner/repo", "1.3.0")
+	tc.state.index, err = mustUpdateIndex(record)
 	require.NoError(t, err)
-	tc.manifests.data["owner/repo"] = []byte(testManifest())
-	tc.releases.data["owner/repo"] = []RepositoryRelease{
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.3.0-rc.1", Prerelease: true, AssetNames: []string{"foo_1.3.0-rc.1_darwin_arm64.tar.gz"}},
-	}
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
 
-	result, err := tc.subject.Update(context.Background(), UpdateRequest{
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -88,19 +73,26 @@ func TestPackageUpdaterReturnsNoOpWhenNoNewerStableReleaseExists(t *testing.T) {
 	})
 
 	require.NoError(t, err)
-	assert.False(t, result.Updated)
-	assert.Equal(t, record.Version, result.Current.Version)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateInstalledResult{
+		Repository:      "owner/repo",
+		Package:         "foo",
+		PreviousVersion: "1.3.0",
+		CurrentVersion:  "1.3.0",
+		Status:          UpdateStatusAlreadyUpToDate,
+	}, results[0])
 	assert.Empty(t, tc.files.replaceRequests)
 	assert.Empty(t, tc.files.removedStorePath)
 	assert.Equal(t, []string{"state-load"}, tc.events)
 }
 
-func TestPackageUpdaterFailsSafelyWhenInstalledAssetVariantDriftsFromManifest(t *testing.T) {
+func TestPackageUpdaterUpdateSingleTargetCannotUpdateWhenInstalledAssetVariantDrifts(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
 	require.NoError(t, err)
-	tc.manifests.data["owner/repo"] = []byte(`
+	tc.manifests.data[record.Repository] = []byte(`
 version = 1
 
 [provenance]
@@ -118,11 +110,11 @@ pattern = "foo_${version}_linux_amd64.tar.gz"
 [[packages.binaries]]
 path = "bin/foo"
 `)
-	tc.releases.data["owner/repo"] = []RepositoryRelease{
+	tc.releases.data[record.Repository] = []RepositoryRelease{
 		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_linux_amd64.tar.gz"}},
 	}
 
-	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -130,36 +122,29 @@ path = "bin/foo"
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "installed asset")
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	assert.Equal(t, "could not update 1 installed package", err.Error())
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, "installed asset")
 	assert.Empty(t, tc.files.replaceRequests)
 	assert.Empty(t, tc.files.removedStorePath)
 	assert.Equal(t, []string{"state-load"}, tc.events)
 }
 
-func TestPackageUpdaterRollsBackActiveLinksWhenStateReplacementFails(t *testing.T) {
+func TestPackageUpdaterUpdateSingleTargetCannotUpdateAndRollsBackLinksWhenStateReplacementFails(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
 	require.NoError(t, err)
 	tc.state.replaceErr = errors.New("write installed state")
-	tc.manifests.data["owner/repo"] = []byte(testManifest())
-	tc.releases.data["owner/repo"] = []RepositoryRelease{
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-	}
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
-	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
-	tc.verifier.evidence = verification.Evidence{
-		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
-	}
-	tc.files.downloadDir = t.TempDir()
-	tc.files.layout = StoreLayout{
-		StorePath:    filepath.Join(t.TempDir(), "store"),
-		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
-		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
-	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/new/extracted/bin/foo"}}
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 
-	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -167,10 +152,15 @@ func TestPackageUpdaterRollsBackActiveLinksWhenStateReplacementFails(t *testing.
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "replace installed state")
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, "replace installed state")
 	require.Len(t, tc.files.replaceRequests, 2)
-	assert.Equal(t, "/bin/foo", tc.files.replaceRequests[0].Previous[0].LinkPath)
-	assert.Equal(t, "/bin/foo", tc.files.replaceRequests[1].Next[0].LinkPath)
+	assert.Equal(t, record.Binaries[0].LinkPath, tc.files.replaceRequests[0].Previous[0].LinkPath)
+	assert.Equal(t, record.Binaries[0].LinkPath, tc.files.replaceRequests[1].Next[0].LinkPath)
 	require.NotNil(t, tc.files.removedManaged)
 	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
 	assert.Empty(t, tc.files.removedManaged.Binaries)
@@ -178,31 +168,18 @@ func TestPackageUpdaterRollsBackActiveLinksWhenStateReplacementFails(t *testing.
 	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "replace-binaries", "remove-managed", "cleanup"}, tc.events)
 }
 
-func TestPackageUpdaterPreservesStagedStoreWhenRollbackFails(t *testing.T) {
+func TestPackageUpdaterUpdateSingleTargetPreservesStagedStoreWhenRollbackFails(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
 	require.NoError(t, err)
 	tc.state.replaceErr = errors.New("write installed state")
-	tc.manifests.data["owner/repo"] = []byte(testManifest())
-	tc.releases.data["owner/repo"] = []RepositoryRelease{
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-	}
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
-	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
-	tc.verifier.evidence = verification.Evidence{
-		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
-	}
-	tc.files.downloadDir = t.TempDir()
-	tc.files.layout = StoreLayout{
-		StorePath:    filepath.Join(t.TempDir(), "store"),
-		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
-		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
-	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/new/extracted/bin/foo"}}
 	tc.files.replaceErrs = []error{nil, errors.New("restore links")}
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 
-	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -210,39 +187,29 @@ func TestPackageUpdaterPreservesStagedStoreWhenRollbackFails(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "replace installed state")
-	assert.Contains(t, err.Error(), "restore previous managed binaries")
-	assert.Contains(t, err.Error(), "preserved staged update")
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, "preserved staged update")
 	require.Len(t, tc.files.replaceRequests, 2)
 	assert.Nil(t, tc.files.removedManaged)
 	assert.Empty(t, tc.files.removedStorePath)
 	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "replace-binaries", "cleanup"}, tc.events)
 }
 
-func TestPackageUpdaterReturnsUpdatedResultWhenPreviousStoreCleanupFails(t *testing.T) {
+func TestPackageUpdaterUpdateSingleTargetUpdatedWithWarningWhenPreviousStoreCleanupFails(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/repo", "foo"))
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
 	require.NoError(t, err)
-	tc.manifests.data["owner/repo"] = []byte(testManifest())
-	tc.releases.data["owner/repo"] = []RepositoryRelease{
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-	}
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
-	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
-	tc.verifier.evidence = verification.Evidence{
-		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
-	}
-	tc.files.downloadDir = t.TempDir()
-	tc.files.layout = StoreLayout{
-		StorePath:    filepath.Join(t.TempDir(), "store"),
-		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
-		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
-	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/new/extracted/bin/foo"}}
 	tc.files.removeStoreErr = errors.New("permission denied")
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
 
-	result, err := tc.subject.Update(context.Background(), UpdateRequest{
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
@@ -250,10 +217,166 @@ func TestPackageUpdaterReturnsUpdatedResultWhenPreviousStoreCleanupFails(t *test
 	})
 
 	require.Error(t, err)
-	assert.True(t, result.Updated)
-	assert.Equal(t, "1.3.0", result.Current.Version)
-	assert.Contains(t, err.Error(), "updated owner/repo/foo@1.2.3 -> 1.3.0 but failed to remove previous store")
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Warned)
+	assert.Equal(t, "updated 1 installed package with warnings", err.Error())
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateInstalledResult{
+		Repository:      "owner/repo",
+		Package:         "foo",
+		PreviousVersion: "1.2.3",
+		CurrentVersion:  "1.3.0",
+		Status:          UpdateStatusUpdatedWithWarning,
+		Reason:          `updated owner/repo/foo@1.2.3 -> 1.3.0 but failed to remove previous store: permission denied`,
+	}, results[0])
+	assert.Equal(t, "1.3.0", tc.state.replacedRecord.Version)
 	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "remove-store", "cleanup"}, tc.events)
+}
+
+func TestPackageUpdaterUpdateAllSuccess(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	alpha := updateInstalledRecord("owner/alpha", "1.2.3")
+	repo := updateInstalledRecord("owner/repo", "1.2.3")
+	var err error
+	tc.state.index, err = mustUpdateIndex(alpha, repo)
+	require.NoError(t, err)
+	configureRepositoryForVersion(t, tc, alpha.Repository, "1.3.0")
+	configureRepositoryForVersion(t, tc, repo.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		All:      true,
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+	assert.Equal(t, UpdateInstalledResult{
+		Repository:      "owner/alpha",
+		Package:         "foo",
+		PreviousVersion: "1.2.3",
+		CurrentVersion:  "1.3.0",
+		Status:          UpdateStatusUpdated,
+	}, results[0])
+	assert.Equal(t, UpdateInstalledResult{
+		Repository:      "owner/repo",
+		Package:         "foo",
+		PreviousVersion: "1.2.3",
+		CurrentVersion:  "1.3.0",
+		Status:          UpdateStatusUpdated,
+	}, results[1])
+}
+
+func TestPackageUpdaterUpdateAllMixedWarningAndFailure(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	broken := updateInstalledRecord("owner/broken", "1.2.3")
+	current := updateInstalledRecord("owner/current", "1.3.0")
+	repo := updateInstalledRecord("owner/repo", "1.2.3")
+	warn := updateInstalledRecord("owner/warn", "1.2.3")
+	var err error
+	tc.state.index, err = mustUpdateIndex(broken, current, repo, warn)
+	require.NoError(t, err)
+	tc.manifests.err[broken.Repository] = errors.New("missing")
+	configureRepositoryForVersion(t, tc, current.Repository, "1.3.0")
+	configureRepositoryForVersion(t, tc, repo.Repository, "1.3.0")
+	configureRepositoryForVersion(t, tc, warn.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.files.removeStoreErrs = []error{nil, errors.New("permission denied")}
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		All:      true,
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.Error(t, err)
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	assert.Equal(t, 1, incomplete.Warned)
+	assert.Equal(t, "update completed with 1 warning and 1 failure", err.Error())
+	require.Len(t, results, 4)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, "fetch ghd.toml: missing")
+	assert.Equal(t, UpdateInstalledResult{
+		Repository:      "owner/current",
+		Package:         "foo",
+		PreviousVersion: "1.3.0",
+		CurrentVersion:  "1.3.0",
+		Status:          UpdateStatusAlreadyUpToDate,
+	}, results[1])
+	assert.Equal(t, UpdateStatusUpdated, results[2].Status)
+	assert.Equal(t, UpdateStatusUpdatedWithWarning, results[3].Status)
+	assert.Contains(t, results[3].Reason, "failed to remove previous store")
+}
+
+func TestPackageUpdaterUpdateRejectsInvalidRequests(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, results)
+	assert.EqualError(t, err, "update target must be set")
+
+	results, err = tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		All:      true,
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.Error(t, err)
+	assert.Nil(t, results)
+	assert.EqualError(t, err, "update accepts a target or --all, not both")
+}
+
+func TestPackageUpdaterUpdateReturnsPreflightErrorsWithoutResults(t *testing.T) {
+	t.Run("state load failure", func(t *testing.T) {
+		tc := newPackageUpdaterTestContext(t)
+		tc.state.loadErr = errors.New("boom")
+
+		results, err := tc.subject.Update(context.Background(), UpdateRequest{
+			Target:   "foo",
+			StoreDir: filepath.Join(t.TempDir(), "store-root"),
+			BinDir:   filepath.Join(t.TempDir(), "bin"),
+			StateDir: filepath.Join(t.TempDir(), "state"),
+		})
+
+		require.Error(t, err)
+		assert.Nil(t, results)
+		assert.EqualError(t, err, "boom")
+	})
+
+	t.Run("ambiguous target", func(t *testing.T) {
+		tc := newPackageUpdaterTestContext(t)
+		one := updateInstalledRecord("owner/one", "1.2.3")
+		two := updateInstalledRecord("owner/two", "1.2.3")
+		var err error
+		tc.state.index, err = mustUpdateIndex(one, two)
+		require.NoError(t, err)
+
+		results, err := tc.subject.Update(context.Background(), UpdateRequest{
+			Target:   "foo",
+			StoreDir: filepath.Join(t.TempDir(), "store-root"),
+			BinDir:   filepath.Join(t.TempDir(), "bin"),
+			StateDir: filepath.Join(t.TempDir(), "state"),
+		})
+
+		require.Error(t, err)
+		assert.Nil(t, results)
+		var ambiguous state.AmbiguousInstallError
+		require.ErrorAs(t, err, &ambiguous)
+	})
 }
 
 type packageUpdaterTestContext struct {
@@ -304,4 +427,63 @@ func newPackageUpdaterTestContext(t *testing.T) *packageUpdaterTestContext {
 	require.NoError(t, err)
 	tc.subject = subject
 	return tc
+}
+
+func configureSuccessfulUpdateFixture(t *testing.T, tc *packageUpdaterTestContext, latestVersion string) {
+	t.Helper()
+	tc.assets.asset = ReleaseAsset{Name: "foo_" + latestVersion + "_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
+	tc.verifier.evidence = verification.Evidence{
+		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
+	}
+	tc.files.downloadDir = t.TempDir()
+	tc.files.layout = StoreLayout{
+		StorePath:    filepath.Join(t.TempDir(), "store"),
+		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
+		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
+	}
+	tc.archives.result = []ExtractedBinary{{
+		Name:         "foo",
+		RelativePath: "bin/foo",
+		Path:         filepath.Join(tc.files.layout.ExtractedDir, "bin", "foo"),
+	}}
+}
+
+func configureRepositoryForVersion(t *testing.T, tc *packageUpdaterTestContext, repository string, latestVersion string) {
+	t.Helper()
+	tc.manifests.data[repository] = []byte(testManifest())
+	tc.releases.data[repository] = []RepositoryRelease{{
+		TagName:    "foo-v" + latestVersion,
+		AssetNames: []string{"foo_" + latestVersion + "_darwin_arm64.tar.gz"},
+	}}
+}
+
+func updateInstalledRecord(repository string, version string) state.Record {
+	slug := strings.ReplaceAll(repository, "/", "-")
+	return state.Record{
+		Repository:       repository,
+		Package:          "foo",
+		Version:          version,
+		Tag:              "foo-v" + version,
+		Asset:            "foo_" + version + "_darwin_arm64.tar.gz",
+		AssetDigest:      "sha256:abc123",
+		StorePath:        filepath.Join("/store", slug, "foo"),
+		ArtifactPath:     filepath.Join("/store", slug, "foo", "artifact"),
+		ExtractedPath:    filepath.Join("/store", slug, "foo", "extracted"),
+		VerificationPath: filepath.Join("/store", slug, "foo", "verification.json"),
+		Binaries:         []state.Binary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: filepath.Join("/store", slug, "foo", "extracted", "foo")}},
+		InstalledAt:      time.Unix(1700000000, 0).UTC(),
+	}
+}
+
+func mustUpdateIndex(records ...state.Record) (state.Index, error) {
+	index := state.NewIndex()
+	var err error
+	for _, record := range records {
+		index, err = index.AddRecord(record)
+		if err != nil {
+			return state.Index{}, err
+		}
+	}
+	return index.Normalize(), nil
 }

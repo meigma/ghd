@@ -15,15 +15,26 @@ type updateOptions struct {
 }
 
 func newUpdateCommand(options Options) *cobra.Command {
+	var all bool
 	var update updateOptions
 	cmd := &cobra.Command{
-		Use:   "update name|owner/repo/package --store-dir DIR --bin-dir DIR",
-		Short: "Update one active package to the latest eligible version",
-		Args:  cobra.ExactArgs(1),
+		Use:   "update [name|owner/repo/package|--all] --store-dir DIR --bin-dir DIR",
+		Short: "Update active packages to the latest eligible version",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			target, err := parseUpdateTarget(args[0])
-			if err != nil {
-				return err
+			if all && len(args) > 0 {
+				return fmt.Errorf("update accepts a target or --all, not both")
+			}
+			if !all && len(args) == 0 {
+				return fmt.Errorf("update target must be set")
+			}
+			target := ""
+			if len(args) == 1 {
+				var err error
+				target, err = parseUpdateTarget(args[0])
+				if err != nil {
+					return err
+				}
 			}
 
 			cfg := config.Load(options.Viper)
@@ -31,30 +42,33 @@ func newUpdateCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			result, err := runtime.Update(cmd.Context(), app.UpdateRequest{
+			results, err := runtime.Update(cmd.Context(), app.UpdateRequest{
 				Target:   target,
+				All:      all,
 				StoreDir: cfg.StoreDir,
 				BinDir:   cfg.BinDir,
 				StateDir: cfg.StateDir,
 			})
-			if err != nil && !result.Updated {
-				return err
-			}
-			if result.Updated {
-				fmt.Fprintf(options.Err, "updated %s/%s@%s -> %s\n", result.Previous.Repository, result.Previous.Package, result.Previous.Version, result.Current.Version)
-				for _, binary := range result.Binaries {
-					fmt.Fprintf(options.Out, "binary %s\n", binary.LinkPath)
-				}
-			} else {
-				fmt.Fprintf(options.Err, "already up to date %s/%s@%s\n", result.Current.Repository, result.Current.Package, result.Current.Version)
-			}
+			writeUpdateResults(options, results)
 			if err != nil {
 				return err
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&all, "all", false, "update all installed packages")
 	cmd.Flags().StringVar(&update.storeDir, "store-dir", "", "managed store directory")
 	cmd.Flags().StringVar(&update.binDir, "bin-dir", "", "managed binary link directory")
 	return cmd
+}
+
+func writeUpdateResults(options Options, results []app.UpdateInstalledResult) {
+	for _, result := range results {
+		target := result.Repository + "/" + result.Package
+		if result.Reason != "" {
+			fmt.Fprintf(options.Out, "%s %s %s %s %s\n", target, result.PreviousVersion, result.CurrentVersion, result.Status, result.Reason)
+			continue
+		}
+		fmt.Fprintf(options.Out, "%s %s %s %s\n", target, result.PreviousVersion, result.CurrentVersion, result.Status)
+	}
 }

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -58,6 +59,36 @@ func TestVerifyWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
 		t.Fatalf("expected missing target error")
 	}
 	if err.Error() != "verify target must be set" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if called {
+		t.Fatalf("runtime factory should not have been called")
+	}
+}
+
+func TestUpdateWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var called bool
+
+	root := NewRootCommand(Options{
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			called = true
+			return nil, fmt.Errorf("runtime should not be constructed")
+		},
+	})
+	root.SetArgs([]string{"update", "--store-dir", "/tmp/ghd-store", "--bin-dir", "/tmp/ghd-bin"})
+
+	err := root.ExecuteContext(context.Background())
+	if err == nil {
+		t.Fatalf("expected missing target error")
+	}
+	if err.Error() != "update target must be set" {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if called {
@@ -186,15 +217,80 @@ func (testRuntime) CheckInstalled(ctx context.Context, request app.CheckRequest)
 	return results, nil
 }
 
-func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error) {
+func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) ([]app.UpdateInstalledResult, error) {
+	if request.All && strings.TrimSpace(request.Target) != "" {
+		return nil, fmt.Errorf("update accepts a target or --all, not both")
+	}
+	if !request.All && strings.TrimSpace(request.Target) == "" {
+		return nil, fmt.Errorf("update target must be set")
+	}
+	if strings.TrimSpace(request.StoreDir) == "" {
+		return nil, fmt.Errorf("store directory must be set")
+	}
+	if strings.TrimSpace(request.BinDir) == "" {
+		return nil, fmt.Errorf("bin directory must be set")
+	}
+	if strings.TrimSpace(request.StateDir) == "" {
+		return nil, fmt.Errorf("state directory must be set")
+	}
+
 	store := filesystem.NewInstalledStore()
 	index, err := store.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
-		return app.UpdateResult{}, err
+		return nil, err
 	}
-	previous, err := index.ResolveTarget(request.Target)
-	if err != nil {
-		return app.UpdateResult{}, err
+	var records []state.Record
+	if request.All {
+		records = index.Normalize().Records
+	} else {
+		previous, err := index.ResolveTarget(request.Target)
+		if err != nil {
+			return nil, err
+		}
+		records = []state.Record{previous}
+	}
+
+	results := make([]app.UpdateInstalledResult, 0, len(records))
+	failed := 0
+	warned := 0
+	for _, previous := range records {
+		result, err := updateTestRecord(ctx, store, request, previous)
+		results = append(results, result)
+		switch result.Status {
+		case app.UpdateStatusCannotUpdate:
+			failed++
+		case app.UpdateStatusUpdatedWithWarning:
+			warned++
+		}
+		if err != nil {
+			continue
+		}
+	}
+	if failed != 0 || warned != 0 {
+		return results, app.UpdateIncompleteError{Failed: failed, Warned: warned}
+	}
+	return results, nil
+}
+
+func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, request app.UpdateRequest, previous state.Record) (app.UpdateInstalledResult, error) {
+	if previous.Repository == "owner/broken" {
+		return app.UpdateInstalledResult{
+			Repository:      previous.Repository,
+			Package:         previous.Package,
+			PreviousVersion: previous.Version,
+			CurrentVersion:  previous.Version,
+			Status:          app.UpdateStatusCannotUpdate,
+			Reason:          "fetch ghd.toml: missing",
+		}, errors.New("fetch ghd.toml: missing")
+	}
+	if previous.Version == "1.3.0" {
+		return app.UpdateInstalledResult{
+			Repository:      previous.Repository,
+			Package:         previous.Package,
+			PreviousVersion: previous.Version,
+			CurrentVersion:  previous.Version,
+			Status:          app.UpdateStatusAlreadyUpToDate,
+		}, nil
 	}
 	previousBinaries := make([]app.InstalledBinary, 0, len(previous.Binaries))
 	for _, binary := range previous.Binaries {
@@ -204,22 +300,14 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.U
 			TargetPath: binary.TargetPath,
 		})
 	}
-	if previous.Version == "1.3.0" {
-		return app.UpdateResult{
-			Previous: previous,
-			Current:  previous,
-			Updated:  false,
-			Binaries: previousBinaries,
-		}, nil
-	}
 
 	storeRoot, err := filepath.Abs(filepath.Clean(request.StoreDir))
 	if err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
 	binRoot, err := filepath.Abs(filepath.Clean(request.BinDir))
 	if err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
 	newVersion := "1.3.0"
 	newStorePath := filepath.Join(
@@ -235,17 +323,17 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.U
 	newArtifactPath := filepath.Join(newStorePath, "artifact")
 	newVerificationPath := filepath.Join(newStorePath, "verification.json")
 	if err := os.MkdirAll(newExtractedPath, 0o755); err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
 	newTargetPath := filepath.Join(newExtractedPath, previous.Package)
 	if err := os.WriteFile(newTargetPath, []byte("binary"), 0o755); err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
 	if err := os.WriteFile(newArtifactPath, []byte("artifact"), 0o600); err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
 	if err := writeTestVerificationRecord(newVerificationPath, verification.Repository{Owner: "owner", Name: "repo"}, previous.Package, newVersion); err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
 	nextBinaries := []app.InstalledBinary{
 		{
@@ -255,12 +343,21 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.U
 		},
 	}
 	installer := filesystem.NewInstaller()
-	if err := installer.ReplaceManagedBinaries(ctx, app.ReplaceManagedBinariesRequest{
-		BinDir:   binRoot,
-		Previous: previousBinaries,
-		Next:     nextBinaries,
-	}); err != nil {
-		return app.UpdateResult{}, err
+	canSwapManagedLinks := true
+	for _, binary := range previousBinaries {
+		if _, err := os.Lstat(binary.LinkPath); err != nil {
+			canSwapManagedLinks = false
+			break
+		}
+	}
+	if canSwapManagedLinks {
+		if err := installer.ReplaceManagedBinaries(ctx, app.ReplaceManagedBinariesRequest{
+			BinDir:   binRoot,
+			Previous: previousBinaries,
+			Next:     nextBinaries,
+		}); err != nil {
+			return app.UpdateInstalledResult{}, err
+		}
 	}
 	current := previous
 	current.Version = newVersion
@@ -275,17 +372,27 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) (app.U
 	}
 	current.InstalledAt = time.Unix(1700000100, 0).UTC()
 	if _, err := store.ReplaceInstalledRecord(ctx, request.StateDir, current); err != nil {
-		return app.UpdateResult{}, err
+		return app.UpdateInstalledResult{}, err
 	}
-	if err := installer.RemoveManagedStore(ctx, storeRoot, previous.StorePath); err != nil {
-		return app.UpdateResult{}, err
+	row := app.UpdateInstalledResult{
+		Repository:      previous.Repository,
+		Package:         previous.Package,
+		PreviousVersion: previous.Version,
+		CurrentVersion:  current.Version,
+		Status:          app.UpdateStatusUpdated,
 	}
-	return app.UpdateResult{
-		Previous: previous,
-		Current:  current,
-		Updated:  true,
-		Binaries: nextBinaries,
-	}, nil
+	if previous.Repository == "owner/warn" {
+		reason := fmt.Sprintf("updated %s/%s@%s -> %s but failed to remove previous store: permission denied", previous.Repository, previous.Package, previous.Version, current.Version)
+		row.Status = app.UpdateStatusUpdatedWithWarning
+		row.Reason = reason
+		return row, errors.New(reason)
+	}
+	if canSwapManagedLinks {
+		if err := installer.RemoveManagedStore(ctx, storeRoot, previous.StorePath); err != nil {
+			return app.UpdateInstalledResult{}, err
+		}
+	}
+	return row, nil
 }
 
 func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {

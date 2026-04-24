@@ -40,8 +40,8 @@ type Runtime interface {
 	CheckInstalled(ctx context.Context, request app.CheckRequest) ([]app.CheckResult, error)
 	// VerifyInstalled re-verifies selected active installed packages.
 	VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) ([]app.VerifyInstalledResult, error)
-	// Update upgrades one active installed package when a newer eligible version exists.
-	Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error)
+	// Update updates selected active installed packages.
+	Update(ctx context.Context, request app.UpdateRequest) ([]app.UpdateInstalledResult, error)
 	// ListInstalled returns active installed packages.
 	ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error)
 	// Uninstall removes one active installed package.
