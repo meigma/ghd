@@ -29,25 +29,35 @@ const (
 	DefaultAPIVersion = "2026-03-10"
 	defaultPerPage    = 100
 	defaultMaxResults = 1000
+
+	defaultMaxReleaseAssetBytes                  int64 = 512 * 1024 * 1024
+	defaultMaxAttestationBundleCompressedBytes   int64 = 16 * 1024 * 1024
+	defaultMaxAttestationBundleDecompressedBytes int64 = 64 * 1024 * 1024
 )
 
 // Client implements verification release and attestation lookup ports with GitHub REST.
 type Client struct {
-	httpClient      *http.Client
-	baseURL         *url.URL
-	token           string
-	apiVersion      string
-	userAgent       string
-	maxAttestations int
+	httpClient                            *http.Client
+	baseURL                               *url.URL
+	token                                 string
+	apiVersion                            string
+	userAgent                             string
+	maxAttestations                       int
+	maxReleaseAssetBytes                  int64
+	maxAttestationBundleCompressedBytes   int64
+	maxAttestationBundleDecompressedBytes int64
 }
 
 type clientOptions struct {
-	httpClient      *http.Client
-	baseURL         string
-	token           string
-	apiVersion      string
-	userAgent       string
-	maxAttestations int
+	httpClient                            *http.Client
+	baseURL                               string
+	token                                 string
+	apiVersion                            string
+	userAgent                             string
+	maxAttestations                       int
+	maxReleaseAssetBytes                  int64
+	maxAttestationBundleCompressedBytes   int64
+	maxAttestationBundleDecompressedBytes int64
 }
 
 // Option configures a GitHub REST client.
@@ -95,6 +105,24 @@ func WithMaxAttestations(maxAttestations int) Option {
 	}
 }
 
+func withMaxReleaseAssetBytes(maxBytes int64) Option {
+	return func(opts *clientOptions) {
+		opts.maxReleaseAssetBytes = maxBytes
+	}
+}
+
+func withMaxAttestationBundleCompressedBytes(maxBytes int64) Option {
+	return func(opts *clientOptions) {
+		opts.maxAttestationBundleCompressedBytes = maxBytes
+	}
+}
+
+func withMaxAttestationBundleDecompressedBytes(maxBytes int64) Option {
+	return func(opts *clientOptions) {
+		opts.maxAttestationBundleDecompressedBytes = maxBytes
+	}
+}
+
 // NewClient creates a GitHub REST adapter.
 func NewClient(options ...Option) (*Client, error) {
 	opts := clientOptions{}
@@ -131,32 +159,99 @@ func NewClient(options ...Option) (*Client, error) {
 	if maxAttestations < 0 {
 		return nil, fmt.Errorf("max attestations must be non-negative")
 	}
+	maxReleaseAssetBytes := opts.maxReleaseAssetBytes
+	if maxReleaseAssetBytes == 0 {
+		maxReleaseAssetBytes = defaultMaxReleaseAssetBytes
+	}
+	if maxReleaseAssetBytes < 0 {
+		return nil, fmt.Errorf("max release asset bytes must be non-negative")
+	}
+	maxAttestationBundleCompressedBytes := opts.maxAttestationBundleCompressedBytes
+	if maxAttestationBundleCompressedBytes == 0 {
+		maxAttestationBundleCompressedBytes = defaultMaxAttestationBundleCompressedBytes
+	}
+	if maxAttestationBundleCompressedBytes < 0 {
+		return nil, fmt.Errorf("max attestation bundle compressed bytes must be non-negative")
+	}
+	maxAttestationBundleDecompressedBytes := opts.maxAttestationBundleDecompressedBytes
+	if maxAttestationBundleDecompressedBytes == 0 {
+		maxAttestationBundleDecompressedBytes = defaultMaxAttestationBundleDecompressedBytes
+	}
+	if maxAttestationBundleDecompressedBytes < 0 {
+		return nil, fmt.Errorf("max attestation bundle decompressed bytes must be non-negative")
+	}
 
 	return &Client{
-		httpClient:      httpClient,
-		baseURL:         baseURL,
-		token:           opts.token,
-		apiVersion:      apiVersion,
-		userAgent:       opts.userAgent,
-		maxAttestations: maxAttestations,
+		httpClient:                            httpClient,
+		baseURL:                               baseURL,
+		token:                                 opts.token,
+		apiVersion:                            apiVersion,
+		userAgent:                             opts.userAgent,
+		maxAttestations:                       maxAttestations,
+		maxReleaseAssetBytes:                  maxReleaseAssetBytes,
+		maxAttestationBundleCompressedBytes:   maxAttestationBundleCompressedBytes,
+		maxAttestationBundleDecompressedBytes: maxAttestationBundleDecompressedBytes,
 	}, nil
 }
 
-// ResolveReleaseTag resolves a GitHub release tag to the tag ref object digest.
-func (c *Client) ResolveReleaseTag(ctx context.Context, repository verification.Repository, tag verification.ReleaseTag) (verification.Digest, error) {
+// ResolveReleaseTag resolves a GitHub release tag to release and source digests.
+func (c *Client) ResolveReleaseTag(ctx context.Context, repository verification.Repository, tag verification.ReleaseTag) (verification.ReleaseResolution, error) {
 	req, err := c.newGitHubRequest(ctx, http.MethodGet, releaseTagPath(repository, tag), nil)
 	if err != nil {
-		return verification.Digest{}, err
+		return verification.ReleaseResolution{}, err
 	}
 
 	var ref gitRefResponse
 	if err := c.doJSON(req, &ref); err != nil {
-		return verification.Digest{}, err
+		return verification.ReleaseResolution{}, err
 	}
 	if ref.Object.SHA == "" {
-		return verification.Digest{}, fmt.Errorf("GitHub ref response did not include object SHA")
+		return verification.ReleaseResolution{}, fmt.Errorf("GitHub ref response did not include object SHA")
 	}
-	return verification.NewDigest("sha1", ref.Object.SHA)
+	releaseDigest, err := verification.NewDigest("sha1", ref.Object.SHA)
+	if err != nil {
+		return verification.ReleaseResolution{}, err
+	}
+	sourceDigest, err := c.resolveSourceDigest(ctx, repository, ref.Object)
+	if err != nil {
+		return verification.ReleaseResolution{}, err
+	}
+	return verification.ReleaseResolution{
+		ReleaseTagDigest: releaseDigest,
+		SourceDigest:     sourceDigest,
+	}, nil
+}
+
+func (c *Client) resolveSourceDigest(ctx context.Context, repository verification.Repository, object gitObjectResponse) (verification.Digest, error) {
+	switch object.Type {
+	case "commit":
+		return verification.NewDigest("sha1", object.SHA)
+	case "tag":
+		return c.resolveAnnotatedTagSourceDigest(ctx, repository, object.SHA)
+	case "":
+		return verification.Digest{}, fmt.Errorf("GitHub ref response did not include object type")
+	default:
+		return verification.Digest{}, fmt.Errorf("GitHub ref object type %q cannot be used as a release source", object.Type)
+	}
+}
+
+func (c *Client) resolveAnnotatedTagSourceDigest(ctx context.Context, repository verification.Repository, tagObjectSHA string) (verification.Digest, error) {
+	req, err := c.newGitHubRequest(ctx, http.MethodGet, tagObjectPath(repository, tagObjectSHA), nil)
+	if err != nil {
+		return verification.Digest{}, err
+	}
+
+	var tag gitTagResponse
+	if err := c.doJSON(req, &tag); err != nil {
+		return verification.Digest{}, err
+	}
+	if tag.Object.SHA == "" {
+		return verification.Digest{}, fmt.Errorf("GitHub tag response did not include object SHA")
+	}
+	if tag.Object.Type != "commit" {
+		return verification.Digest{}, fmt.Errorf("GitHub tag object type %q cannot be used as a release source", tag.Object.Type)
+	}
+	return verification.NewDigest("sha1", tag.Object.SHA)
 }
 
 // FetchManifest returns the root ghd.toml for repository.
@@ -328,6 +423,9 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, request app.DownloadR
 	if totalBytes < 0 {
 		totalBytes = 0
 	}
+	if totalBytes > c.maxReleaseAssetBytes {
+		return "", fmt.Errorf("release asset %q is %d bytes, exceeding limit %d", asset.Name, totalBytes, c.maxReleaseAssetBytes)
+	}
 	if request.Progress != nil {
 		request.Progress(app.DownloadProgress{
 			AssetName:       asset.Name,
@@ -358,7 +456,7 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, request app.DownloadR
 	if request.Progress != nil {
 		writer = progressWriter
 	}
-	if _, err := io.Copy(writer, resp.Body); err != nil {
+	if _, err := copyBounded(writer, resp.Body, c.maxReleaseAssetBytes); err != nil {
 		_ = temp.Close()
 		return "", fmt.Errorf("write temporary artifact: %w", err)
 	}
@@ -488,9 +586,16 @@ func (c *Client) fetchBundle(ctx context.Context, bundleURL string) (*sigbundle.
 		return nil, httpStatusError(resp)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readBoundedResponse(resp, c.maxAttestationBundleCompressedBytes, "attestation bundle response")
 	if err != nil {
 		return nil, fmt.Errorf("read attestation bundle response: %w", err)
+	}
+	decodedLen, err := snappy.DecodedLen(body)
+	if err != nil {
+		return nil, fmt.Errorf("decompress attestation bundle: %w", err)
+	}
+	if int64(decodedLen) > c.maxAttestationBundleDecompressedBytes {
+		return nil, fmt.Errorf("attestation bundle expands to %d bytes, exceeding limit %d", decodedLen, c.maxAttestationBundleDecompressedBytes)
 	}
 
 	decompressed, err := snappy.Decode(nil, body)
@@ -607,6 +712,33 @@ func (c *Client) nextRequest(ctx context.Context, resp *http.Response) (*http.Re
 	return c.newGitHubRequestFromURL(ctx, next)
 }
 
+func copyBounded(dst io.Writer, src io.Reader, limit int64) (int64, error) {
+	reader := &io.LimitedReader{R: src, N: limit + 1}
+	written, err := io.Copy(dst, reader)
+	if err != nil {
+		return written, err
+	}
+	if written > limit {
+		return written, fmt.Errorf("response exceeds limit %d bytes", limit)
+	}
+	return written, nil
+}
+
+func readBoundedResponse(resp *http.Response, limit int64, label string) ([]byte, error) {
+	if resp.ContentLength > limit {
+		return nil, fmt.Errorf("%s is %d bytes, exceeding limit %d", label, resp.ContentLength, limit)
+	}
+	reader := &io.LimitedReader{R: resp.Body, N: limit + 1}
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("%s exceeds limit %d bytes", label, limit)
+	}
+	return body, nil
+}
+
 func httpStatusError(resp *http.Response) error {
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 	message := strings.TrimSpace(string(body))
@@ -637,6 +769,10 @@ func parseNextLink(header string) string {
 
 func releaseTagPath(repository verification.Repository, tag verification.ReleaseTag) rawPath {
 	return rawPath(fmt.Sprintf("repos/%s/%s/git/ref/tags/%s", repository.Owner, repository.Name, tag))
+}
+
+func tagObjectPath(repository verification.Repository, sha string) rawPath {
+	return rawPath(fmt.Sprintf("repos/%s/%s/git/tags/%s", repository.Owner, repository.Name, sha))
 }
 
 func releaseByTagPath(repository verification.Repository, tag verification.ReleaseTag) rawPath {
@@ -670,9 +806,16 @@ func escapePathSegments(path string) string {
 }
 
 type gitRefResponse struct {
-	Object struct {
-		SHA string `json:"sha"`
-	} `json:"object"`
+	Object gitObjectResponse `json:"object"`
+}
+
+type gitTagResponse struct {
+	Object gitObjectResponse `json:"object"`
+}
+
+type gitObjectResponse struct {
+	SHA  string `json:"sha"`
+	Type string `json:"type"`
 }
 
 type rateLimitResponse struct {

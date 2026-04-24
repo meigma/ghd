@@ -19,20 +19,26 @@ func (v *Verifier) VerifyReleaseAsset(ctx context.Context, request Request) (Evi
 		return Evidence{}, wrapError(KindDigest, err, "digest artifact %s returned invalid digest", request.AssetPath)
 	}
 
-	releaseDigest, err := v.releases.ResolveReleaseTag(ctx, request.Repository, request.Tag)
+	releaseResolution, err := v.releases.ResolveReleaseTag(ctx, request.Repository, request.Tag)
 	if err != nil {
 		return Evidence{}, wrapError(KindResolveRelease, err, "resolve release tag %s", request.Tag)
 	}
+	releaseDigest := releaseResolution.ReleaseTagDigest
 	// The resolved tag digest is the subject for GitHub's immutable release attestation.
 	if err := releaseDigest.validate(); err != nil {
 		return Evidence{}, wrapError(KindResolveRelease, err, "resolve release tag %s returned invalid digest", request.Tag)
+	}
+	if !releaseResolution.SourceDigest.IsZero() {
+		if err := releaseResolution.SourceDigest.validate(); err != nil {
+			return Evidence{}, wrapError(KindResolveRelease, err, "resolve release tag %s returned invalid source digest", request.Tag)
+		}
 	}
 
 	releaseAttestations, err := v.attestations.FetchReleaseAttestations(ctx, request.Repository, releaseDigest)
 	if err != nil {
 		return Evidence{}, wrapError(KindFetchReleaseAttestations, err, "fetch release attestations for %s", releaseDigest)
 	}
-	release, err := v.verifyReleaseAttestation(ctx, releaseAttestations, releaseDigest, assetDigest, request.Tag)
+	releaseAttestation, err := v.verifyReleaseAttestation(ctx, releaseAttestations, releaseDigest, assetDigest, request.Tag)
 	if err != nil {
 		return Evidence{}, err
 	}
@@ -41,7 +47,14 @@ func (v *Verifier) VerifyReleaseAsset(ctx context.Context, request Request) (Evi
 	if err != nil {
 		return Evidence{}, wrapError(KindFetchProvenanceAttestations, err, "fetch provenance attestations for %s", assetDigest)
 	}
-	provenance, err := v.verifyProvenanceAttestation(ctx, provenanceAttestations, assetDigest, request.Policy)
+	policy := request.Policy
+	if policy.ExpectedSourceRef == "" {
+		policy.ExpectedSourceRef = "refs/tags/" + string(request.Tag)
+	}
+	if policy.ExpectedSourceDigest.IsZero() && !releaseResolution.SourceDigest.IsZero() {
+		policy.ExpectedSourceDigest = releaseResolution.SourceDigest
+	}
+	provenance, err := v.verifyProvenanceAttestation(ctx, provenanceAttestations, assetDigest, policy)
 	if err != nil {
 		return Evidence{}, err
 	}
@@ -51,7 +64,7 @@ func (v *Verifier) VerifyReleaseAsset(ctx context.Context, request Request) (Evi
 		Tag:                   request.Tag,
 		AssetDigest:           assetDigest,
 		ReleaseTagDigest:      releaseDigest,
-		ReleaseAttestation:    evidenceFor(release),
+		ReleaseAttestation:    evidenceFor(releaseAttestation),
 		ProvenanceAttestation: evidenceFor(provenance),
 	}, nil
 }

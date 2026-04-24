@@ -2,10 +2,18 @@ package verification
 
 import "context"
 
-// ReleaseResolver resolves GitHub release tags to immutable tag ref object digests.
+// ReleaseResolution contains the resolved Git objects for one release tag.
+type ReleaseResolution struct {
+	// ReleaseTagDigest is the Git tag ref object digest used by GitHub release attestations.
+	ReleaseTagDigest Digest
+	// SourceDigest is the peeled source commit digest for provenance binding. Zero means unavailable.
+	SourceDigest Digest
+}
+
+// ReleaseResolver resolves GitHub release tags to immutable Git object digests.
 type ReleaseResolver interface {
-	// ResolveReleaseTag resolves tag in repository to its tag ref object digest.
-	ResolveReleaseTag(ctx context.Context, repository Repository, tag ReleaseTag) (Digest, error)
+	// ResolveReleaseTag resolves tag in repository to release and source digests.
+	ResolveReleaseTag(ctx context.Context, repository Repository, tag ReleaseTag) (ReleaseResolution, error)
 }
 
 // AttestationSource loads attestations needed by core verification.

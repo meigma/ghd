@@ -53,6 +53,34 @@ func TestVerifierVerifyReleaseAssetHonorsPinnedSignerWorkflowDigest(t *testing.T
 	require.NoError(t, err)
 }
 
+func TestVerifierVerifyReleaseAssetDefaultsSourceRefToReleaseTag(t *testing.T) {
+	tc := newTestContext(t)
+	tc.updateResult("provenance-attestation", func(v *VerifiedAttestation) {
+		v.Certificate.SourceRef = "refs/heads/main"
+	})
+
+	_, err := tc.verifier.VerifyReleaseAsset(context.Background(), tc.request)
+
+	require.Error(t, err)
+	var verificationErr *Error
+	require.ErrorAs(t, err, &verificationErr)
+	assert.Equal(t, KindSourceRefMismatch, verificationErr.Kind)
+}
+
+func TestVerifierVerifyReleaseAssetDefaultsSourceDigestFromReleaseResolution(t *testing.T) {
+	tc := newTestContext(t)
+	tc.updateResult("provenance-attestation", func(v *VerifiedAttestation) {
+		v.Certificate.SourceDigest = mustDigest(t, "sha1", repeatHex("ee", 20))
+	})
+
+	_, err := tc.verifier.VerifyReleaseAsset(context.Background(), tc.request)
+
+	require.Error(t, err)
+	var verificationErr *Error
+	require.ErrorAs(t, err, &verificationErr)
+	assert.Equal(t, KindSourceDigestMismatch, verificationErr.Kind)
+}
+
 func TestVerifierVerifyReleaseAssetAcceptsCurrentReleasePredicate(t *testing.T) {
 	tc := newTestContext(t)
 	tc.updateResult("release-attestation", func(v *VerifiedAttestation) {
@@ -319,7 +347,14 @@ func TestVerifierVerifyReleaseAssetValidatesRequest(t *testing.T) {
 		{
 			name: "invalid release digest from resolver",
 			mutate: func(tc *testContext) {
-				tc.resolver.digest = Digest{}
+				tc.resolver.resolution.ReleaseTagDigest = Digest{}
+			},
+			wantKind: KindResolveRelease,
+		},
+		{
+			name: "invalid source digest from resolver",
+			mutate: func(tc *testContext) {
+				tc.resolver.resolution.SourceDigest = Digest{Algorithm: "sha1", Hex: "aa"}
 			},
 			wantKind: KindResolveRelease,
 		},
@@ -479,7 +514,12 @@ func newTestContext(t *testing.T) *testContext {
 		errors: map[string]error{},
 	}
 	digester := &fakeDigester{digest: assetDigest}
-	resolver := &fakeReleaseResolver{digest: releaseDigest}
+	resolver := &fakeReleaseResolver{
+		resolution: ReleaseResolution{
+			ReleaseTagDigest: releaseDigest,
+			SourceDigest:     sourceDigest,
+		},
+	}
 
 	verifier, err := NewVerifier(Dependencies{
 		ReleaseResolver:   resolver,
@@ -516,12 +556,12 @@ func (tc *testContext) updateResult(id string, update func(*VerifiedAttestation)
 }
 
 type fakeReleaseResolver struct {
-	digest Digest
-	err    error
+	resolution ReleaseResolution
+	err        error
 }
 
-func (f *fakeReleaseResolver) ResolveReleaseTag(context.Context, Repository, ReleaseTag) (Digest, error) {
-	return f.digest, f.err
+func (f *fakeReleaseResolver) ResolveReleaseTag(context.Context, Repository, ReleaseTag) (ReleaseResolution, error) {
+	return f.resolution, f.err
 }
 
 type fakeAttestationSource struct {

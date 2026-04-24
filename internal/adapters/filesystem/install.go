@@ -22,12 +22,12 @@ func NewInstaller() Installer {
 	return Installer{}
 }
 
-// CreateDownloadDir creates a temporary directory for install downloads.
+// CreateDownloadDir creates a temporary directory for downloads and short-lived verification work.
 func (Installer) CreateDownloadDir(ctx context.Context) (string, func(), error) {
 	if err := ctx.Err(); err != nil {
 		return "", nil, err
 	}
-	dir, err := os.MkdirTemp("", "ghd-install-*")
+	dir, err := os.MkdirTemp("", "ghd-download-*")
 	if err != nil {
 		return "", nil, fmt.Errorf("create temporary download directory: %w", err)
 	}
@@ -35,6 +35,31 @@ func (Installer) CreateDownloadDir(ctx context.Context) (string, func(), error) 
 		_ = os.RemoveAll(dir)
 	}
 	return dir, cleanup, nil
+}
+
+// PublishVerifiedArtifact copies a verified artifact into an output directory without overwriting.
+func (Installer) PublishVerifiedArtifact(ctx context.Context, sourcePath string, outputDir string, assetName string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(sourcePath) == "" {
+		return "", fmt.Errorf("source artifact path must be set")
+	}
+	name, err := cleanPathSegment("release asset name", assetName)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(outputDir) == "" {
+		return "", fmt.Errorf("output directory must be set")
+	}
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return "", fmt.Errorf("create output directory: %w", err)
+	}
+	destination := filepath.Join(outputDir, name)
+	if err := copyFileExclusive(sourcePath, destination, 0o600); err != nil {
+		return "", err
+	}
+	return destination, nil
 }
 
 // CreateStoreLayout creates the digest-keyed store layout and copies the artifact.
@@ -446,6 +471,38 @@ func (Installer) WriteInstallMetadata(ctx context.Context, storePath string, rec
 	}
 	data = append(data, '\n')
 	return writeFileAtomic(storePath, "install.json", data, 0o644)
+}
+
+func copyFileExclusive(source string, destination string, mode os.FileMode) error {
+	input, err := os.Open(source)
+	if err != nil {
+		return fmt.Errorf("open artifact: %w", err)
+	}
+	defer input.Close()
+
+	output, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, mode)
+	if err != nil {
+		if os.IsExist(err) {
+			return fmt.Errorf("output artifact %s already exists", destination)
+		}
+		return fmt.Errorf("create output artifact: %w", err)
+	}
+	removeOutput := true
+	defer func() {
+		if removeOutput {
+			_ = os.Remove(destination)
+		}
+	}()
+
+	if _, err := io.Copy(output, input); err != nil {
+		_ = output.Close()
+		return fmt.Errorf("copy output artifact: %w", err)
+	}
+	if err := output.Close(); err != nil {
+		return fmt.Errorf("close output artifact: %w", err)
+	}
+	removeOutput = false
+	return nil
 }
 
 func copyFileExclusiveRoot(root *os.Root, source string, destination string, mode os.FileMode) error {

@@ -104,6 +104,7 @@ func NewVerifiedDownloader(ctx context.Context, cfg config.Config) (*app.Verifie
 		Downloader:     components.githubClient,
 		Verifier:       coreVerifier,
 		EvidenceWriter: components.evidenceWriter,
+		FileSystem:     filesystem.NewInstaller(),
 	})
 }
 
@@ -285,6 +286,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 		Downloader:     r.components.githubClient,
 		Verifier:       coreVerifier,
 		EvidenceWriter: r.components.evidenceWriter,
+		FileSystem:     filesystem.NewInstaller(),
 	})
 	if err != nil {
 		return err
