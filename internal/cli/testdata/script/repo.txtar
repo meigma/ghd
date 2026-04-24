@@ -68,6 +68,18 @@ stdout 'add'
 stdout 'list'
 stdout 'remove'
 stdout 'refresh'
+stdout 'Examples:'
+stdout 'ghd repo add owner/repo --index-dir ./index'
+stdout 'ghd repo refresh --index-dir ./index --all'
+! stderr .
+
+exec ghd repo add --help
+stdout 'ghd repo add owner/repo --index-dir ./index'
+! stderr .
+
+exec ghd repo refresh --help
+stdout 'ghd repo refresh owner/repo --index-dir ./index'
+stdout 'ghd --non-interactive repo refresh --index-dir ./index --all'
 ! stderr .
 
 -- stale-ambiguous-index.json --

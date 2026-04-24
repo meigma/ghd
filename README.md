@@ -88,10 +88,16 @@ summary of what was removed, but it remains immediate and non-confirming by
 design. `--non-interactive` keeps the existing one-line stderr result without
 any richer terminal framing.
 
-`list`, `info`, and `check` now render richer human-oriented views when stdout
-is a terminal. Their automation-facing contracts stay unchanged: `--json`
-preserves structured output, and `--non-interactive` forces the existing plain
-row or labeled text output without transient status text.
+`list`, `info`, `check`, `verify`, `doctor`, and `repo list` now render richer
+human-oriented views when stdout is a terminal. Their automation-facing
+contracts stay unchanged: `--json` preserves structured output, and
+`--non-interactive` forces the existing plain row or labeled text output
+without transient status text.
+
+Interactive `repo add`, `repo refresh`, and `repo remove` now show transient
+stderr status plus concise stderr summaries on a terminal, while keeping their
+existing one-line stderr output in the plain non-interactive path. `repo
+remove` still updates only the local index; it does not uninstall anything.
 
 Start with the design document for the intended full product shape:
 

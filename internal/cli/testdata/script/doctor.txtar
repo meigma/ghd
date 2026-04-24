@@ -28,3 +28,6 @@ stderr 'doctor found 1 failing check'
 
 exec ghd doctor --help
 stdout 'doctor'
+stdout 'Examples:'
+stdout 'ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin'
+stdout 'ghd --non-interactive doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin'

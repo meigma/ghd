@@ -16,6 +16,12 @@ func newRepositoryCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "repo",
 		Short: "Manage indexed GitHub repositories",
+		Example: strings.TrimSpace(`
+ghd repo add owner/repo --index-dir ./index
+ghd repo list --index-dir ./index
+ghd repo refresh --index-dir ./index --all
+ghd repo remove owner/repo --index-dir ./index
+`),
 	}
 	cmd.AddCommand(newRepositoryAddCommand(options))
 	cmd.AddCommand(newRepositoryListCommand(options))
@@ -28,8 +34,18 @@ func newRepositoryAddCommand(options Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "add owner/repo",
 		Short: "Add a repository to the local index",
-		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+ghd repo add owner/repo --index-dir ./index
+ghd --non-interactive repo add owner/repo --index-dir ./index
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectRepositoryMutationMode(options)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 			repository, err := parseRepositoryTarget(args[0])
 			if err != nil {
 				return err
@@ -39,6 +55,9 @@ func newRepositoryAddCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				status.Show(fmt.Sprintf("Indexing %s", terminalSafeText(repository.String())))
+			}
 			record, err := runtime.AddRepository(cmd.Context(), app.RepositoryAddRequest{
 				Repository: repository,
 				IndexDir:   cfg.IndexDir,
@@ -46,7 +65,10 @@ func newRepositoryAddCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(options.Err, "indexed %s\n", record.Repository)
+			if status != nil {
+				status.Clear()
+			}
+			writeRepositoryAddSummary(options.Err, record, mode.enhanced, mode.color)
 			return nil
 		},
 	}
@@ -57,19 +79,40 @@ func newRepositoryListCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List indexed repositories",
-		Args:  cobra.NoArgs,
+		Example: strings.TrimSpace(`
+ghd repo list --index-dir ./index
+ghd repo list --index-dir ./index --json
+ghd --non-interactive repo list --index-dir ./index
+`),
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectReadOnlyPresentationMode(options, jsonOutput)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 			cfg := config.Load(options.Viper)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				status.Show("Loading indexed repositories")
+			}
 			repositories, err := runtime.ListRepositories(cmd.Context(), cfg.IndexDir)
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				status.Clear()
+			}
 			if jsonOutput {
 				return writeRepositoryListJSON(options, repositories)
+			}
+			if mode.richOutput {
+				writeRepositoryListTTY(options.Out, repositories, mode.color)
+				return nil
 			}
 			writeRepositoryList(options, repositories)
 			return nil
@@ -83,8 +126,18 @@ func newRepositoryRemoveCommand(options Options) *cobra.Command {
 	return &cobra.Command{
 		Use:   "remove owner/repo",
 		Short: "Remove a repository from the local index",
-		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+ghd repo remove owner/repo --index-dir ./index
+ghd --non-interactive repo remove owner/repo --index-dir ./index
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectRepositoryMutationMode(options)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 			repository, err := parseRepositoryTarget(args[0])
 			if err != nil {
 				return err
@@ -94,13 +147,19 @@ func newRepositoryRemoveCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				status.Show(fmt.Sprintf("Removing %s from the local index", terminalSafeText(repository.String())))
+			}
 			if err := runtime.RemoveRepository(cmd.Context(), app.RepositoryRemoveRequest{
 				Repository: repository,
 				IndexDir:   cfg.IndexDir,
 			}); err != nil {
 				return err
 			}
-			fmt.Fprintf(options.Err, "removed %s\n", repository)
+			if status != nil {
+				status.Clear()
+			}
+			writeRepositoryRemoveSummary(options.Err, repository, mode.enhanced, mode.color)
 			return nil
 		},
 	}
@@ -111,8 +170,19 @@ func newRepositoryRefreshCommand(options Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "refresh [owner/repo | --all]",
 		Short: "Refresh indexed repository manifests",
-		Args:  cobra.MaximumNArgs(1),
+		Example: strings.TrimSpace(`
+ghd repo refresh owner/repo --index-dir ./index
+ghd repo refresh --index-dir ./index --all
+ghd --non-interactive repo refresh --index-dir ./index --all
+`),
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			mode := detectRepositoryMutationMode(options)
+			var status *transientStatusLine
+			if mode.statusLine {
+				status = newTransientStatusLine(options.Err, mode.color)
+				defer status.Clear()
+			}
 			if all && len(args) > 0 {
 				return fmt.Errorf("repo refresh accepts owner/repo or --all, not both")
 			}
@@ -129,6 +199,13 @@ func newRepositoryRefreshCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			if status != nil {
+				if repository.IsZero() {
+					status.Show("Refreshing indexed repositories")
+				} else {
+					status.Show(fmt.Sprintf("Refreshing %s", terminalSafeText(repository.String())))
+				}
+			}
 			repositories, err := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
 				Repository: repository,
 				All:        all || len(args) == 0,
@@ -137,11 +214,10 @@ func newRepositoryRefreshCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if len(args) == 1 {
-				fmt.Fprintf(options.Err, "refreshed %s\n", repository)
-				return nil
+			if status != nil {
+				status.Clear()
 			}
-			fmt.Fprintf(options.Err, "refreshed %d repositories\n", len(repositories))
+			writeRepositoryRefreshSummary(options.Err, repositories, repository, mode.enhanced, mode.color)
 			return nil
 		},
 	}

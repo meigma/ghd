@@ -244,6 +244,9 @@ Behavior notes:
 - `check` uses the same TTY rule as `list` and `info`: richer grouped human
   output on a terminal, plain rows for `--non-interactive`, and unchanged JSON
   output for automation.
+- `verify` uses the same TTY rule as `check`: richer grouped human output on a
+  terminal, plain rows for `--non-interactive`, unchanged JSON output for
+  automation, and the same aggregate failure behavior for `--all`.
 - `update` applies an available update through the same verification path as
   install and refuses updates that would expose a binary owned by another
   installed package. Interactive update uses transient status, byte-level
@@ -253,7 +256,16 @@ Behavior notes:
   summary of what was removed, but it remains immediate and non-confirming by
   design. `--non-interactive` keeps the existing one-line stderr result.
 - `doctor` checks PATH setup, local directory permissions, GitHub connectivity,
-  and authentication/rate-limit readiness.
+  and authentication/rate-limit readiness. On a terminal it renders grouped
+  `fail`, `warn`, and `pass` sections while keeping plain rows for
+  `--non-interactive` and unchanged JSON output for automation.
+- `repo list` uses the same TTY rule as the other read-only index/discovery
+  commands: a richer terminal view on stdout, plain rows for
+  `--non-interactive`, and unchanged JSON output for automation.
+- Interactive `repo add`, `repo refresh`, and `repo remove` use transient
+  terminal status plus concise stderr summaries on a terminal, while the plain
+  automation path keeps the existing one-line stderr confirmations. `repo
+  remove` still updates only the local index; it does not uninstall packages.
 - `list`, `info`, `installed`, `check`, `verify`, `update`, `doctor`, and
   `repo list` support `--json` for scriptable result output.
 

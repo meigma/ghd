@@ -55,6 +55,9 @@ stderr 'could not verify 1 installed package'
 exec ghd verify --help
 stdout 'verify \[name\|owner/repo/package\|--all\]'
 stdout '--all'
+stdout 'Examples:'
+stdout 'ghd verify package --state-dir ./state'
+stdout 'ghd verify package --state-dir ./state --json'
 ! stderr .
 
 -- tampered.txt --
