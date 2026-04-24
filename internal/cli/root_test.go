@@ -280,6 +280,183 @@ func TestInstallApprovalFactsIncludeVerificationFields(t *testing.T) {
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
 }
 
+func TestUpdateYesNonInteractiveKeepsPlainRows(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "update", "foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/repo/foo 1.2.3 1.3.0 updated\n", stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+func TestUpdateNonInteractiveWithoutYesReturnsResultRow(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--non-interactive", "update", "foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.Error(t, err)
+	assert.Equal(t, "could not update 1 installed package", err.Error())
+	assert.Equal(t, "owner/repo/foo 1.2.3 1.2.3 cannot-update update requires approval after verification; rerun with --yes to approve non-interactively\n", stdout.String())
+	assert.Empty(t, stderr.String())
+	record := requireInstalledRecord(t, stateDir, "owner/repo", "foo")
+	assert.Equal(t, "1.2.3", record.Version)
+}
+
+func TestUpdateJSONWithoutYesReturnsStructuredCannotUpdate(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "update", "foo", "--json", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.Error(t, err)
+	assert.Equal(t, "could not update 1 installed package", err.Error())
+	assert.Contains(t, stdout.String(), `"updates":[`)
+	assert.Contains(t, stdout.String(), `"target":"owner/repo/foo"`)
+	assert.Contains(t, stdout.String(), `"previous_version":"1.2.3"`)
+	assert.Contains(t, stdout.String(), `"current_version":"1.2.3"`)
+	assert.Contains(t, stdout.String(), `"status":"cannot-update"`)
+	assert.Contains(t, stdout.String(), `"reason":"update requires approval after verification; rerun with --yes to approve non-interactively"`)
+	assert.Empty(t, stderr.String())
+}
+
+func TestUpdateInteractiveApprovalCanApprove(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var approval app.UpdateApproval
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		UpdateConfirmation: func(_ context.Context, got app.UpdateApproval) error {
+			approval = got
+			return nil
+		},
+	}, "--state-dir", stateDir, "update", "foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/repo/foo 1.2.3 1.3.0 updated\n", stdout.String())
+	assert.Empty(t, stderr.String())
+	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
+	assert.Equal(t, "foo", approval.PackageName)
+	assert.Equal(t, "1.2.3", approval.PreviousVersion)
+	assert.Equal(t, "1.3.0", approval.Version)
+	assert.Equal(t, verification.ReleaseTag("v1.3.0"), approval.Tag)
+	assert.Equal(t, "foo.tar.gz", approval.AssetName)
+	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), approval.AssetDigest.String())
+	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
+	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.SignerWorkflow)
+	assert.Equal(t, binDir, approval.BinDir)
+	assert.Equal(t, []string{"foo"}, approval.Binaries)
+}
+
+func TestUpdateApprovalDeclineDoesNotMutateState(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/repo/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		UpdateConfirmation: func(context.Context, app.UpdateApproval) error {
+			return app.ErrUpdateNotApproved
+		},
+	}, "--state-dir", stateDir, "update", "foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.Error(t, err)
+	assert.Equal(t, "could not update 1 installed package", err.Error())
+	assert.Equal(t, "owner/repo/foo 1.2.3 1.2.3 cannot-update update was not approved\n", stdout.String())
+	assert.Empty(t, stderr.String())
+	record := requireInstalledRecord(t, stateDir, "owner/repo", "foo")
+	assert.Equal(t, "1.2.3", record.Version)
+}
+
 func runTestCommand() int {
 	vp := viper.New()
 	root := NewRootCommand(Options{
@@ -297,6 +474,30 @@ func runTestCommand() int {
 		return 1
 	}
 	return 0
+}
+
+func executeTestRoot(options Options, args ...string) error {
+	if options.Viper == nil {
+		options.Viper = viper.New()
+	}
+	root := NewRootCommand(options)
+	root.SetArgs(args)
+	return root.ExecuteContext(context.Background())
+}
+
+func testRuntimeFactory(context.Context, config.Config) (Runtime, error) {
+	return testRuntime{}, nil
+}
+
+func requireInstalledRecord(t *testing.T, stateDir string, repository string, packageName string) state.Record {
+	t.Helper()
+
+	store := filesystem.NewInstalledStore()
+	index, err := store.LoadInstalledState(context.Background(), stateDir)
+	require.NoError(t, err)
+	record, ok := index.Record(repository, packageName)
+	require.True(t, ok)
+	return record
 }
 
 type testRuntime struct{}
@@ -501,6 +702,41 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 		})
 	}
 
+	repository, err := testRepositoryFromString(previous.Repository)
+	if err != nil {
+		return app.UpdateInstalledResult{}, err
+	}
+	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
+	if err != nil {
+		return app.UpdateInstalledResult{}, err
+	}
+	newVersion := "1.3.0"
+	if request.Approve != nil {
+		if err := request.Approve(ctx, app.UpdateApproval{
+			Repository:              repository,
+			PackageName:             previous.Package,
+			PreviousVersion:         previous.Version,
+			Version:                 newVersion,
+			Tag:                     verification.ReleaseTag("v" + newVersion),
+			AssetName:               previous.Package + ".tar.gz",
+			AssetDigest:             digest,
+			ReleasePredicateType:    verification.ReleasePredicateV02,
+			ProvenancePredicateType: verification.SLSAPredicateV1,
+			SignerWorkflow:          verification.WorkflowIdentity(previous.Repository + "/.github/workflows/release.yml"),
+			BinDir:                  request.BinDir,
+			Binaries:                []string{previous.Package},
+		}); err != nil {
+			return app.UpdateInstalledResult{
+				Repository:      previous.Repository,
+				Package:         previous.Package,
+				PreviousVersion: previous.Version,
+				CurrentVersion:  previous.Version,
+				Status:          app.UpdateStatusCannotUpdate,
+				Reason:          err.Error(),
+			}, err
+		}
+	}
+
 	storeRoot, err := filepath.Abs(filepath.Clean(request.StoreDir))
 	if err != nil {
 		return app.UpdateInstalledResult{}, err
@@ -509,7 +745,6 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 	if err != nil {
 		return app.UpdateInstalledResult{}, err
 	}
-	newVersion := "1.3.0"
 	newStorePath := filepath.Join(
 		storeRoot,
 		"github.com",
@@ -566,7 +801,7 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 	current.ArtifactPath = newArtifactPath
 	current.ExtractedPath = newExtractedPath
 	current.VerificationPath = newVerificationPath
-	current.AssetDigest = "sha256:" + strings.Repeat("a", 64)
+	current.AssetDigest = digest.String()
 	current.Binaries = []state.Binary{
 		{Name: previous.Package, LinkPath: nextBinaries[0].LinkPath, TargetPath: nextBinaries[0].TargetPath},
 	}
@@ -593,6 +828,14 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 		}
 	}
 	return row, nil
+}
+
+func testRepositoryFromString(value string) (verification.Repository, error) {
+	owner, name, ok := strings.Cut(value, "/")
+	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
+		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
+	}
+	return verification.Repository{Owner: owner, Name: name}, nil
 }
 
 func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {

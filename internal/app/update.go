@@ -86,6 +86,89 @@ const (
 	UpdateStatusCannotUpdate UpdateStatus = "cannot-update"
 )
 
+// ErrUpdateNotApproved means update stopped because the verified artifact was not approved.
+var ErrUpdateNotApproved = errors.New("update was not approved")
+
+// UpdateProgressStage identifies one user-visible update step.
+type UpdateProgressStage string
+
+const (
+	// UpdateProgressCheckingState means update is reading active installed package state.
+	UpdateProgressCheckingState UpdateProgressStage = "checking-state"
+	// UpdateProgressResolvingCandidate means update is checking package metadata and releases.
+	UpdateProgressResolvingCandidate UpdateProgressStage = "resolving-candidate"
+	// UpdateProgressCheckingBinaries means update is checking future binary ownership.
+	UpdateProgressCheckingBinaries UpdateProgressStage = "checking-binaries"
+	// UpdateProgressResolvingAsset means update is resolving the concrete GitHub release asset.
+	UpdateProgressResolvingAsset UpdateProgressStage = "resolving-asset"
+	// UpdateProgressPreparingDownload means update is preparing temporary download storage.
+	UpdateProgressPreparingDownload UpdateProgressStage = "preparing-download"
+	// UpdateProgressDownloading means update is downloading the selected release asset.
+	UpdateProgressDownloading UpdateProgressStage = "downloading"
+	// UpdateProgressVerifying means update is verifying release and provenance attestations.
+	UpdateProgressVerifying UpdateProgressStage = "verifying"
+	// UpdateProgressAwaitingApproval means update has verified the asset and is waiting for approval.
+	UpdateProgressAwaitingApproval UpdateProgressStage = "awaiting-approval"
+	// UpdateProgressPreparingStore means update is creating the managed store layout.
+	UpdateProgressPreparingStore UpdateProgressStage = "preparing-store"
+	// UpdateProgressExtracting means update is extracting configured binaries.
+	UpdateProgressExtracting UpdateProgressStage = "extracting"
+	// UpdateProgressWritingEvidence means update is writing verification evidence.
+	UpdateProgressWritingEvidence UpdateProgressStage = "writing-evidence"
+	// UpdateProgressWritingMetadata means update is writing package install metadata.
+	UpdateProgressWritingMetadata UpdateProgressStage = "writing-metadata"
+	// UpdateProgressReplacingBinaries means update is swapping managed binary links.
+	UpdateProgressReplacingBinaries UpdateProgressStage = "replacing-binaries"
+	// UpdateProgressRecordingState means update is recording active installed package state.
+	UpdateProgressRecordingState UpdateProgressStage = "recording-state"
+	// UpdateProgressRemovingPreviousStore means update is cleaning up the previous managed store.
+	UpdateProgressRemovingPreviousStore UpdateProgressStage = "removing-previous-store"
+)
+
+// UpdateProgress describes one user-visible update step.
+type UpdateProgress struct {
+	// Stage identifies the step underway.
+	Stage UpdateProgressStage
+	// Message is a concise human-readable status line.
+	Message string
+	// Download carries byte-level download progress when Stage is UpdateProgressDownloading.
+	Download *DownloadProgress
+}
+
+// UpdateProgressFunc receives user-visible update progress.
+type UpdateProgressFunc func(UpdateProgress)
+
+// UpdateApproval contains verified artifact facts for the update approval decision.
+type UpdateApproval struct {
+	// Repository is the verified GitHub repository.
+	Repository verification.Repository
+	// PackageName is the package name within the repository manifest.
+	PackageName string
+	// PreviousVersion is the active version that will be replaced.
+	PreviousVersion string
+	// Version is the candidate version that will become active.
+	Version string
+	// Tag is the resolved GitHub release tag.
+	Tag verification.ReleaseTag
+	// AssetName is the concrete release asset name.
+	AssetName string
+	// AssetDigest is the verified local asset digest.
+	AssetDigest verification.Digest
+	// ReleasePredicateType is the accepted immutable release predicate type.
+	ReleasePredicateType string
+	// ProvenancePredicateType is the accepted provenance predicate type.
+	ProvenancePredicateType string
+	// SignerWorkflow is the accepted provenance signer workflow.
+	SignerWorkflow verification.WorkflowIdentity
+	// BinDir receives exposed binary links if the update proceeds.
+	BinDir string
+	// Binaries are the binary names that will be exposed if the update proceeds.
+	Binaries []string
+}
+
+// UpdateApprovalFunc approves or rejects a verified update before local mutation.
+type UpdateApprovalFunc func(context.Context, UpdateApproval) error
+
 // UpdateInstalledResult is one installed-package update result row.
 type UpdateInstalledResult struct {
 	// Repository is the GitHub repository that owns the package.
@@ -158,6 +241,10 @@ type UpdateRequest struct {
 	BinDir string
 	// StateDir stores active installed package state.
 	StateDir string
+	// Progress receives user-visible update progress. Nil disables progress reports.
+	Progress UpdateProgressFunc
+	// Approve approves a verified artifact before extraction, linking, or state writes. Nil approves automatically.
+	Approve UpdateApprovalFunc
 }
 
 type updateRecordResult struct {
@@ -218,6 +305,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) ([]U
 	if err := request.validate(); err != nil {
 		return nil, err
 	}
+	request.report(UpdateProgressCheckingState, "Checking installed packages")
 	index, err := u.state.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
 		return nil, err
@@ -256,6 +344,8 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		Current:  previous,
 	}
 
+	target := previous.Repository + "/" + previous.Package
+	request.report(UpdateProgressResolvingCandidate, fmt.Sprintf("Checking %s for updates", target))
 	candidate, err := resolveInstalledPackageUpdate(ctx, u.manifests, u.releases, previous)
 	if err != nil {
 		return result, err
@@ -263,6 +353,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if candidate.LatestVersion == "" {
 		return result, nil
 	}
+	request.report(UpdateProgressCheckingBinaries, fmt.Sprintf("Checking %s binary ownership", target))
 	if err := u.checkBinaryOwnership(ctx, request.StateDir, previous, candidate.Package.Binaries); err != nil {
 		return result, err
 	}
@@ -275,24 +366,34 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if err != nil {
 		return result, err
 	}
+	request.report(UpdateProgressResolvingAsset, fmt.Sprintf("Resolving %s", assetName))
 	releaseAsset, err := u.assets.ResolveReleaseAsset(ctx, candidate.Repository, tag, assetName)
 	if err != nil {
 		return result, fmt.Errorf("resolve release asset %q: %w", assetName, err)
 	}
 
+	request.report(UpdateProgressPreparingDownload, "Preparing download")
 	downloadDir, cleanup, err := u.files.CreateDownloadDir(ctx)
 	if err != nil {
 		return result, err
 	}
 	defer cleanup()
 
-	artifactPath, err := u.download.DownloadReleaseAsset(ctx, DownloadReleaseAssetRequest{
+	request.report(UpdateProgressDownloading, fmt.Sprintf("Downloading %s", releaseAsset.Name))
+	downloadRequest := DownloadReleaseAssetRequest{
 		Asset:     releaseAsset,
 		OutputDir: downloadDir,
-	})
+	}
+	if request.Progress != nil {
+		downloadRequest.Progress = func(progress DownloadProgress) {
+			request.reportDownload(progress)
+		}
+	}
+	artifactPath, err := u.download.DownloadReleaseAsset(ctx, downloadRequest)
 	if err != nil {
 		return result, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
 	}
+	request.report(UpdateProgressVerifying, "Verifying release and provenance")
 	evidence, err := u.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: candidate.Repository,
 		Tag:        tag,
@@ -305,6 +406,25 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		return result, err
 	}
 
+	request.report(UpdateProgressAwaitingApproval, fmt.Sprintf("Reviewing verified update for %s", target))
+	if err := request.approve(ctx, UpdateApproval{
+		Repository:              candidate.Repository,
+		PackageName:             previous.Package,
+		PreviousVersion:         previous.Version,
+		Version:                 candidate.LatestVersion,
+		Tag:                     tag,
+		AssetName:               assetName,
+		AssetDigest:             evidence.AssetDigest,
+		ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
+		ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
+		SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
+		BinDir:                  request.BinDir,
+		Binaries:                manifestBinaryNames(candidate.Package.Binaries),
+	}); err != nil {
+		return result, err
+	}
+
+	request.report(UpdateProgressPreparingStore, "Preparing managed store")
 	layout, err := u.files.CreateStoreLayout(ctx, StoreLayoutRequest{
 		StoreRoot:    request.StoreDir,
 		Repository:   candidate.Repository,
@@ -317,6 +437,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		return result, err
 	}
 
+	request.report(UpdateProgressExtracting, "Extracting configured binaries")
 	extracted, err := u.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
 		ArchivePath:    layout.ArtifactPath,
 		ArchiveName:    assetName,
@@ -336,6 +457,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		Asset:         assetName,
 		Evidence:      evidence,
 	}
+	request.report(UpdateProgressWritingEvidence, "Writing verification evidence")
 	evidencePath, err := u.evidence.WriteVerificationEvidence(ctx, layout.StorePath, verificationRecord)
 	if err != nil {
 		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write verification evidence: %w", err))
@@ -360,11 +482,13 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		VerificationPath: evidencePath,
 		Binaries:         nextBinaries,
 	}
+	request.report(UpdateProgressWritingMetadata, "Writing install metadata")
 	if _, err := u.files.WriteInstallMetadata(ctx, layout.StorePath, installRecord); err != nil {
 		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write install metadata: %w", err))
 	}
 
 	previousBinaries := installedBinaries(previous.Binaries)
+	request.report(UpdateProgressReplacingBinaries, "Swapping managed binaries")
 	if err := u.files.ReplaceManagedBinaries(ctx, ReplaceManagedBinariesRequest{
 		BinDir:   request.BinDir,
 		Previous: previousBinaries,
@@ -387,6 +511,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		Binaries:         stateBinaries(nextBinaries),
 		InstalledAt:      u.now().UTC(),
 	}
+	request.report(UpdateProgressRecordingState, "Recording installed state")
 	if _, err := u.state.ReplaceInstalledRecord(ctx, request.StateDir, current); err != nil {
 		rollbackErr := u.files.ReplaceManagedBinaries(context.WithoutCancel(ctx), ReplaceManagedBinariesRequest{
 			BinDir:   request.BinDir,
@@ -418,6 +543,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		Current:  current,
 		Updated:  true,
 	}
+	request.report(UpdateProgressRemovingPreviousStore, "Removing previous store")
 	if err := u.files.RemoveManagedStore(context.WithoutCancel(ctx), request.StoreDir, previous.StorePath); err != nil {
 		return result, fmt.Errorf(
 			"updated %s/%s@%s -> %s but failed to remove previous store: %w",
@@ -479,6 +605,39 @@ func updateRow(result updateRecordResult, err error) UpdateInstalledResult {
 		row.Reason = err.Error()
 	}
 	return row
+}
+
+func (r UpdateRequest) report(stage UpdateProgressStage, message string) {
+	if r.Progress == nil {
+		return
+	}
+	r.Progress(UpdateProgress{
+		Stage:   stage,
+		Message: message,
+	})
+}
+
+func (r UpdateRequest) reportDownload(progress DownloadProgress) {
+	if r.Progress == nil {
+		return
+	}
+	copied := progress
+	message := "Downloading"
+	if strings.TrimSpace(copied.AssetName) != "" {
+		message = fmt.Sprintf("Downloading %s", copied.AssetName)
+	}
+	r.Progress(UpdateProgress{
+		Stage:    UpdateProgressDownloading,
+		Message:  message,
+		Download: &copied,
+	})
+}
+
+func (r UpdateRequest) approve(ctx context.Context, approval UpdateApproval) error {
+	if r.Approve == nil {
+		return nil
+	}
+	return r.Approve(ctx, approval)
 }
 
 func (u *PackageUpdater) cleanupStagedUpdate(ctx context.Context, request UpdateRequest, storePath string, err error) error {

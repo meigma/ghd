@@ -58,6 +58,192 @@ func TestPackageUpdaterUpdateSingleTargetUpdatedRowAfterSuccessfulStaging(t *tes
 	assert.Equal(t, []string{"state-load", "state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "remove-store", "cleanup"}, tc.events)
 }
 
+func TestPackageUpdaterReportsProgressInUpdateOrder(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	var err error
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
+	require.NoError(t, err)
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	var stages []UpdateProgressStage
+
+	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Progress: func(progress UpdateProgress) {
+			stages = append(stages, progress.Stage)
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, []UpdateProgressStage{
+		UpdateProgressCheckingState,
+		UpdateProgressResolvingCandidate,
+		UpdateProgressCheckingBinaries,
+		UpdateProgressResolvingAsset,
+		UpdateProgressPreparingDownload,
+		UpdateProgressDownloading,
+		UpdateProgressVerifying,
+		UpdateProgressAwaitingApproval,
+		UpdateProgressPreparingStore,
+		UpdateProgressExtracting,
+		UpdateProgressWritingEvidence,
+		UpdateProgressWritingMetadata,
+		UpdateProgressReplacingBinaries,
+		UpdateProgressRecordingState,
+		UpdateProgressRemovingPreviousStore,
+	}, stages)
+}
+
+func TestPackageUpdaterForwardsDownloadProgressBeforeVerification(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	var err error
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
+	require.NoError(t, err)
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.verifier.events = &tc.events
+	tc.downloader.progress = []DownloadProgress{
+		{AssetName: "foo_1.3.0_darwin_arm64.tar.gz", BytesDownloaded: 0, TotalBytes: 100},
+		{AssetName: "foo_1.3.0_darwin_arm64.tar.gz", BytesDownloaded: 40, TotalBytes: 100},
+		{AssetName: "foo_1.3.0_darwin_arm64.tar.gz", BytesDownloaded: 100, TotalBytes: 100},
+	}
+	var downloads []DownloadProgress
+
+	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Progress: func(progress UpdateProgress) {
+			if progress.Download == nil {
+				return
+			}
+			downloads = append(downloads, *progress.Download)
+			tc.events = append(tc.events, "download-progress")
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, tc.downloader.progress, downloads)
+	assert.Equal(t, []string{
+		"state-load",
+		"state-load",
+		"download-dir",
+		"download-progress",
+		"download-progress",
+		"download-progress",
+		"verify",
+		"store-layout",
+		"extract",
+		"evidence",
+		"metadata",
+		"replace-binaries",
+		"state-replace",
+		"remove-store",
+		"cleanup",
+	}, tc.events)
+}
+
+func TestPackageUpdaterApprovalReceivesVerifiedFacts(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	var err error
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
+	require.NoError(t, err)
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	var approval UpdateApproval
+
+	_, err = tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   "/managed/bin",
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Approve: func(_ context.Context, got UpdateApproval) error {
+			approval = got
+			return nil
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
+	assert.Equal(t, "foo", approval.PackageName)
+	assert.Equal(t, "1.2.3", approval.PreviousVersion)
+	assert.Equal(t, "1.3.0", approval.Version)
+	assert.Equal(t, verification.ReleaseTag("foo-v1.3.0"), approval.Tag)
+	assert.Equal(t, "foo_1.3.0_darwin_arm64.tar.gz", approval.AssetName)
+	assert.Equal(t, tc.verifier.evidence.AssetDigest, approval.AssetDigest)
+	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
+	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.SignerWorkflow)
+	assert.Equal(t, "/managed/bin", approval.BinDir)
+	assert.Equal(t, []string{"foo"}, approval.Binaries)
+}
+
+func TestPackageUpdaterDoesNotMutateWhenApprovalDeclines(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	var err error
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	tc.state.index, err = mustUpdateIndex(record)
+	require.NoError(t, err)
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.verifier.events = &tc.events
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Approve: func(context.Context, UpdateApproval) error {
+			tc.events = append(tc.events, "approval")
+			return ErrUpdateNotApproved
+		},
+	})
+
+	require.Error(t, err)
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, ErrUpdateNotApproved.Error())
+	assert.False(t, tc.files.storeCalled)
+	assert.False(t, tc.archives.called)
+	assert.Nil(t, tc.evidence.record)
+	assert.Nil(t, tc.files.metadata)
+	assert.Equal(t, []string{"state-load", "state-load", "download-dir", "verify", "approval", "cleanup"}, tc.events)
+}
+
+func TestPackageUpdaterDoesNotRequestApprovalWhenAlreadyUpToDate(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	var err error
+	record := updateInstalledRecord("owner/repo", "1.3.0")
+	tc.state.index, err = mustUpdateIndex(record)
+	require.NoError(t, err)
+	configureRepositoryForVersion(t, tc, record.Repository, "1.3.0")
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   filepath.Join(t.TempDir(), "bin"),
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Approve: func(context.Context, UpdateApproval) error {
+			t.Fatal("approval should not be requested for already-current packages")
+			return nil
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusAlreadyUpToDate, results[0].Status)
+}
+
 func TestPackageUpdaterRejectsBinaryOwnershipCollisionBeforeDownloading(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	record := updateInstalledRecord("owner/repo", "1.2.3")
@@ -472,6 +658,13 @@ func configureSuccessfulUpdateFixture(t *testing.T, tc *packageUpdaterTestContex
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
+		ReleaseAttestation: verification.AttestationEvidence{
+			PredicateType: verification.ReleasePredicateV02,
+		},
+		ProvenanceAttestation: verification.AttestationEvidence{
+			PredicateType:  verification.SLSAPredicateV1,
+			SignerWorkflow: "owner/repo/.github/workflows/release.yml",
+		},
 	}
 	tc.files.downloadDir = t.TempDir()
 	tc.files.layout = StoreLayout{
