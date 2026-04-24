@@ -63,7 +63,9 @@ func TestInstalledPackageCheckerReportsUpToDateWhenNoNewerStableReleaseExists(t 
 func TestInstalledPackageCheckerRejectsAmbiguousTargets(t *testing.T) {
 	tc := newInstalledPackageCheckerTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/one", "foo"))
+	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/one", "foo"), []state.Binary{
+		{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/foo/extracted/one"},
+	}))
 	require.NoError(t, err)
 	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
 		{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
@@ -118,7 +120,9 @@ func TestInstalledPackageCheckerAggregatesCannotDetermineResultsForAllTargets(t 
 	var err error
 	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/one", "foo"))
 	require.NoError(t, err)
-	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/two", "bar"))
+	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
+		{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/bar/extracted/bar"},
+	}))
 	require.NoError(t, err)
 	tc.manifests.data["owner/one"] = []byte(testManifest())
 	tc.releases.data["owner/one"] = []RepositoryRelease{{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}}}

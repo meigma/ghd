@@ -292,6 +292,21 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 			Status:          app.UpdateStatusAlreadyUpToDate,
 		}, nil
 	}
+	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return app.UpdateInstalledResult{}, err
+	}
+	owner := state.PackageRef{Repository: previous.Repository, Package: previous.Package}
+	if err := index.CheckBinaryOwnership(owner, []string{previous.Package}, owner); err != nil {
+		return app.UpdateInstalledResult{
+			Repository:      previous.Repository,
+			Package:         previous.Package,
+			PreviousVersion: previous.Version,
+			CurrentVersion:  previous.Version,
+			Status:          app.UpdateStatusCannotUpdate,
+			Reason:          err.Error(),
+		}, err
+	}
 	previousBinaries := make([]app.InstalledBinary, 0, len(previous.Binaries))
 	for _, binary := range previous.Binaries {
 		previousBinaries = append(previousBinaries, app.InstalledBinary{
@@ -451,6 +466,17 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 }
 
 func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
+	store := filesystem.NewInstalledStore()
+	index, err := store.LoadInstalledState(ctx, request.StateDir)
+	if err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
+	if err := index.CheckBinaryOwnership(state.PackageRef{
+		Repository: request.Repository.String(),
+		Package:    request.PackageName,
+	}, []string{request.PackageName}, state.PackageRef{}); err != nil {
+		return app.VerifiedInstallResult{}, err
+	}
 	binDir, err := filepath.Abs(filepath.Clean(request.BinDir))
 	if err != nil {
 		return app.VerifiedInstallResult{}, err
@@ -506,7 +532,6 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		Binaries:         []state.Binary{{Name: request.PackageName, LinkPath: linkPath, TargetPath: linkTarget}},
 		InstalledAt:      time.Unix(1700000000, 0).UTC(),
 	}
-	store := filesystem.NewInstalledStore()
 	if _, err := store.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}

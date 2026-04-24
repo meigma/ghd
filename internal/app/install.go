@@ -305,6 +305,12 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
+	if err := installedState.CheckBinaryOwnership(state.PackageRef{
+		Repository: request.Repository.String(),
+		Package:    request.PackageName,
+	}, manifestBinaryNames(pkg.Binaries), state.PackageRef{}); err != nil {
+		return VerifiedInstallResult{}, err
+	}
 	releaseAsset, err := i.assets.ResolveReleaseAsset(ctx, request.Repository, tag, selected.Name)
 	if err != nil {
 		return VerifiedInstallResult{}, fmt.Errorf("resolve release asset %q: %w", selected.Name, err)

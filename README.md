@@ -61,7 +61,8 @@ Start with the design document for the intended full product shape:
 - [Initial Design](docs/docs/design.md)
 
 `check`, `verify`, and `doctor` are intentionally read-only in the current
-prototype. Richer collision ownership UX remains future work.
+prototype. Binary ownership collisions are refused early; richer ownership
+transfer or shim UX remains future work.
 
 ## Documentation
 

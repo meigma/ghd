@@ -24,6 +24,27 @@ func TestIndexAddRecordRejectsDuplicateActiveInstall(t *testing.T) {
 	assert.Equal(t, "foo", duplicate.Package)
 }
 
+func TestIndexAddRecordRejectsBinaryOwnershipCollision(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/one", "foo"), []Binary{
+		{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/one/extracted/foo"},
+	}))
+	require.NoError(t, err)
+
+	_, err = index.AddRecord(withBinaries(installedRecord("owner/two", "bar"), []Binary{
+		{Name: "foo", LinkPath: "/other-bin/foo", TargetPath: "/store/two/extracted/foo"},
+	}))
+
+	require.Error(t, err)
+	var conflict BinaryOwnershipConflictError
+	require.ErrorAs(t, err, &conflict)
+	assert.Equal(t, "foo", conflict.Binary)
+	assert.Equal(t, PackageRef{Repository: "owner/one", Package: "foo"}, conflict.Owner)
+	assert.Equal(t, PackageRef{Repository: "owner/two", Package: "bar"}, conflict.Candidate)
+	assert.Equal(t, `binary "foo" is already owned by owner/one/foo; owner/two/bar cannot expose it`, err.Error())
+}
+
 func TestIndexResolveTarget(t *testing.T) {
 	index := NewIndex()
 	var err error
@@ -75,7 +96,9 @@ func TestIndexResolveTarget(t *testing.T) {
 func TestIndexResolveTargetReportsAmbiguousAndMissingInstalls(t *testing.T) {
 	index := NewIndex()
 	var err error
-	index, err = index.AddRecord(installedRecord("owner/one", "foo"))
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/one", "foo"), []Binary{
+		{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/foo/extracted/one"},
+	}))
 	require.NoError(t, err)
 	index, err = index.AddRecord(withBinaries(installedRecord("owner/two", "bar"), []Binary{
 		{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
@@ -96,12 +119,79 @@ func TestIndexResolveTargetReportsAmbiguousAndMissingInstalls(t *testing.T) {
 	assert.Equal(t, "missing", notInstalled.Target)
 }
 
+func TestIndexCheckBinaryOwnership(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/one", "foo"), []Binary{
+		{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/foo/extracted/foo"},
+		{Name: "helper", LinkPath: "/bin/helper", TargetPath: "/store/foo/extracted/helper"},
+	}))
+	require.NoError(t, err)
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/two", "bar"), []Binary{
+		{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/bar/extracted/bar"},
+	}))
+	require.NoError(t, err)
+
+	t.Run("allows unowned binary", func(t *testing.T) {
+		err := index.CheckBinaryOwnership(PackageRef{Repository: "owner/three", Package: "baz"}, []string{"baz"}, PackageRef{})
+
+		require.NoError(t, err)
+	})
+
+	t.Run("reports owning package for a collision", func(t *testing.T) {
+		err := index.CheckBinaryOwnership(PackageRef{Repository: "owner/three", Package: "baz"}, []string{"helper", "baz"}, PackageRef{})
+
+		require.Error(t, err)
+		var conflict BinaryOwnershipConflictError
+		require.ErrorAs(t, err, &conflict)
+		assert.Equal(t, "helper", conflict.Binary)
+		assert.Equal(t, PackageRef{Repository: "owner/one", Package: "foo"}, conflict.Owner)
+		assert.Equal(t, PackageRef{Repository: "owner/three", Package: "baz"}, conflict.Candidate)
+		assert.Equal(t, `binary "helper" is already owned by owner/one/foo; owner/three/baz cannot expose it`, err.Error())
+	})
+
+	t.Run("ignores the selected package during updates", func(t *testing.T) {
+		err := index.CheckBinaryOwnership(
+			PackageRef{Repository: "owner/one", Package: "foo"},
+			[]string{"foo", "helper"},
+			PackageRef{Repository: "owner/one", Package: "foo"},
+		)
+
+		require.NoError(t, err)
+	})
+
+	t.Run("reports the selected package unless it is ignored", func(t *testing.T) {
+		err := index.CheckBinaryOwnership(PackageRef{Repository: "owner/one", Package: "foo"}, []string{"foo"}, PackageRef{})
+
+		require.Error(t, err)
+		var conflict BinaryOwnershipConflictError
+		require.ErrorAs(t, err, &conflict)
+		assert.Equal(t, PackageRef{Repository: "owner/one", Package: "foo"}, conflict.Owner)
+	})
+
+	t.Run("still checks other packages when one package is ignored", func(t *testing.T) {
+		err := index.CheckBinaryOwnership(
+			PackageRef{Repository: "owner/one", Package: "foo"},
+			[]string{"bar"},
+			PackageRef{Repository: "owner/one", Package: "foo"},
+		)
+
+		require.Error(t, err)
+		var conflict BinaryOwnershipConflictError
+		require.ErrorAs(t, err, &conflict)
+		assert.Equal(t, "bar", conflict.Binary)
+		assert.Equal(t, PackageRef{Repository: "owner/two", Package: "bar"}, conflict.Owner)
+	})
+}
+
 func TestIndexRemoveRecordRemovesActiveInstall(t *testing.T) {
 	index := NewIndex()
 	var err error
 	index, err = index.AddRecord(installedRecord("owner/repo", "foo"))
 	require.NoError(t, err)
-	index, err = index.AddRecord(installedRecord("owner/other", "bar"))
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/other", "bar"), []Binary{
+		{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/bar/extracted/bar"},
+	}))
 	require.NoError(t, err)
 
 	next, removed, err := index.RemoveRecord("owner/repo", "foo")
@@ -150,6 +240,29 @@ func TestIndexReplaceRecordReplacesActiveInstall(t *testing.T) {
 	assert.Equal(t, "owner/repo/missing", notInstalled.Target)
 }
 
+func TestIndexReplaceRecordRejectsBinaryOwnershipCollision(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.AddRecord(installedRecord("owner/one", "foo"))
+	require.NoError(t, err)
+	index, err = index.AddRecord(withBinaries(installedRecord("owner/two", "bar"), []Binary{
+		{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/bar/extracted/bar"},
+	}))
+	require.NoError(t, err)
+
+	replacement := withBinaries(installedRecord("owner/one", "foo"), []Binary{
+		{Name: "bar", LinkPath: "/other-bin/bar", TargetPath: "/store/foo/extracted/bar"},
+	})
+	_, err = index.ReplaceRecord(replacement)
+
+	require.Error(t, err)
+	var conflict BinaryOwnershipConflictError
+	require.ErrorAs(t, err, &conflict)
+	assert.Equal(t, "bar", conflict.Binary)
+	assert.Equal(t, PackageRef{Repository: "owner/two", Package: "bar"}, conflict.Owner)
+	assert.Equal(t, PackageRef{Repository: "owner/one", Package: "foo"}, conflict.Candidate)
+}
+
 func TestIndexNormalizeSortsRecordsAndBinaries(t *testing.T) {
 	index := Index{
 		Records: []Record{
@@ -193,6 +306,14 @@ func TestIndexValidateRejectsMalformedRecords(t *testing.T) {
 			name:  "duplicate package",
 			index: Index{SchemaVersion: schemaVersion, Records: []Record{installedRecord("owner/repo", "foo"), installedRecord("OWNER/repo", "foo")}},
 			want:  "already installed",
+		},
+		{
+			name: "duplicate binary owner",
+			index: Index{SchemaVersion: schemaVersion, Records: []Record{
+				installedRecord("owner/one", "foo"),
+				withBinaries(installedRecord("owner/two", "bar"), []Binary{{Name: "foo", LinkPath: "/other-bin/foo", TargetPath: "/store/bar/extracted/foo"}}),
+			}},
+			want: "already owned",
 		},
 		{
 			name:  "missing binary target",

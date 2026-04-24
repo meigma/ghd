@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/meigma/ghd/internal/manifest"
 	"github.com/meigma/ghd/internal/state"
 	"github.com/meigma/ghd/internal/verification"
 )
@@ -262,6 +263,9 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if candidate.LatestVersion == "" {
 		return result, nil
 	}
+	if err := u.checkBinaryOwnership(ctx, request.StateDir, previous, candidate.Package.Binaries); err != nil {
+		return result, err
+	}
 
 	tag, err := candidate.Package.ReleaseTag(candidate.LatestVersion)
 	if err != nil {
@@ -422,6 +426,15 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		)
 	}
 	return result, nil
+}
+
+func (u *PackageUpdater) checkBinaryOwnership(ctx context.Context, stateDir string, previous state.Record, binaries []manifest.Binary) error {
+	index, err := u.state.LoadInstalledState(ctx, stateDir)
+	if err != nil {
+		return err
+	}
+	owner := state.PackageRef{Repository: previous.Repository, Package: previous.Package}
+	return index.CheckBinaryOwnership(owner, manifestBinaryNames(binaries), owner)
 }
 
 func (r UpdateRequest) validate() error {
