@@ -30,4 +30,6 @@ stderr 'list target must be owner/repo'
 exec ghd list --help
 stdout 'Usage:'
 stdout 'list \[owner/repo\]'
+stdout 'ghd list --index-dir ./index'
+stdout 'ghd list owner/repo'
 ! stderr .

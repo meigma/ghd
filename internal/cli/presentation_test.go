@@ -58,3 +58,13 @@ func TestFormatByteCount(t *testing.T) {
 		})
 	}
 }
+
+func TestTransientStatusLineShowAndClear(t *testing.T) {
+	var buf bytes.Buffer
+
+	status := newTransientStatusLine(&buf, false)
+	status.Show("Loading indexed packages")
+	status.Clear()
+
+	assert.Equal(t, "\r\033[KLoading indexed packages\r\033[K", buf.String())
+}

@@ -51,6 +51,8 @@ exec ghd check --help
 stdout 'Usage:'
 stdout 'check \[name\|owner/repo/package\|--all\]'
 stdout '--all'
+stdout 'ghd check --state-dir ./state'
+stdout 'ghd check foo --state-dir ./state'
 ! stderr .
 
 -- check-state/installed.json --

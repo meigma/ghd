@@ -36,10 +36,10 @@ type uiRow struct {
 
 func detectPresentationMode(options Options) presentationMode {
 	nonInteractive := options.Viper.GetBool("non-interactive")
-	inputTTY := readerIsTerminal(options.In)
-	errTTY := writerIsTerminal(options.Err)
+	inputTTY := inputIsTerminal(options)
+	errTTY := errorIsTerminal(options)
 	dynamic := !nonInteractive && inputTTY && errTTY
-	color := dynamic && colorEnabled()
+	color := dynamic && colorEnabledForOptions(options)
 	return presentationMode{
 		nonInteractive: nonInteractive,
 		dynamic:        dynamic,
@@ -61,6 +61,34 @@ func writerIsTerminal(w io.Writer) bool {
 
 func colorEnabled() bool {
 	return os.Getenv("NO_COLOR") == "" && os.Getenv("TERM") != "dumb"
+}
+
+func inputIsTerminal(options Options) bool {
+	if options.StdinTTY != nil {
+		return *options.StdinTTY
+	}
+	return readerIsTerminal(options.In)
+}
+
+func outputIsTerminal(options Options) bool {
+	if options.StdoutTTY != nil {
+		return *options.StdoutTTY
+	}
+	return writerIsTerminal(options.Out)
+}
+
+func errorIsTerminal(options Options) bool {
+	if options.StderrTTY != nil {
+		return *options.StderrTTY
+	}
+	return writerIsTerminal(options.Err)
+}
+
+func colorEnabledForOptions(options Options) bool {
+	if options.ColorEnabled != nil {
+		return *options.ColorEnabled
+	}
+	return colorEnabled()
 }
 
 func newUIStyles(color bool) uiStyles {
@@ -123,6 +151,36 @@ func (s *statusLine) nextFrame() string {
 	frame := s.styles.accent.Render(frames[s.frame%len(frames)])
 	s.frame++
 	return frame
+}
+
+type transientStatusLine struct {
+	w      io.Writer
+	styles uiStyles
+	active bool
+}
+
+func newTransientStatusLine(w io.Writer, color bool) *transientStatusLine {
+	return &transientStatusLine{
+		w:      w,
+		styles: newUIStyles(color),
+	}
+}
+
+func (s *transientStatusLine) Show(message string) {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return
+	}
+	fmt.Fprintf(s.w, "\r\033[K%s", s.styles.muted.Render(message))
+	s.active = true
+}
+
+func (s *transientStatusLine) Clear() {
+	if !s.active {
+		return
+	}
+	fmt.Fprint(s.w, "\r\033[K")
+	s.active = false
 }
 
 func runPromptForm(ctx context.Context, options Options, mode presentationMode, groups ...*huh.Group) error {

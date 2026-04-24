@@ -77,6 +77,11 @@ without prompting; `install` emits the stable `binary PATH` stdout lines only in
 non-interactive mode, while `update` preserves its result rows and `--json`
 output.
 
+`list`, `info`, and `check` now render richer human-oriented views when stdout
+is a terminal. Their automation-facing contracts stay unchanged: `--json`
+preserves structured output, and `--non-interactive` forces the existing plain
+row or labeled text output without transient status text.
+
 Start with the design document for the intended full product shape:
 
 - [Initial Design](docs/docs/design.md)

@@ -49,4 +49,6 @@ stderr 'info target must be name, owner/repo, or owner/repo/package'
 exec ghd info --help
 stdout 'Usage:'
 stdout 'info name\|owner/repo\|owner/repo/package'
+stdout 'ghd info foo --index-dir ./index'
+stdout 'ghd info owner/repo/foo'
 ! stderr .
