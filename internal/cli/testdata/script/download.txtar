@@ -37,6 +37,11 @@ exec ghd --state-dir state uninstall owner/repo/foo --store-dir store --bin-dir 
 stderr 'uninstalled owner/repo/foo@1.2.3'
 ! stdout .
 
+# Install refuses binary names already owned in installed state before writing store contents.
+! exec ghd --state-dir collision-state install owner/repo/foo@1.2.3 --store-dir collision-store --bin-dir collision-bin
+stderr 'binary "foo" is already owned by owner/other/bar'
+! exists collision-store
+
 # Malformed install targets fail cleanly.
 ! exec ghd --state-dir malformed-state install foo --store-dir store --bin-dir bin
 stderr 'install target must be package@version or owner/repo/package@version'
@@ -96,9 +101,9 @@ stdout '--bin-dir'
       "verification_path": "/store/one/verification.json",
       "binaries": [
         {
-          "name": "foo",
-          "link_path": "/bin/foo",
-          "target_path": "/store/one/extracted/foo"
+          "name": "one",
+          "link_path": "/bin/one",
+          "target_path": "/store/one/extracted/one"
         }
       ],
       "installed_at": "2026-04-22T00:00:00Z"
@@ -119,6 +124,33 @@ stdout '--bin-dir'
           "name": "foo",
           "link_path": "/bin/foo-two",
           "target_path": "/store/two/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}
+
+-- collision-state/installed.json --
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "repository": "owner/other",
+      "package": "bar",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "bar.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/bar",
+      "artifact_path": "/store/bar/artifact",
+      "extracted_path": "/store/bar/extracted",
+      "verification_path": "/store/bar/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/bin/foo",
+          "target_path": "/store/bar/extracted/foo"
         }
       ],
       "installed_at": "2026-04-22T00:00:00Z"

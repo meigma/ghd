@@ -126,6 +126,37 @@ func TestVerifiedInstallerRejectsDuplicateActiveInstallBeforeDownloading(t *test
 	assert.Equal(t, []string{"state-load"}, tc.events)
 }
 
+func TestVerifiedInstallerRejectsBinaryOwnershipCollisionBeforeDownloading(t *testing.T) {
+	tc := newInstallTestContext(t)
+	var err error
+	existing := installedRecord("owner/other", "bar")
+	existing.Binaries = []state.Binary{
+		{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/bar/extracted/foo"},
+	}
+	tc.state.index, err = tc.state.index.AddRecord(existing)
+	require.NoError(t, err)
+	tc.manifests.data = []byte(testManifest())
+
+	_, err = tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+	})
+
+	require.Error(t, err)
+	var conflict state.BinaryOwnershipConflictError
+	require.ErrorAs(t, err, &conflict)
+	assert.Equal(t, "foo", conflict.Binary)
+	assert.Equal(t, state.PackageRef{Repository: "owner/other", Package: "bar"}, conflict.Owner)
+	assert.False(t, tc.files.storeCalled)
+	assert.False(t, tc.archives.called)
+	assert.Equal(t, []string{"state-load"}, tc.events)
+}
+
 func TestVerifiedInstallerDoesNotWriteMetadataWhenLinkingFails(t *testing.T) {
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
@@ -357,6 +388,17 @@ func (f *fakeArchiveExtractor) ExtractArchive(_ context.Context, request Archive
 	f.request = request
 	if f.err != nil {
 		return nil, f.err
+	}
+	if f.result == nil {
+		out := make([]ExtractedBinary, 0, len(request.Binaries))
+		for _, binary := range request.Binaries {
+			out = append(out, ExtractedBinary{
+				Name:         filepath.Base(filepath.FromSlash(binary.Path)),
+				RelativePath: binary.Path,
+				Path:         filepath.Join(request.DestinationDir, filepath.FromSlash(binary.Path)),
+			})
+		}
+		return out, nil
 	}
 	return f.result, nil
 }

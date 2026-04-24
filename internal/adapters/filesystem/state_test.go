@@ -86,7 +86,11 @@ func TestInstalledStoreRemoveInstalledRecord(t *testing.T) {
 	stateDir := t.TempDir()
 	_, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
 	require.NoError(t, err)
-	_, err = store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "bar"))
+	bar := installedStateRecord("owner/repo", "bar")
+	bar.Binaries[0].Name = "bar"
+	bar.Binaries[0].LinkPath = "/bin/bar"
+	bar.Binaries[0].TargetPath = "/store/foo/extracted/bar"
+	_, err = store.AddInstalledRecord(context.Background(), stateDir, bar)
 	require.NoError(t, err)
 
 	index, err := store.RemoveInstalledRecord(context.Background(), stateDir, "owner/repo", "foo")
@@ -101,6 +105,22 @@ func TestInstalledStoreRemoveInstalledRecord(t *testing.T) {
 	_, err = store.RemoveInstalledRecord(context.Background(), stateDir, "owner/repo", "missing")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not installed")
+}
+
+func TestInstalledStoreAddInstalledRecordRejectsBinaryOwnershipCollision(t *testing.T) {
+	store := NewInstalledStore()
+	stateDir := t.TempDir()
+	_, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+
+	_, err = store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/other", "bar"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `binary "foo" is already owned by owner/repo/foo`)
+	loaded, loadErr := store.LoadInstalledState(context.Background(), stateDir)
+	require.NoError(t, loadErr)
+	require.Len(t, loaded.Records, 1)
+	assert.Equal(t, "foo", loaded.Records[0].Package)
 }
 
 func TestInstalledStoreReplaceInstalledRecord(t *testing.T) {
@@ -127,6 +147,34 @@ func TestInstalledStoreReplaceInstalledRecord(t *testing.T) {
 	_, err = store.ReplaceInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "missing"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not installed")
+}
+
+func TestInstalledStoreReplaceInstalledRecordRejectsBinaryOwnershipCollision(t *testing.T) {
+	store := NewInstalledStore()
+	stateDir := t.TempDir()
+	_, err := store.AddInstalledRecord(context.Background(), stateDir, installedStateRecord("owner/repo", "foo"))
+	require.NoError(t, err)
+	bar := installedStateRecord("owner/other", "bar")
+	bar.Binaries[0].Name = "bar"
+	bar.Binaries[0].LinkPath = "/bin/bar"
+	bar.Binaries[0].TargetPath = "/store/bar/extracted/bar"
+	_, err = store.AddInstalledRecord(context.Background(), stateDir, bar)
+	require.NoError(t, err)
+
+	replacement := installedStateRecord("owner/repo", "foo")
+	replacement.Binaries[0].Name = "bar"
+	replacement.Binaries[0].LinkPath = "/other-bin/bar"
+	replacement.Binaries[0].TargetPath = "/store/foo/extracted/bar"
+	_, err = store.ReplaceInstalledRecord(context.Background(), stateDir, replacement)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `binary "bar" is already owned by owner/other/bar`)
+	loaded, loadErr := store.LoadInstalledState(context.Background(), stateDir)
+	require.NoError(t, loadErr)
+	require.Len(t, loaded.Records, 2)
+	record, ok := loaded.Record("owner/repo", "foo")
+	require.True(t, ok)
+	assert.Equal(t, "foo", record.Binaries[0].Name)
 }
 
 func TestInstalledStoreRejectsMalformedState(t *testing.T) {

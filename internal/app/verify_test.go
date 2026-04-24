@@ -211,6 +211,7 @@ func TestInstalledPackageVerifierVerifyReturnsPreflightErrorsWithoutResults(t *t
 
 	t.Run("ambiguous target", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
+		tc.record.Binaries[0].Name = "repo"
 		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "two"}, "bar", "1.0.0")
 		second.Binaries[0].Name = "foo"
 		tc.state.index = mustStateIndex(t, tc.record, second)

@@ -9,8 +9,8 @@ Status: initial design. This document describes the first coherent shape of the
 project, not a frozen architecture.
 
 Prototype status: `list`, `info`, `download`, `install`, repository indexing,
-installed-state, `check`, `verify`, `doctor`, `update`, and `uninstall` now
-exist as working slices.
+installed-state, `check`, `verify`, `doctor`, `update`, `uninstall`, and
+binary ownership collision preflight now exist as working slices.
 
 GitHub Downloader (`ghd`) is a CLI for securely installing binaries from GitHub
 releases. It is intentionally opinionated: a compatible repository must publish
@@ -217,9 +217,12 @@ Behavior notes:
   exactly one package; otherwise the user must qualify `owner/repo/package`.
 - `install owner/repo/foo` can be a one-off install without adding the
   repository to the index.
+- `install` refuses binary-name collisions against active installed packages
+  before downloading release assets.
 - `check` is read-only and reports available updates for installed packages.
 - `update` applies an available update through the same verification path as
-  install.
+  install and refuses updates that would expose a binary owned by another
+  installed package.
 - `doctor` checks PATH setup, local directory permissions, GitHub connectivity,
   and authentication/rate-limit readiness.
 
@@ -249,9 +252,9 @@ rollback simple:
 store path. The hoster controls which binary paths are exposed, but never where
 they are installed on the user's machine.
 
-If two installed packages expose the same binary name, `ghd` must not silently
-overwrite the command. The user must choose which package owns the link, or run
-the package through an explicit qualified command if shims are introduced later.
+If two installed packages would expose the same binary name, `ghd` refuses the
+second install or update instead of silently overwriting the command. Richer
+ownership transfer or shim behavior can be introduced later.
 
 ## Install Pipeline
 
@@ -439,8 +442,9 @@ The first vertical slice should prove the complete path for one real repository:
 8. Record `verification.json`.
 
 After the verified install, indexing, installed-state, uninstall, read-only
-check, and package-discovery slices work, the next slices should add clearer
-collision UX and broader lifecycle flows.
+check, package-discovery, collision preflight, and broader lifecycle slices
+work, the next slices should focus on remaining polish and release-readiness
+gaps.
 
 ## Open Questions
 
@@ -451,7 +455,8 @@ collision UX and broader lifecycle flows.
   start?
 - How should users approve an upstream signer workflow change after a repository
   has already been added?
-- What is the exact UX for binary-name collisions between installed packages?
+- What is the exact UX for future binary ownership transfer or shim-based
+  coexistence between installed packages?
 
 ## References
 

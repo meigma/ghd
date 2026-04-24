@@ -55,6 +55,14 @@ type Binary struct {
 	TargetPath string `json:"target_path"`
 }
 
+// PackageRef identifies one installed package owner.
+type PackageRef struct {
+	// Repository is the package repository.
+	Repository string
+	// Package is the package name within Repository.
+	Package string
+}
+
 // DuplicateInstallError reports an active install for the same package.
 type DuplicateInstallError struct {
 	// Repository is the package repository.
@@ -77,6 +85,16 @@ type AmbiguousInstallError struct {
 	Matches []Record
 }
 
+// BinaryOwnershipConflictError reports that an exposed binary already belongs to another package.
+type BinaryOwnershipConflictError struct {
+	// Binary is the command name that would collide.
+	Binary string
+	// Owner is the active package that already owns Binary.
+	Owner PackageRef
+	// Candidate is the package that tried to expose Binary.
+	Candidate PackageRef
+}
+
 // Error describes the duplicate active install.
 func (e DuplicateInstallError) Error() string {
 	return fmt.Sprintf("package %s/%s is already installed", e.Repository, e.Package)
@@ -95,6 +113,16 @@ func (e AmbiguousInstallError) Error() string {
 	}
 	sort.Strings(matches)
 	return fmt.Sprintf("installed package %q is ambiguous; qualify one of: %s", e.Target, strings.Join(matches, ", "))
+}
+
+// Error describes the binary ownership conflict.
+func (e BinaryOwnershipConflictError) Error() string {
+	return fmt.Sprintf("binary %q is already owned by %s; %s cannot expose it", e.Binary, e.Owner, e.Candidate)
+}
+
+// String returns ref formatted as owner/repo/package.
+func (r PackageRef) String() string {
+	return strings.TrimSpace(r.Repository) + "/" + strings.TrimSpace(r.Package)
 }
 
 // NewIndex returns an empty installed-state index.
@@ -127,7 +155,9 @@ func (i Index) Validate() error {
 	if i.SchemaVersion != schemaVersion {
 		return fmt.Errorf("unsupported installed state version %d", i.SchemaVersion)
 	}
+	i = i.Normalize()
 	seen := map[string]struct{}{}
+	binaryOwners := map[string]PackageRef{}
 	for _, record := range i.Records {
 		if err := record.Validate(); err != nil {
 			return err
@@ -137,6 +167,17 @@ func (i Index) Validate() error {
 			return DuplicateInstallError{Repository: record.Repository, Package: record.Package}
 		}
 		seen[key] = struct{}{}
+		owner := record.packageRef()
+		for _, binary := range record.Binaries {
+			if existing, ok := binaryOwners[binary.Name]; ok {
+				return BinaryOwnershipConflictError{
+					Binary:    binary.Name,
+					Owner:     existing,
+					Candidate: owner,
+				}
+			}
+			binaryOwners[binary.Name] = owner
+		}
 	}
 	return nil
 }
@@ -149,6 +190,10 @@ func (i Index) AddRecord(record Record) (Index, error) {
 	i = i.Normalize()
 	if _, ok := i.Record(record.Repository, record.Package); ok {
 		return Index{}, DuplicateInstallError{Repository: record.Repository, Package: record.Package}
+	}
+	candidate := record.packageRef()
+	if err := i.CheckBinaryOwnership(candidate, record.binaryNames(), PackageRef{}); err != nil {
+		return Index{}, err
 	}
 	i.Records = append(i.Records, record)
 	i = i.Normalize()
@@ -192,17 +237,21 @@ func (i Index) ReplaceRecord(record Record) (Index, error) {
 	}
 	i = i.Normalize()
 	key := recordKey(record.Repository, record.Package)
-	found := false
+	candidate := record.packageRef()
+	found := -1
 	for idx, existing := range i.Records {
 		if recordKey(existing.Repository, existing.Package) == key {
-			i.Records[idx] = record
-			found = true
+			found = idx
 			break
 		}
 	}
-	if !found {
+	if found == -1 {
 		return Index{}, NotInstalledError{Target: strings.TrimSpace(record.Repository) + "/" + strings.TrimSpace(record.Package)}
 	}
+	if err := i.CheckBinaryOwnership(candidate, record.binaryNames(), candidate); err != nil {
+		return Index{}, err
+	}
+	i.Records[found] = record
 	i = i.Normalize()
 	if err := i.Validate(); err != nil {
 		return Index{}, err
@@ -219,6 +268,42 @@ func (i Index) Record(repository string, packageName string) (Record, bool) {
 		}
 	}
 	return Record{}, false
+}
+
+// CheckBinaryOwnership verifies that candidate can expose binaryNames without colliding with active installs.
+func (i Index) CheckBinaryOwnership(candidate PackageRef, binaryNames []string, ignored PackageRef) error {
+	if err := candidate.Validate(); err != nil {
+		return err
+	}
+	if !ignored.IsZero() {
+		if err := ignored.Validate(); err != nil {
+			return err
+		}
+	}
+	names, err := cleanBinaryNames(binaryNames)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		return fmt.Errorf("at least one binary must be checked")
+	}
+	ignoredKey := ignored.key()
+	for _, record := range i.Normalize().Records {
+		owner := PackageRef{Repository: record.Repository, Package: record.Package}
+		if owner.key() == ignoredKey {
+			continue
+		}
+		for _, binary := range record.Binaries {
+			if _, ok := names[binary.Name]; ok {
+				return BinaryOwnershipConflictError{
+					Binary:    binary.Name,
+					Owner:     owner,
+					Candidate: candidate,
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // ResolveTarget resolves a user-facing uninstall target to one active install.
@@ -324,6 +409,25 @@ func (b Binary) Validate() error {
 	return nil
 }
 
+// Validate checks the package reference.
+func (r PackageRef) Validate() error {
+	if err := validateRepository(r.Repository); err != nil {
+		return err
+	}
+	if strings.TrimSpace(r.Package) == "" {
+		return fmt.Errorf("package name must be set")
+	}
+	if strings.Contains(r.Package, "/") {
+		return fmt.Errorf("package name %q must not contain path separators", r.Package)
+	}
+	return nil
+}
+
+// IsZero reports whether ref is unset.
+func (r PackageRef) IsZero() bool {
+	return strings.TrimSpace(r.Repository) == "" && strings.TrimSpace(r.Package) == ""
+}
+
 func (r Record) exposesBinary(name string) bool {
 	for _, binary := range r.Binaries {
 		if binary.Name == name {
@@ -331,6 +435,18 @@ func (r Record) exposesBinary(name string) bool {
 		}
 	}
 	return false
+}
+
+func (r Record) packageRef() PackageRef {
+	return PackageRef{Repository: r.Repository, Package: r.Package}
+}
+
+func (r Record) binaryNames() []string {
+	names := make([]string, 0, len(r.Binaries))
+	for _, binary := range r.Binaries {
+		names = append(names, binary.Name)
+	}
+	return names
 }
 
 func validateRepository(repository string) error {
@@ -357,6 +473,28 @@ func recordKey(repository string, packageName string) string {
 	return strings.ToLower(strings.TrimSpace(repository)) + "/" + strings.ToLower(strings.TrimSpace(packageName))
 }
 
+func (r PackageRef) key() string {
+	if r.IsZero() {
+		return ""
+	}
+	return recordKey(r.Repository, r.Package)
+}
+
 func binarySortKey(binary Binary) string {
 	return strings.ToLower(binary.Name) + "\x00" + strings.ToLower(binary.LinkPath) + "\x00" + strings.ToLower(binary.TargetPath)
+}
+
+func cleanBinaryNames(binaryNames []string) (map[string]struct{}, error) {
+	names := map[string]struct{}{}
+	for _, name := range binaryNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("binary name must be set")
+		}
+		if strings.ContainsAny(name, `/\`) {
+			return nil, fmt.Errorf("binary name %q must not contain path separators", name)
+		}
+		names[name] = struct{}{}
+	}
+	return names, nil
 }
