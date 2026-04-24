@@ -56,6 +56,9 @@ type RuntimeFactory func(context.Context, config.Config) (Runtime, error)
 // InstallConfirmationFunc confirms whether a verified artifact should be installed.
 type InstallConfirmationFunc func(context.Context, app.InstallApproval) error
 
+// UpdateConfirmationFunc confirms whether a verified artifact should replace an installed package.
+type UpdateConfirmationFunc func(context.Context, app.UpdateApproval) error
+
 // Options customizes root command construction.
 type Options struct {
 	// In receives interactive command input.
@@ -70,6 +73,8 @@ type Options struct {
 	RuntimeFactory RuntimeFactory
 	// InstallConfirmation overrides the default interactive install confirmation prompt.
 	InstallConfirmation InstallConfirmationFunc
+	// UpdateConfirmation overrides the default interactive update confirmation prompt.
+	UpdateConfirmation UpdateConfirmationFunc
 }
 
 // NewRootCommand creates the ghd Cobra command tree.
@@ -109,7 +114,7 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.PersistentFlags().String("index-dir", "", "local repository index directory")
 	root.PersistentFlags().String("state-dir", "", "local installed package state directory")
 	root.PersistentFlags().Bool("non-interactive", false, "disable prompts, colors, and transient terminal UI")
-	root.PersistentFlags().Bool("yes", false, "approve verified install actions without prompting")
+	root.PersistentFlags().Bool("yes", false, "approve verified install and update actions without prompting")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
 	root.AddCommand(newListCommand(options))

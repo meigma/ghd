@@ -38,6 +38,15 @@ func newUpdateCommand(options Options) *cobra.Command {
 				}
 			}
 
+			mode := detectUpdatePresentationMode(options, jsonOutput)
+			var status *statusLine
+			var progress app.UpdateProgressFunc
+			if mode.statusLine {
+				status = newStatusLine(options.Err, mode.color)
+				defer status.Clear()
+				progress = status.UpdateUpdateProgress
+			}
+
 			cfg := config.Load(options.Viper)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
@@ -49,13 +58,19 @@ func newUpdateCommand(options Options) *cobra.Command {
 				StoreDir: cfg.StoreDir,
 				BinDir:   cfg.BinDir,
 				StateDir: cfg.StateDir,
+				Progress: progress,
+				Approve:  updateApprovalCallback(options, mode, status),
 			})
+			if status != nil {
+				status.Clear()
+			}
 			if jsonOutput {
 				if writeErr := writeUpdateResultsJSON(options, results); writeErr != nil {
 					return writeErr
 				}
 			} else {
 				writeUpdateResults(options, results)
+				writeUpdateSummary(options.Err, results, mode.enhanced, mode.color)
 			}
 			if err != nil {
 				return err

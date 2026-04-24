@@ -54,6 +54,7 @@ go run ./cmd/ghd verify package --state-dir ./state
 go run ./cmd/ghd verify --state-dir ./state --all
 go run ./cmd/ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd update package --state-dir ./state --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd --yes --non-interactive update package --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd update --state-dir ./state --store-dir ./store --bin-dir ./bin --all
 go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
 ```
@@ -61,14 +62,15 @@ go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin
 Commands that return stable row-style results support `--json`: `list`, `info`,
 `installed`, `check`, `verify`, `update`, `doctor`, and `repo list`.
 
-Interactive `install` runs with transient terminal status, shows byte-level
-download progress when GitHub reports an asset size, and asks for approval after
-verification but before exposing binaries. The approval prompt summarizes the
-source, destination, and trust result, with full provenance facts behind
-`View details`. Automation should pass
-`--yes --non-interactive` to keep output plain and approve the verified install
-without prompting; the stable `binary PATH` stdout lines are emitted only in
-non-interactive mode.
+Interactive `install` and `update` run with transient terminal status, show
+byte-level download progress when GitHub reports an asset size, and ask for
+approval after verification but before exposing or swapping binaries. The
+approval prompt summarizes the source, destination, and trust result, with full
+provenance facts behind `View details`. Automation should pass
+`--yes --non-interactive` to keep output plain and approve the verified action
+without prompting; `install` emits the stable `binary PATH` stdout lines only in
+non-interactive mode, while `update` preserves its result rows and `--json`
+output.
 
 Start with the design document for the intended full product shape:
 

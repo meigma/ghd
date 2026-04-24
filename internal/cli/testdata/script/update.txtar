@@ -1,7 +1,7 @@
 # Successful update swaps the active install to the newer version.
 exec ghd --state-dir state --yes --non-interactive install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
 stderr 'installed owner/repo/foo@1\.2\.3'
-exec ghd --state-dir state update foo --store-dir store --bin-dir bin
+exec ghd --state-dir state --yes update foo --store-dir store --bin-dir bin
 stdout 'owner/repo/foo 1\.2\.3 1\.3\.0 updated'
 ! stderr .
 exec ghd --state-dir state installed
@@ -43,7 +43,7 @@ stderr 'package "foo" is not installed'
 ! stdout .
 
 # Batch update prints every row, then returns an aggregate error.
-! exec ghd --state-dir batch-state update --all --store-dir batch-store --bin-dir batch-bin
+! exec ghd --state-dir batch-state --yes update --all --store-dir batch-store --bin-dir batch-bin
 stdout 'owner/broken/broken 1\.2\.3 1\.2\.3 cannot-update fetch ghd\.toml: missing'
 stdout 'owner/current/current 1\.3\.0 1\.3\.0 already-up-to-date'
 stdout 'owner/repo/foo 1\.2\.3 1\.3\.0 updated'

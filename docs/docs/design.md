@@ -229,7 +229,9 @@ Behavior notes:
 - `check` is read-only and reports available updates for installed packages.
 - `update` applies an available update through the same verification path as
   install and refuses updates that would expose a binary owned by another
-  installed package.
+  installed package. Interactive update uses transient status, byte-level
+  download progress, and verified-artifact approval before swapping binaries;
+  `--yes --non-interactive` keeps result output plain for automation.
 - `doctor` checks PATH setup, local directory permissions, GitHub connectivity,
   and authentication/rate-limit readiness.
 - `list`, `info`, `installed`, `check`, `verify`, `update`, `doctor`, and
@@ -454,8 +456,9 @@ The first vertical slice should prove the complete path for one real repository:
 After the verified install, indexing, installed-state, uninstall, read-only
 check, package-discovery, collision preflight, broader lifecycle slices,
 structured output for result-oriented commands, and the first interactive
-install UX pass work, the next slices should focus on remaining polish and
-release-readiness gaps. Byte-level download progress is still deferred.
+install/update UX passes, the next slices should focus on remaining polish and
+release-readiness gaps. Byte-level download progress for the standalone
+`download` command is still deferred.
 
 ## Open Questions
 
