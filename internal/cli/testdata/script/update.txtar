@@ -1,20 +1,20 @@
 # Successful update swaps the active install to the newer version.
 exec ghd --state-dir state install owner/repo/foo@1.2.3 --store-dir store --bin-dir bin
-stderr 'installed owner/repo/foo@1.2.3'
+stderr 'installed owner/repo/foo@1\.2\.3'
 exec ghd --state-dir state update foo --store-dir store --bin-dir bin
-stdout 'binary .*/bin/foo'
-stderr 'updated owner/repo/foo@1\.2\.3 -> 1\.3\.0'
+stdout 'owner/repo/foo 1\.2\.3 1\.3\.0 updated'
+! stderr .
 exec ghd --state-dir state installed
 stdout 'owner/repo/foo 1\.3\.0 foo'
 ! exists store/github.com/owner/repo/foo/1.2.3/sha256-abc123
 exists store/github.com/owner/repo/foo/1.3.0/sha256-abc123
 
-# Already-current installs are a quiet no-op on stdout.
+# Already-current installs print an explicit no-op row.
 exec ghd --state-dir current-state install owner/repo/foo@1.3.0 --store-dir current-store --bin-dir current-bin
-stderr 'installed owner/repo/foo@1.3.0'
+stderr 'installed owner/repo/foo@1\.3\.0'
 exec ghd --state-dir current-state update foo --store-dir current-store --bin-dir current-bin
-! stdout .
-stderr 'already up to date owner/repo/foo@1\.3\.0'
+stdout 'owner/repo/foo 1\.3\.0 1\.3\.0 already-up-to-date'
+! stderr .
 
 # Ambiguous update targets require qualification.
 ! exec ghd --state-dir ambiguous-state update foo --store-dir store --bin-dir bin
@@ -22,10 +22,36 @@ stderr 'installed package "foo" is ambiguous'
 stderr 'owner/one/foo'
 stderr 'owner/two/bar'
 
-# Plain failures do not print a bogus no-op status first.
+# Plain failures do not print result rows first.
 ! exec ghd --state-dir empty-state update foo --store-dir store --bin-dir bin
 stderr 'package "foo" is not installed'
-! stderr 'already up to date'
+! stdout .
+
+# Batch update prints every row, then returns an aggregate error.
+! exec ghd --state-dir batch-state update --all --store-dir batch-store --bin-dir batch-bin
+stdout 'owner/broken/foo 1\.2\.3 1\.2\.3 cannot-update fetch ghd\.toml: missing'
+stdout 'owner/current/foo 1\.3\.0 1\.3\.0 already-up-to-date'
+stdout 'owner/repo/foo 1\.2\.3 1\.3\.0 updated'
+stdout 'owner/warn/foo 1\.2\.3 1\.3\.0 updated-with-warning updated owner/warn/foo@1\.2\.3 -> 1\.3\.0 but failed to remove previous store: permission denied'
+stderr 'update completed with 1 warning and 1 failure'
+exec ghd --state-dir batch-state installed
+stdout 'owner/broken/foo 1\.2\.3 foo'
+stdout 'owner/current/foo 1\.3\.0 foo'
+stdout 'owner/repo/foo 1\.3\.0 foo'
+stdout 'owner/warn/foo 1\.3\.0 foo'
+
+# Missing targets fail cleanly.
+! exec ghd update --store-dir store --bin-dir bin
+stderr 'update target must be set'
+
+# Missing targets fail before runtime setup.
+! exec ghd --trusted-root /tmp/ghd-missing-trusted-root update --store-dir store --bin-dir bin
+stderr 'update target must be set'
+! stderr 'trusted-root'
+
+# Target and --all cannot be combined.
+! exec ghd update foo --all --store-dir store --bin-dir bin
+stderr 'update accepts a target or --all, not both'
 
 # Malformed targets fail cleanly.
 ! exec ghd update owner/repo --store-dir store --bin-dir bin
@@ -34,7 +60,8 @@ stderr 'update target must be name or owner/repo/package'
 # Help is scriptable and quiet on stderr.
 exec ghd update --help
 stdout 'Usage:'
-stdout 'update name\|owner/repo/package --store-dir DIR --bin-dir DIR'
+stdout 'update \[name\|owner/repo/package\|--all\] --store-dir DIR --bin-dir DIR'
+stdout '--all'
 stdout '--store-dir'
 stdout '--bin-dir'
 ! stderr .
@@ -79,6 +106,93 @@ stdout '--bin-dir'
           "name": "foo",
           "link_path": "/bin/foo-two",
           "target_path": "/store/two/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}
+
+-- batch-state/installed.json --
+{
+  "schema_version": 1,
+  "records": [
+    {
+      "repository": "owner/broken",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/broken",
+      "artifact_path": "/store/broken/artifact",
+      "extracted_path": "/store/broken/extracted",
+      "verification_path": "/store/broken/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/batch-bin/foo-broken",
+          "target_path": "/store/broken/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": "owner/current",
+      "package": "foo",
+      "version": "1.3.0",
+      "tag": "v1.3.0",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/current",
+      "artifact_path": "/store/current/artifact",
+      "extracted_path": "/store/current/extracted",
+      "verification_path": "/store/current/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/batch-bin/foo-current",
+          "target_path": "/store/current/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": "owner/repo",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/repo",
+      "artifact_path": "/store/repo/artifact",
+      "extracted_path": "/store/repo/extracted",
+      "verification_path": "/store/repo/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/batch-bin/foo-repo",
+          "target_path": "/store/repo/extracted/foo"
+        }
+      ],
+      "installed_at": "2026-04-22T00:00:00Z"
+    },
+    {
+      "repository": "owner/warn",
+      "package": "foo",
+      "version": "1.2.3",
+      "tag": "v1.2.3",
+      "asset": "foo.tar.gz",
+      "asset_digest": "sha256:abc123",
+      "store_path": "/store/warn",
+      "artifact_path": "/store/warn/artifact",
+      "extracted_path": "/store/warn/extracted",
+      "verification_path": "/store/warn/verification.json",
+      "binaries": [
+        {
+          "name": "foo",
+          "link_path": "/batch-bin/foo-warn",
+          "target_path": "/store/warn/extracted/foo"
         }
       ],
       "installed_at": "2026-04-22T00:00:00Z"

@@ -174,10 +174,10 @@ func (r *Runtime) VerifyInstalled(ctx context.Context, request app.VerifyInstall
 	return r.verifier.Verify(ctx, request)
 }
 
-// Update upgrades one active installed package when a newer eligible version exists.
-func (r *Runtime) Update(ctx context.Context, request app.UpdateRequest) (app.UpdateResult, error) {
+// Update updates selected active installed packages.
+func (r *Runtime) Update(ctx context.Context, request app.UpdateRequest) ([]app.UpdateInstalledResult, error) {
 	if err := r.ensureVerifiedUseCases(ctx); err != nil {
-		return app.UpdateResult{}, err
+		return nil, err
 	}
 	if request.StoreDir == "" {
 		request.StoreDir = r.cfg.StoreDir

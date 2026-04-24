@@ -71,7 +71,67 @@ type PackageUpdaterDependencies struct {
 	Now func() time.Time
 }
 
-// PackageUpdater implements single-target installed package updates.
+// UpdateStatus is one installed-package update outcome.
+type UpdateStatus string
+
+const (
+	// UpdateStatusUpdated reports that a newer version became active.
+	UpdateStatusUpdated UpdateStatus = "updated"
+	// UpdateStatusUpdatedWithWarning reports that a newer version became active but post-success cleanup failed.
+	UpdateStatusUpdatedWithWarning UpdateStatus = "updated-with-warning"
+	// UpdateStatusAlreadyUpToDate reports that no newer eligible version exists.
+	UpdateStatusAlreadyUpToDate UpdateStatus = "already-up-to-date"
+	// UpdateStatusCannotUpdate reports that the package could not be updated.
+	UpdateStatusCannotUpdate UpdateStatus = "cannot-update"
+)
+
+// UpdateInstalledResult is one installed-package update result row.
+type UpdateInstalledResult struct {
+	// Repository is the GitHub repository that owns the package.
+	Repository string
+	// Package is the installed package name.
+	Package string
+	// PreviousVersion is the version that was active when the update started.
+	PreviousVersion string
+	// CurrentVersion is the version active after the update attempt completes.
+	CurrentVersion string
+	// Status is the update outcome.
+	Status UpdateStatus
+	// Reason explains warnings or failures.
+	Reason string
+}
+
+// UpdateIncompleteError reports one or more warning or failure rows.
+type UpdateIncompleteError struct {
+	// Failed is the number of packages that could not be updated.
+	Failed int
+	// Warned is the number of packages that updated with warnings.
+	Warned int
+}
+
+// Error describes the aggregated batch update outcome.
+func (e UpdateIncompleteError) Error() string {
+	switch {
+	case e.Warned == 0 && e.Failed == 1:
+		return "could not update 1 installed package"
+	case e.Warned == 0:
+		return fmt.Sprintf("could not update %d installed packages", e.Failed)
+	case e.Failed == 0 && e.Warned == 1:
+		return "updated 1 installed package with warnings"
+	case e.Failed == 0:
+		return fmt.Sprintf("updated %d installed packages with warnings", e.Warned)
+	case e.Warned == 1 && e.Failed == 1:
+		return "update completed with 1 warning and 1 failure"
+	case e.Warned > 1 && e.Failed == 1:
+		return fmt.Sprintf("update completed with %d warnings and 1 failure", e.Warned)
+	case e.Warned == 1:
+		return fmt.Sprintf("update completed with 1 warning and %d failures", e.Failed)
+	default:
+		return fmt.Sprintf("update completed with %d warnings and %d failures", e.Warned, e.Failed)
+	}
+}
+
+// PackageUpdater implements installed package updates.
 type PackageUpdater struct {
 	manifests ManifestSource
 	releases  RepositoryReleaseSource
@@ -85,10 +145,12 @@ type PackageUpdater struct {
 	now       func() time.Time
 }
 
-// UpdateRequest describes one package update request.
+// UpdateRequest describes installed-package update requests.
 type UpdateRequest struct {
 	// Target is a package name, binary name, or owner/repo/package.
 	Target string
+	// All updates every active installed package.
+	All bool
 	// StoreDir is the root of ghd's managed package store.
 	StoreDir string
 	// BinDir is the managed binary link directory.
@@ -97,16 +159,10 @@ type UpdateRequest struct {
 	StateDir string
 }
 
-// UpdateResult describes a completed package update check or swap.
-type UpdateResult struct {
-	// Previous is the previously active installed package record.
+type updateRecordResult struct {
 	Previous state.Record
-	// Current is the current active installed package record after Update.
-	Current state.Record
-	// Updated reports whether a newer version was activated.
-	Updated bool
-	// Binaries are the active managed binary links after Update.
-	Binaries []InstalledBinary
+	Current  state.Record
+	Updated  bool
 }
 
 // NewPackageUpdater creates a package updater use case.
@@ -156,56 +212,79 @@ func NewPackageUpdater(deps PackageUpdaterDependencies) (*PackageUpdater, error)
 	}, nil
 }
 
-// Update upgrades one active installed package when a newer eligible release exists.
-func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (UpdateResult, error) {
+// Update updates selected active installed packages.
+func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) ([]UpdateInstalledResult, error) {
 	if err := request.validate(); err != nil {
-		return UpdateResult{}, err
+		return nil, err
 	}
 	index, err := u.state.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
-		return UpdateResult{}, err
+		return nil, err
 	}
-	previous, err := index.ResolveTarget(request.Target)
+	records, err := checkTargets(index.Normalize(), CheckRequest{
+		Target: request.Target,
+		All:    request.All,
+	})
 	if err != nil {
-		return UpdateResult{}, err
+		return nil, err
+	}
+
+	results := make([]UpdateInstalledResult, 0, len(records))
+	failed := 0
+	warned := 0
+	for _, previous := range records {
+		recordResult, err := u.updateRecord(ctx, request, previous)
+		row := updateRow(recordResult, err)
+		results = append(results, row)
+		switch row.Status {
+		case UpdateStatusCannotUpdate:
+			failed++
+		case UpdateStatusUpdatedWithWarning:
+			warned++
+		}
+	}
+	if failed != 0 || warned != 0 {
+		return results, UpdateIncompleteError{Failed: failed, Warned: warned}
+	}
+	return results, nil
+}
+
+func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest, previous state.Record) (updateRecordResult, error) {
+	result := updateRecordResult{
+		Previous: previous,
+		Current:  previous,
 	}
 
 	candidate, err := resolveInstalledPackageUpdate(ctx, u.manifests, u.releases, previous)
 	if err != nil {
-		return UpdateResult{}, err
+		return result, err
 	}
 	if candidate.LatestVersion == "" {
-		binaries := installedBinaries(previous.Binaries)
-		return UpdateResult{
-			Previous: previous,
-			Current:  previous,
-			Updated:  false,
-			Binaries: binaries,
-		}, nil
+		return result, nil
 	}
 
 	tag, err := candidate.Package.ReleaseTag(candidate.LatestVersion)
 	if err != nil {
-		return UpdateResult{}, err
+		return result, err
 	}
 	assetName, err := candidate.InstalledAsset.ResolveName(candidate.LatestVersion)
 	if err != nil {
-		return UpdateResult{}, err
+		return result, err
 	}
 	releaseAsset, err := u.assets.ResolveReleaseAsset(ctx, candidate.Repository, tag, assetName)
 	if err != nil {
-		return UpdateResult{}, fmt.Errorf("resolve release asset %q: %w", assetName, err)
+		return result, fmt.Errorf("resolve release asset %q: %w", assetName, err)
 	}
 
 	downloadDir, cleanup, err := u.files.CreateDownloadDir(ctx)
 	if err != nil {
-		return UpdateResult{}, err
+		return result, err
 	}
 	defer cleanup()
 
 	artifactPath, err := u.download.DownloadReleaseAsset(ctx, releaseAsset, downloadDir)
 	if err != nil {
-		return UpdateResult{}, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
+		return result, fmt.Errorf("download release asset %q: %w", releaseAsset.Name, err)
 	}
 	evidence, err := u.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: candidate.Repository,
@@ -216,7 +295,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		},
 	})
 	if err != nil {
-		return UpdateResult{}, err
+		return result, err
 	}
 
 	layout, err := u.files.CreateStoreLayout(ctx, StoreLayoutRequest{
@@ -228,7 +307,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		ArtifactPath: artifactPath,
 	})
 	if err != nil {
-		return UpdateResult{}, err
+		return result, err
 	}
 
 	extracted, err := u.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
@@ -238,7 +317,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		Binaries:       candidate.Package.Binaries,
 	})
 	if err != nil {
-		return UpdateResult{}, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
+		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
 	}
 
 	verificationRecord := VerificationRecord{
@@ -252,12 +331,12 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 	}
 	evidencePath, err := u.evidence.WriteVerificationEvidence(ctx, layout.StorePath, verificationRecord)
 	if err != nil {
-		return UpdateResult{}, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write verification evidence: %w", err))
+		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write verification evidence: %w", err))
 	}
 
 	nextBinaries, err := plannedInstalledBinaries(request.BinDir, extracted)
 	if err != nil {
-		return UpdateResult{}, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
+		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
 	}
 
 	installRecord := InstallRecord{
@@ -275,7 +354,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		Binaries:         nextBinaries,
 	}
 	if _, err := u.files.WriteInstallMetadata(ctx, layout.StorePath, installRecord); err != nil {
-		return UpdateResult{}, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write install metadata: %w", err))
+		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write install metadata: %w", err))
 	}
 
 	previousBinaries := installedBinaries(previous.Binaries)
@@ -284,7 +363,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		Previous: previousBinaries,
 		Next:     nextBinaries,
 	}); err != nil {
-		return UpdateResult{}, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
+		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
 	}
 
 	current := state.Record{
@@ -319,7 +398,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		if rollbackErr != nil {
 			preservedErr = fmt.Errorf("preserved staged update at %s after rollback failure", layout.StorePath)
 		}
-		return UpdateResult{}, errors.Join(
+		return result, errors.Join(
 			fmt.Errorf("replace installed state: %w", err),
 			wrapOptional("restore previous managed binaries", rollbackErr),
 			preservedErr,
@@ -327,11 +406,10 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 		)
 	}
 
-	result := UpdateResult{
+	result = updateRecordResult{
 		Previous: previous,
 		Current:  current,
 		Updated:  true,
-		Binaries: nextBinaries,
 	}
 	if err := u.files.RemoveManagedStore(context.WithoutCancel(ctx), request.StoreDir, previous.StorePath); err != nil {
 		return result, fmt.Errorf(
@@ -347,7 +425,10 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) (Upd
 }
 
 func (r UpdateRequest) validate() error {
-	if strings.TrimSpace(r.Target) == "" {
+	if r.All && strings.TrimSpace(r.Target) != "" {
+		return fmt.Errorf("update accepts a target or --all, not both")
+	}
+	if !r.All && strings.TrimSpace(r.Target) == "" {
 		return fmt.Errorf("update target must be set")
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
@@ -360,6 +441,28 @@ func (r UpdateRequest) validate() error {
 		return fmt.Errorf("state directory must be set")
 	}
 	return nil
+}
+
+func updateRow(result updateRecordResult, err error) UpdateInstalledResult {
+	row := UpdateInstalledResult{
+		Repository:      result.Previous.Repository,
+		Package:         result.Previous.Package,
+		PreviousVersion: result.Previous.Version,
+		CurrentVersion:  result.Current.Version,
+	}
+	switch {
+	case err == nil && result.Updated:
+		row.Status = UpdateStatusUpdated
+	case err == nil:
+		row.Status = UpdateStatusAlreadyUpToDate
+	case result.Updated:
+		row.Status = UpdateStatusUpdatedWithWarning
+		row.Reason = err.Error()
+	default:
+		row.Status = UpdateStatusCannotUpdate
+		row.Reason = err.Error()
+	}
+	return row
 }
 
 func (u *PackageUpdater) cleanupStagedUpdate(ctx context.Context, request UpdateRequest, storePath string, err error) error {
