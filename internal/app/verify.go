@@ -36,8 +36,8 @@ type InstalledPackageVerifierDependencies struct {
 	Verifier Verifier
 	// EvidenceStore loads persisted verification evidence.
 	EvidenceStore VerificationRecordStore
-	// Archives extracts verified archives for binary comparison.
-	Archives ArchiveExtractor
+	// Materializer prepares configured binaries from verified artifacts for comparison.
+	Materializer ArtifactMaterializer
 	// FileSystem owns verify-time temporary directories and file comparisons.
 	FileSystem InstalledVerificationFileSystem
 }
@@ -92,11 +92,11 @@ type VerifyInstalledRequest struct {
 
 // InstalledPackageVerifier re-verifies installed packages.
 type InstalledPackageVerifier struct {
-	state    InstalledStateReader
-	verify   Verifier
-	evidence VerificationRecordStore
-	archives ArchiveExtractor
-	files    InstalledVerificationFileSystem
+	state        InstalledStateReader
+	verify       Verifier
+	evidence     VerificationRecordStore
+	materializer ArtifactMaterializer
+	files        InstalledVerificationFileSystem
 }
 
 // NewInstalledPackageVerifier creates an installed package verifier use case.
@@ -110,18 +110,18 @@ func NewInstalledPackageVerifier(deps InstalledPackageVerifierDependencies) (*In
 	if deps.EvidenceStore == nil {
 		return nil, fmt.Errorf("verification record store must be set")
 	}
-	if deps.Archives == nil {
-		return nil, fmt.Errorf("archive extractor must be set")
+	if deps.Materializer == nil {
+		return nil, fmt.Errorf("artifact materializer must be set")
 	}
 	if deps.FileSystem == nil {
 		return nil, fmt.Errorf("verify filesystem must be set")
 	}
 	return &InstalledPackageVerifier{
-		state:    deps.StateStore,
-		verify:   deps.Verifier,
-		evidence: deps.EvidenceStore,
-		archives: deps.Archives,
-		files:    deps.FileSystem,
+		state:        deps.StateStore,
+		verify:       deps.Verifier,
+		evidence:     deps.EvidenceStore,
+		materializer: deps.Materializer,
+		files:        deps.FileSystem,
 	}, nil
 }
 
@@ -203,30 +203,30 @@ func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record stat
 	}
 	defer cleanup()
 
-	extracted, err := v.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
-		ArchivePath:    record.ArtifactPath,
-		ArchiveName:    record.Asset,
+	materialized, err := v.materializer.MaterializeBinaries(ctx, ArtifactMaterializationRequest{
+		ArtifactPath:   record.ArtifactPath,
+		AssetName:      record.Asset,
 		DestinationDir: tempDir,
 		Binaries:       declaredBinaries,
 	})
 	if err != nil {
 		return err
 	}
-	extractedByRelativePath := map[string]ExtractedBinary{}
-	for _, binary := range extracted {
+	materializedByRelativePath := map[string]MaterializedBinary{}
+	for _, binary := range materialized {
 		key := path.Clean(filepath.ToSlash(strings.TrimSpace(binary.RelativePath)))
-		extractedByRelativePath[key] = binary
+		materializedByRelativePath[key] = binary
 	}
 
 	for relativePath, installedBinary := range installedByRelativePath {
-		extractedBinary, ok := extractedByRelativePath[relativePath]
+		materializedBinary, ok := materializedByRelativePath[relativePath]
 		if !ok {
-			return fmt.Errorf("verified artifact did not extract installed binary %q at %s", installedBinary.Name, relativePath)
+			return fmt.Errorf("verified artifact did not prepare installed binary %q at %s", installedBinary.Name, relativePath)
 		}
 		if err := v.files.VerifyManagedBinaryLink(ctx, installedBinary.LinkPath, installedBinary.TargetPath); err != nil {
 			return err
 		}
-		if err := v.files.CompareFiles(ctx, installedBinary.TargetPath, extractedBinary.Path); err != nil {
+		if err := v.files.CompareFiles(ctx, installedBinary.TargetPath, materializedBinary.Path); err != nil {
 			return fmt.Errorf("installed binary %q does not match verified artifact: %w", installedBinary.Name, err)
 		}
 	}

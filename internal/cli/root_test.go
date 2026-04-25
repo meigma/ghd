@@ -1672,7 +1672,7 @@ func (testRuntime) VerifyInstalled(ctx context.Context, request app.VerifyInstal
 		StateStore:    filesystem.NewInstalledStore(),
 		Verifier:      testReleaseVerifier{},
 		EvidenceStore: filesystem.NewEvidenceWriter(),
-		Archives:      testArchiveExtractor{},
+		Materializer:  testArchiveExtractor{},
 		FileSystem:    filesystem.NewInstaller(),
 	})
 	if err != nil {
@@ -2013,11 +2013,11 @@ func testVersionFromRef(ref string) string {
 
 type testArchiveExtractor struct{}
 
-func (testArchiveExtractor) ExtractArchive(_ context.Context, request app.ArchiveExtractionRequest) ([]app.ExtractedBinary, error) {
+func (testArchiveExtractor) MaterializeBinaries(_ context.Context, request app.ArtifactMaterializationRequest) ([]app.MaterializedBinary, error) {
 	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
 		return nil, err
 	}
-	out := make([]app.ExtractedBinary, 0, len(request.Binaries))
+	out := make([]app.MaterializedBinary, 0, len(request.Binaries))
 	for _, binary := range request.Binaries {
 		targetPath := filepath.Join(request.DestinationDir, filepath.FromSlash(binary.Path))
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
@@ -2026,7 +2026,7 @@ func (testArchiveExtractor) ExtractArchive(_ context.Context, request app.Archiv
 		if err := os.WriteFile(targetPath, []byte("binary"), 0o755); err != nil {
 			return nil, err
 		}
-		out = append(out, app.ExtractedBinary{
+		out = append(out, app.MaterializedBinary{
 			Name:         filepath.Base(binary.Path),
 			RelativePath: binary.Path,
 			Path:         targetPath,

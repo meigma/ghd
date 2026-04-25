@@ -1,2 +1,2 @@
-// Package archive adapts archive extraction to app ports.
+// Package archive adapts verified artifact materialization to app ports.
 package archive

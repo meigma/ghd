@@ -32,14 +32,14 @@ func NewTarGzipExtractor() TarGzipExtractor {
 	return TarGzipExtractor{}
 }
 
-// ExtractArchive extracts a verified tar.gz archive.
-func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveExtractionRequest) ([]app.ExtractedBinary, error) {
+// MaterializeBinaries extracts a verified tar.gz archive.
+func (TarGzipExtractor) MaterializeBinaries(ctx context.Context, request app.ArtifactMaterializationRequest) ([]app.MaterializedBinary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	archiveName := request.ArchiveName
+	archiveName := request.AssetName
 	if archiveName == "" {
-		archiveName = request.ArchivePath
+		archiveName = request.ArtifactPath
 	}
 	if !strings.HasSuffix(archiveName, ".tar.gz") {
 		return nil, fmt.Errorf("unsupported archive type for %s", archiveName)
@@ -58,7 +58,7 @@ func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveE
 		return nil, fmt.Errorf("create extraction destination: %w", err)
 	}
 
-	file, err := os.Open(request.ArchivePath)
+	file, err := os.Open(request.ArtifactPath)
 	if err != nil {
 		return nil, fmt.Errorf("open archive: %w", err)
 	}
@@ -258,8 +258,8 @@ func writeRegularFile(root *os.Root, reader *tar.Reader, header *tar.Header, nam
 	return nil
 }
 
-func validateBinaries(root *os.Root, destination string, binaries []manifest.Binary) ([]app.ExtractedBinary, error) {
-	extracted := make([]app.ExtractedBinary, 0, len(binaries))
+func validateBinaries(root *os.Root, destination string, binaries []manifest.Binary) ([]app.MaterializedBinary, error) {
+	extracted := make([]app.MaterializedBinary, 0, len(binaries))
 	for _, binary := range binaries {
 		if err := binary.Validate(); err != nil {
 			return nil, err
@@ -279,7 +279,7 @@ func validateBinaries(root *os.Root, destination string, binaries []manifest.Bin
 		if err != nil {
 			return nil, fmt.Errorf("resolve configured binary %q: %w", binary.Path, err)
 		}
-		extracted = append(extracted, app.ExtractedBinary{
+		extracted = append(extracted, app.MaterializedBinary{
 			Name:         filepath.Base(relativePath),
 			RelativePath: relativePath,
 			Path:         absolutePath,

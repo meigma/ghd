@@ -64,8 +64,8 @@ type PackageUpdaterDependencies struct {
 	EvidenceWriter EvidenceWriter
 	// EvidenceStore loads persisted verification evidence for the installed version.
 	EvidenceStore VerificationRecordStore
-	// Archives extracts verified archives.
-	Archives ArchiveExtractor
+	// Materializer prepares configured binaries from verified artifacts.
+	Materializer ArtifactMaterializer
 	// FileSystem owns install store and binary exposure behavior.
 	FileSystem UpdateFileSystem
 	// StateStore persists active installed package records.
@@ -116,7 +116,7 @@ const (
 	UpdateProgressAwaitingApproval UpdateProgressStage = "awaiting-approval"
 	// UpdateProgressPreparingStore means update is creating the managed store layout.
 	UpdateProgressPreparingStore UpdateProgressStage = "preparing-store"
-	// UpdateProgressExtracting means update is extracting configured binaries.
+	// UpdateProgressExtracting means update is preparing configured binaries.
 	UpdateProgressExtracting UpdateProgressStage = "extracting"
 	// UpdateProgressWritingEvidence means update is writing verification evidence.
 	UpdateProgressWritingEvidence UpdateProgressStage = "writing-evidence"
@@ -228,17 +228,17 @@ func (e UpdateIncompleteError) Error() string {
 
 // PackageUpdater implements installed package updates.
 type PackageUpdater struct {
-	manifests ManifestSource
-	releases  RepositoryReleaseSource
-	assets    ReleaseAssetSource
-	download  ArtifactDownloader
-	verify    Verifier
-	evidence  EvidenceWriter
-	records   VerificationRecordStore
-	archives  ArchiveExtractor
-	files     UpdateFileSystem
-	state     InstalledStateReplaceStore
-	now       func() time.Time
+	manifests    ManifestSource
+	releases     RepositoryReleaseSource
+	assets       ReleaseAssetSource
+	download     ArtifactDownloader
+	verify       Verifier
+	evidence     EvidenceWriter
+	records      VerificationRecordStore
+	materializer ArtifactMaterializer
+	files        UpdateFileSystem
+	state        InstalledStateReplaceStore
+	now          func() time.Time
 }
 
 // UpdateRequest describes installed-package update requests.
@@ -259,7 +259,7 @@ type UpdateRequest struct {
 	AllowSignerChange bool
 	// Progress receives user-visible update progress. Nil disables progress reports.
 	Progress UpdateProgressFunc
-	// Approve approves a verified artifact before extraction, linking, or state writes. Nil approves automatically.
+	// Approve approves a verified artifact before preparing binaries, linking, or state writes. Nil approves automatically.
 	Approve UpdateApprovalFunc
 }
 
@@ -292,8 +292,8 @@ func NewPackageUpdater(deps PackageUpdaterDependencies) (*PackageUpdater, error)
 	if deps.EvidenceStore == nil {
 		return nil, fmt.Errorf("verification record store must be set")
 	}
-	if deps.Archives == nil {
-		return nil, fmt.Errorf("archive extractor must be set")
+	if deps.Materializer == nil {
+		return nil, fmt.Errorf("artifact materializer must be set")
 	}
 	if deps.FileSystem == nil {
 		return nil, fmt.Errorf("update filesystem must be set")
@@ -306,17 +306,17 @@ func NewPackageUpdater(deps PackageUpdaterDependencies) (*PackageUpdater, error)
 		now = time.Now
 	}
 	return &PackageUpdater{
-		manifests: deps.Manifests,
-		releases:  deps.Releases,
-		assets:    deps.Assets,
-		download:  deps.Downloader,
-		verify:    deps.Verifier,
-		evidence:  deps.EvidenceWriter,
-		records:   deps.EvidenceStore,
-		archives:  deps.Archives,
-		files:     deps.FileSystem,
-		state:     deps.StateStore,
-		now:       now,
+		manifests:    deps.Manifests,
+		releases:     deps.Releases,
+		assets:       deps.Assets,
+		download:     deps.Downloader,
+		verify:       deps.Verifier,
+		evidence:     deps.EvidenceWriter,
+		records:      deps.EvidenceStore,
+		materializer: deps.Materializer,
+		files:        deps.FileSystem,
+		state:        deps.StateStore,
+		now:          now,
 	}, nil
 }
 
@@ -481,10 +481,10 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		return result, err
 	}
 
-	request.report(UpdateProgressExtracting, "Extracting configured binaries")
-	extracted, err := u.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
-		ArchivePath:    layout.ArtifactPath,
-		ArchiveName:    assetName,
+	request.report(UpdateProgressExtracting, "Preparing configured binaries")
+	materialized, err := u.materializer.MaterializeBinaries(ctx, ArtifactMaterializationRequest{
+		ArtifactPath:   layout.ArtifactPath,
+		AssetName:      assetName,
 		DestinationDir: layout.ExtractedDir,
 		Binaries:       candidate.Package.Binaries,
 	})
@@ -507,7 +507,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write verification evidence: %w", err))
 	}
 
-	nextBinaries, err := plannedInstalledBinaries(request.BinDir, extracted)
+	nextBinaries, err := plannedInstalledBinaries(request.BinDir, materialized)
 	if err != nil {
 		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, err)
 	}
@@ -702,7 +702,7 @@ func (u *PackageUpdater) cleanupStagedUpdate(ctx context.Context, request Update
 	return err
 }
 
-func plannedInstalledBinaries(binDir string, binaries []ExtractedBinary) ([]InstalledBinary, error) {
+func plannedInstalledBinaries(binDir string, binaries []MaterializedBinary) ([]InstalledBinary, error) {
 	binDir = strings.TrimSpace(binDir)
 	if binDir == "" {
 		return nil, fmt.Errorf("bin directory must be set")

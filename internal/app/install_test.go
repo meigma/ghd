@@ -41,7 +41,7 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 
 	result, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
@@ -60,8 +60,8 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	assert.Nil(t, tc.downloader.request.Progress)
 	assert.Equal(t, assetDigest, tc.files.storeRequest.AssetDigest)
 	assert.Equal(t, tc.downloader.path, tc.files.storeRequest.ArtifactPath)
-	assert.Equal(t, tc.files.layout.ArtifactPath, tc.archives.request.ArchivePath)
-	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.archives.request.ArchiveName)
+	assert.Equal(t, tc.files.layout.ArtifactPath, tc.archives.request.ArtifactPath)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.archives.request.AssetName)
 	assert.Equal(t, tc.files.layout.ExtractedDir, tc.archives.request.DestinationDir)
 	require.NotNil(t, tc.evidence.record)
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.evidence.record.Asset)
@@ -76,6 +76,36 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	assert.Equal(t, []state.Binary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, tc.state.saved.Records[0].Binaries)
 	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, result.Binaries)
 	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "cleanup"}, tc.events)
+}
+
+func TestVerifiedInstallerInstallsDirectBinaryAsset(t *testing.T) {
+	tc := newInstallTestContext(t)
+	givenSuccessfulInstallFixture(t, tc)
+	tc.manifests.data = []byte(testManifestWithAssetPattern("foo_${version}_darwin_arm64"))
+	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64", DownloadURL: "https://example.test/foo"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo")
+	materializedPath := filepath.Join(tc.files.layout.ExtractedDir, "bin", "foo")
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: materializedPath}}
+	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: materializedPath}}
+
+	result, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64", result.AssetName)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64", tc.archives.request.AssetName)
+	require.NotNil(t, tc.files.metadata)
+	assert.Equal(t, "foo_1.2.3_darwin_arm64", tc.files.metadata.Asset)
+	require.Len(t, tc.state.saved.Records, 1)
+	assert.Equal(t, materializedPath, tc.state.saved.Records[0].Binaries[0].TargetPath)
+	assert.Equal(t, materializedPath, result.Binaries[0].TargetPath)
 }
 
 func TestVerifiedInstallerReportsProgressInInstallOrder(t *testing.T) {
@@ -256,7 +286,7 @@ func TestVerifiedInstallerResolvesLatestStableVersionWhenVersionIsOmitted(t *tes
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 
 	result, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
@@ -416,7 +446,7 @@ func TestVerifiedInstallerDoesNotWriteMetadataWhenLinkingFails(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.linkErr = errors.New("binary link already exists")
 	storeDir := filepath.Join(t.TempDir(), "store-root")
 	binDir := filepath.Join(t.TempDir(), "bin")
@@ -457,7 +487,7 @@ func TestVerifiedInstallerRollsBackLinksWhenMetadataFails(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 	tc.files.metadataErr = errors.New("disk full")
 	storeDir := filepath.Join(t.TempDir(), "store-root")
@@ -498,7 +528,7 @@ func TestVerifiedInstallerRollsBackLinksWhenInstalledStateFails(t *testing.T) {
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 	tc.state.saveErr = errors.New("disk full")
 	storeDir := filepath.Join(t.TempDir(), "store-root")
@@ -596,7 +626,7 @@ func newInstallTestContext(t *testing.T) *installTestContext {
 		Downloader:     tc.downloader,
 		Verifier:       tc.verifier,
 		EvidenceWriter: tc.evidence,
-		Archives:       tc.archives,
+		Materializer:   tc.archives,
 		FileSystem:     tc.files,
 		StateStore:     tc.state,
 		Now:            func() time.Time { return time.Unix(1700000000, 0).UTC() },
@@ -636,7 +666,7 @@ func givenSuccessfulInstallFixture(t *testing.T, tc *installTestContext) verific
 		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
 		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
 	}
-	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
 	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
 	return evidence
 }
@@ -694,13 +724,13 @@ func (f *eventEvidenceWriter) StoreInstalledRecords(t *testing.T, records ...sta
 
 type fakeArchiveExtractor struct {
 	events  *[]string
-	request ArchiveExtractionRequest
-	result  []ExtractedBinary
+	request ArtifactMaterializationRequest
+	result  []MaterializedBinary
 	err     error
 	called  bool
 }
 
-func (f *fakeArchiveExtractor) ExtractArchive(_ context.Context, request ArchiveExtractionRequest) ([]ExtractedBinary, error) {
+func (f *fakeArchiveExtractor) MaterializeBinaries(_ context.Context, request ArtifactMaterializationRequest) ([]MaterializedBinary, error) {
 	*f.events = append(*f.events, "extract")
 	f.called = true
 	f.request = request
@@ -708,9 +738,9 @@ func (f *fakeArchiveExtractor) ExtractArchive(_ context.Context, request Archive
 		return nil, f.err
 	}
 	if f.result == nil {
-		out := make([]ExtractedBinary, 0, len(request.Binaries))
+		out := make([]MaterializedBinary, 0, len(request.Binaries))
 		for _, binary := range request.Binaries {
-			out = append(out, ExtractedBinary{
+			out = append(out, MaterializedBinary{
 				Name:         filepath.Base(filepath.FromSlash(binary.Path)),
 				RelativePath: binary.Path,
 				Path:         filepath.Join(request.DestinationDir, filepath.FromSlash(binary.Path)),

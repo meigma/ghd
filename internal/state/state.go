@@ -35,7 +35,7 @@ type Record struct {
 	StorePath string `json:"store_path"`
 	// ArtifactPath is the copied artifact path inside the store.
 	ArtifactPath string `json:"artifact_path"`
-	// ExtractedPath is the extracted archive directory.
+	// ExtractedPath is the prepared binaries directory inside the store.
 	ExtractedPath string `json:"extracted_path"`
 	// VerificationPath is the verification evidence path.
 	VerificationPath string `json:"verification_path"`
@@ -51,7 +51,7 @@ type Binary struct {
 	Name string `json:"name"`
 	// LinkPath is the managed bin path.
 	LinkPath string `json:"link_path"`
-	// TargetPath is the verified extracted binary path.
+	// TargetPath is the verified prepared binary path.
 	TargetPath string `json:"target_path"`
 }
 

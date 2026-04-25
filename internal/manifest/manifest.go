@@ -134,7 +134,7 @@ type Package struct {
 	TagPattern string `toml:"tag_pattern"`
 	// Assets maps platform tuples to release asset names.
 	Assets []Asset `toml:"assets"`
-	// Binaries lists executable paths inside the verified asset.
+	// Binaries lists executable paths inside the verified artifact or prepared directory.
 	Binaries []Binary `toml:"binaries"`
 }
 
@@ -148,9 +148,9 @@ type Asset struct {
 	Pattern string `toml:"pattern"`
 }
 
-// Binary identifies one executable path inside an asset or extracted archive.
+// Binary identifies one executable path inside a direct asset or extracted archive.
 type Binary struct {
-	// Path is a relative executable path inside the verified asset.
+	// Path is a relative executable path inside the verified artifact.
 	Path string `toml:"path"`
 }
 

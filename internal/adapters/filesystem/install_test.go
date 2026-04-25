@@ -289,7 +289,7 @@ func TestInstallerLinksBinariesAndFailsClosedOnCollision(t *testing.T) {
 
 	links, err := installer.LinkBinaries(context.Background(), app.LinkBinariesRequest{
 		BinDir: binDir,
-		Binaries: []app.ExtractedBinary{
+		Binaries: []app.MaterializedBinary{
 			{Name: "foo", Path: fooTarget},
 		},
 	})
@@ -305,7 +305,7 @@ func TestInstallerLinksBinariesAndFailsClosedOnCollision(t *testing.T) {
 	require.NoError(t, os.WriteFile(existingBar, []byte("existing"), 0o644))
 	_, err = installer.LinkBinaries(context.Background(), app.LinkBinariesRequest{
 		BinDir: binDir,
-		Binaries: []app.ExtractedBinary{
+		Binaries: []app.MaterializedBinary{
 			{Name: "baz", Path: fooTarget},
 			{Name: "bar", Path: barTarget},
 		},
@@ -335,7 +335,7 @@ func TestInstallerLinksBinariesWithAbsolutePathsFromRelativeBinRoot(t *testing.T
 
 	links, err := installer.LinkBinaries(context.Background(), app.LinkBinariesRequest{
 		BinDir: "bin",
-		Binaries: []app.ExtractedBinary{
+		Binaries: []app.MaterializedBinary{
 			{Name: "foo", Path: target},
 		},
 	})
