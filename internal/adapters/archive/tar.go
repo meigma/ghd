@@ -50,6 +50,10 @@ func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveE
 	if len(request.Binaries) == 0 {
 		return nil, fmt.Errorf("at least one binary must be configured")
 	}
+	plan, err := newExtractionPlan(request.Binaries)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
 		return nil, fmt.Errorf("create extraction destination: %w", err)
 	}
@@ -73,7 +77,7 @@ func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveE
 	}
 	defer root.Close()
 
-	if err := extractTar(ctx, root, tar.NewReader(gzipReader)); err != nil {
+	if err := extractTar(ctx, root, tar.NewReader(gzipReader), plan); err != nil {
 		_ = gzipReader.Close()
 		return nil, err
 	}
@@ -87,7 +91,63 @@ func (TarGzipExtractor) ExtractArchive(ctx context.Context, request app.ArchiveE
 	return binaries, nil
 }
 
-func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader) error {
+type extractionPlan struct {
+	targets []string
+	target  map[string]struct{}
+	dir     map[string]struct{}
+}
+
+func newExtractionPlan(binaries []manifest.Binary) (extractionPlan, error) {
+	plan := extractionPlan{
+		target: make(map[string]struct{}, len(binaries)),
+		dir:    make(map[string]struct{}, len(binaries)),
+	}
+	for _, binary := range binaries {
+		if err := binary.Validate(); err != nil {
+			return extractionPlan{}, err
+		}
+		target := cleanManifestPath(binary.Path)
+		if _, ok := plan.target[target]; !ok {
+			plan.target[target] = struct{}{}
+			plan.targets = append(plan.targets, target)
+		}
+		for parent := filepath.Dir(target); parent != "."; parent = filepath.Dir(parent) {
+			plan.dir[parent] = struct{}{}
+		}
+	}
+	return plan, nil
+}
+
+func (p extractionPlan) wantsFile(name string) bool {
+	_, ok := p.target[name]
+	return ok
+}
+
+func (p extractionPlan) wantsDir(name string) bool {
+	if _, ok := p.dir[name]; ok {
+		return true
+	}
+	_, ok := p.target[name]
+	return ok
+}
+
+func (p extractionPlan) conflictingTarget(name string) (string, bool) {
+	for _, target := range p.targets {
+		if target == name {
+			continue
+		}
+		if isArchiveAncestor(name, target) || isArchiveAncestor(target, name) {
+			return target, true
+		}
+	}
+	return "", false
+}
+
+func isArchiveAncestor(parent string, child string) bool {
+	return strings.HasPrefix(child, parent+string(filepath.Separator))
+}
+
+func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader, plan extractionPlan) error {
 	var totalBytes int64
 	var entries int
 	for {
@@ -121,6 +181,12 @@ func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader) error {
 
 		switch header.Typeflag {
 		case tar.TypeDir:
+			if target, ok := plan.conflictingTarget(name); ok && !plan.wantsDir(name) {
+				return fmt.Errorf("archive entry %q conflicts with configured binary path %q", header.Name, filepath.ToSlash(target))
+			}
+			if !plan.wantsDir(name) {
+				continue
+			}
 			if err := root.MkdirAll(name, safeDirMode(header)); err != nil {
 				return fmt.Errorf("create archive directory %q: %w", header.Name, err)
 			}
@@ -132,6 +198,12 @@ func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader) error {
 				return fmt.Errorf("archive expands beyond %d bytes", MaxUncompressedBytes)
 			}
 			totalBytes += header.Size
+			if target, ok := plan.conflictingTarget(name); ok && !plan.wantsFile(name) {
+				return fmt.Errorf("archive entry %q conflicts with configured binary path %q", header.Name, filepath.ToSlash(target))
+			}
+			if !plan.wantsFile(name) {
+				continue
+			}
 			if err := writeRegularFile(root, reader, header, name); err != nil {
 				return err
 			}
