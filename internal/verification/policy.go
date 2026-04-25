@@ -7,7 +7,7 @@ type Policy struct {
 	// ExpectedSourceRepository is the repository expected to appear in provenance.
 	ExpectedSourceRepository Repository
 	// ExpectedSourceRef is the optional source ref expected to appear in provenance.
-	ExpectedSourceRef string
+	ExpectedSourceRef SourceRef
 	// ExpectedSourceDigest is the optional source digest expected to appear in provenance.
 	ExpectedSourceDigest Digest
 	// ExpectedSignerDigest is the optional signer workflow digest expected to appear in provenance.
@@ -37,17 +37,22 @@ func (r Request) validate() error {
 	if err := r.Repository.Validate(); err != nil {
 		return newError(KindInvalidRequest, "repository must be owner/repo")
 	}
-	if r.Tag == "" {
-		return newError(KindInvalidRequest, "release tag must be set")
+	if err := r.Tag.Validate(); err != nil {
+		return newError(KindInvalidRequest, "release tag is invalid: %v", err)
 	}
 	if r.AssetPath == "" {
 		return newError(KindInvalidRequest, "asset path must be set")
 	}
-	if r.Policy.TrustedSignerWorkflow == "" {
-		return newError(KindInvalidRequest, "trusted signer workflow must be set")
+	if err := r.Policy.TrustedSignerWorkflow.Validate(); err != nil {
+		return newError(KindInvalidRequest, "trusted signer workflow is invalid: %v", err)
 	}
 	if err := r.Policy.ExpectedSourceRepository.Validate(); err != nil {
 		return newError(KindInvalidRequest, "expected source repository must be owner/repo")
+	}
+	if !r.Policy.ExpectedSourceRef.IsZero() {
+		if err := r.Policy.ExpectedSourceRef.Validate(); err != nil {
+			return newError(KindInvalidRequest, "expected source ref is invalid: %v", err)
+		}
 	}
 	if !r.Policy.ExpectedSourceDigest.IsZero() {
 		if err := r.Policy.ExpectedSourceDigest.validate(); err != nil {

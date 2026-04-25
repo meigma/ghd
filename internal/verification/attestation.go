@@ -26,7 +26,7 @@ type CertificateEvidence struct {
 	// SourceRepository is the source repository recorded by the certificate.
 	SourceRepository Repository
 	// SourceRef is the source ref recorded by the certificate when available.
-	SourceRef string
+	SourceRef SourceRef
 	// SourceDigest is the source commit digest recorded by the certificate when available.
 	SourceDigest Digest
 	// SignerWorkflow is the workflow identity recorded by the certificate.

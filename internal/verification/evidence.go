@@ -33,7 +33,7 @@ type AttestationEvidence struct {
 	// SourceRepository is the accepted source repository.
 	SourceRepository Repository
 	// SourceRef is the accepted source ref.
-	SourceRef string
+	SourceRef SourceRef
 	// SourceDigest is the accepted source digest.
 	SourceDigest Digest
 	// RunnerEnvironment is the accepted runner environment.

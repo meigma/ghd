@@ -396,11 +396,15 @@ func verificationStatement(statement *intoto.Statement) (verification.Statement,
 	}
 
 	predicate := statement.GetPredicate()
+	releaseTag, err := optionalReleaseTag(stringField(predicate, "tag"))
+	if err != nil {
+		return verification.Statement{}, err
+	}
 	return verification.Statement{
 		PredicateType: statement.GetPredicateType(),
 		Subjects:      subjects,
 		Predicate: verification.Predicate{
-			ReleaseTag: verification.ReleaseTag(stringField(predicate, "tag")),
+			ReleaseTag: releaseTag,
 			BuildType:  stringField(nestedStruct(predicate, "buildDefinition"), "buildType"),
 			BuilderID:  stringField(nestedStruct(nestedStruct(predicate, "runDetails"), "builder"), "id"),
 		},
@@ -420,17 +424,61 @@ func certificateEvidence(cert certificate.Summary) (verification.CertificateEvid
 	if err != nil {
 		return verification.CertificateEvidence{}, err
 	}
+	sourceRef, err := optionalSourceRef(cert.SourceRepositoryRef)
+	if err != nil {
+		return verification.CertificateEvidence{}, err
+	}
+	signerWorkflow, err := optionalWorkflowIdentity(cert.BuildSignerURI)
+	if err != nil {
+		return verification.CertificateEvidence{}, err
+	}
 
 	return verification.CertificateEvidence{
 		Issuer:                 cert.Issuer,
 		SubjectAlternativeName: cert.SubjectAlternativeName,
 		SourceRepository:       sourceRepository,
-		SourceRef:              cert.SourceRepositoryRef,
+		SourceRef:              sourceRef,
 		SourceDigest:           sourceDigest,
-		SignerWorkflow:         verification.WorkflowIdentity(cert.BuildSignerURI),
+		SignerWorkflow:         signerWorkflow,
 		SignerDigest:           signerDigest,
 		RunnerEnvironment:      verification.RunnerEnvironment(cert.RunnerEnvironment),
 	}, nil
+}
+
+func optionalReleaseTag(value string) (verification.ReleaseTag, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	tag, err := verification.NewReleaseTag(value)
+	if err != nil {
+		return "", fmt.Errorf("release predicate tag %q is invalid: %w", value, err)
+	}
+	return tag, nil
+}
+
+func optionalSourceRef(value string) (verification.SourceRef, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	sourceRef, err := verification.NewSourceRef(value)
+	if err != nil {
+		return "", fmt.Errorf("source repository ref %q is invalid: %w", value, err)
+	}
+	return sourceRef, nil
+}
+
+func optionalWorkflowIdentity(value string) (verification.WorkflowIdentity, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	workflowIdentity, err := verification.NewWorkflowIdentity(value)
+	if err != nil {
+		return "", fmt.Errorf("build signer URI %q is invalid: %w", value, err)
+	}
+	return workflowIdentity, nil
 }
 
 func optionalDigest(value string) (verification.Digest, error) {

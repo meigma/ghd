@@ -668,7 +668,7 @@ func (f fakeBundleVerifier) Verify(_ context.Context, attestation verification.A
 			Issuer:                 verification.GitHubActionsOIDCIssuer,
 			SubjectAlternativeName: "https://github.com/owner/repo/.github/workflows/release.yml@refs/heads/main",
 			SourceRepository:       f.repository,
-			SourceRef:              "refs/tags/" + string(f.tag),
+			SourceRef:              f.tag.RefName(),
 			SourceDigest:           f.releaseDigest,
 			SignerWorkflow:         "https://github.com/owner/repo/.github/workflows/release.yml@refs/heads/main",
 			RunnerEnvironment:      verification.RunnerEnvironmentGitHubHosted,

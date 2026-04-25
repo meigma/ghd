@@ -213,6 +213,9 @@ func (c Config) Validate() error {
 	if err := validateNoControlCharacters("provenance.signer_workflow", c.Provenance.SignerWorkflow); err != nil {
 		return err
 	}
+	if _, err := c.Provenance.validatedTrustedSignerWorkflow(); err != nil {
+		return fmt.Errorf("provenance.signer_workflow: %w", err)
+	}
 	if len(c.Packages) == 0 {
 		return fmt.Errorf("at least one package must be declared")
 	}
@@ -233,7 +236,12 @@ func (c Config) Validate() error {
 
 // TrustedSignerWorkflow returns the verification workflow identity.
 func (p Provenance) TrustedSignerWorkflow() verification.WorkflowIdentity {
-	return verification.WorkflowIdentity(strings.TrimSpace(p.SignerWorkflow))
+	identity, _ := p.validatedTrustedSignerWorkflow()
+	return identity
+}
+
+func (p Provenance) validatedTrustedSignerWorkflow() (verification.WorkflowIdentity, error) {
+	return verification.NewWorkflowIdentity(p.SignerWorkflow)
 }
 
 // Package returns the package with name.
@@ -298,16 +306,23 @@ func (p Package) ReleaseTag(version PackageVersion) (verification.ReleaseTag, er
 	if tag == "" {
 		return "", fmt.Errorf("release tag pattern for package %q resolved to an empty tag", p.Name)
 	}
-	return verification.ReleaseTag(tag), nil
+	releaseTag, err := verification.NewReleaseTag(tag)
+	if err != nil {
+		return "", fmt.Errorf("release tag pattern for package %q resolved to invalid tag %q: %w", p.Name, tag, err)
+	}
+	return releaseTag, nil
 }
 
 // VersionForTag extracts one package version from tag when it matches TagPattern exactly.
 func (p Package) VersionForTag(tag verification.ReleaseTag) (PackageVersion, bool, error) {
+	if err := tag.Validate(); err != nil {
+		return "", false, err
+	}
 	prefix, suffix, err := versionPatternParts(strings.TrimSpace(p.TagPattern))
 	if err != nil {
 		return "", false, err
 	}
-	value := string(tag)
+	value := tag.String()
 	if !strings.HasPrefix(value, prefix) || !strings.HasSuffix(value, suffix) {
 		return "", false, nil
 	}

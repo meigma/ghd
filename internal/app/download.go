@@ -211,16 +211,20 @@ func (r VerificationRecord) Validate() error {
 			return fmt.Errorf("verification %s must be set", field.label)
 		}
 	}
+	tag, err := verification.NewReleaseTag(r.Tag)
+	if err != nil {
+		return fmt.Errorf("verification tag %q is invalid: %w", r.Tag, err)
+	}
 	if r.Evidence.Repository.IsZero() {
 		return fmt.Errorf("verification evidence repository must be set")
 	}
 	if !strings.EqualFold(r.Evidence.Repository.String(), r.Repository) {
 		return fmt.Errorf("verification evidence repository %s does not match record repository %s", r.Evidence.Repository, r.Repository)
 	}
-	if strings.TrimSpace(string(r.Evidence.Tag)) == "" {
-		return fmt.Errorf("verification evidence tag must be set")
+	if err := r.Evidence.Tag.Validate(); err != nil {
+		return fmt.Errorf("verification evidence tag is invalid: %w", err)
 	}
-	if string(r.Evidence.Tag) != r.Tag {
+	if r.Evidence.Tag != tag {
 		return fmt.Errorf("verification evidence tag %s does not match record tag %s", r.Evidence.Tag, r.Tag)
 	}
 	if r.Evidence.AssetDigest.IsZero() {

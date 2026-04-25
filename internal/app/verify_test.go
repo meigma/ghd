@@ -91,6 +91,31 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 		assertSingleVerifyFailure(t, results, err, "decode verification record")
 	})
 
+	t.Run("invalid persisted release tag", func(t *testing.T) {
+		tc := newInstalledPackageVerifierTestContext(t)
+		tc.record.Tag = ".bad"
+		verificationPath, err := fakeVerificationRecordStore{}.WriteVerificationRecord(context.Background(), filepath.Dir(tc.record.VerificationPath), VerificationRecord{
+			SchemaVersion: 1,
+			Repository:    tc.record.Repository,
+			Package:       tc.record.Package,
+			Version:       tc.record.Version,
+			Tag:           tc.record.Tag,
+			Asset:         tc.record.Asset,
+			Evidence: verification.Evidence{
+				Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+				Tag:         verification.ReleaseTag(tc.record.Tag),
+				AssetDigest: mustTestDigest(t, "aa"),
+			},
+		})
+		require.NoError(t, err)
+		tc.record.VerificationPath = verificationPath
+		tc.state.index = mustStateIndex(t, tc.record)
+
+		results, err := tc.subject.Verify(context.Background(), tc.request)
+
+		assertSingleVerifyFailure(t, results, err, "verification tag")
+	})
+
 	t.Run("artifact digest mismatch", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		tc.verifier.evidence.AssetDigest = mustTestDigest(t, "bb")

@@ -36,8 +36,12 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
+	installedTag, err := verification.NewReleaseTag(record.Tag)
+	if err != nil {
+		return resolvedInstalledPackageUpdate{}, fmt.Errorf("installed record for %s/%s@%s has invalid release tag %q: %w", record.Repository, record.Package, record.Version, record.Tag, err)
+	}
 
-	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, packageName, version, verification.ReleaseTag(record.Tag))
+	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, packageName, version, installedTag)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
