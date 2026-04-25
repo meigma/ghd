@@ -40,6 +40,46 @@ func TestTarGzipExtractorExtractsConfiguredBinary(t *testing.T) {
 	assert.Equal(t, "hello\n", string(data))
 }
 
+func TestTarGzipExtractorDoesNotMaterializeUnconfiguredRegularFiles(t *testing.T) {
+	archivePath := writeTarGzip(t, []tarTestEntry{
+		{name: "bin", typeflag: tar.TypeDir, mode: 0o755},
+		{name: "bin/foo", body: "hello\n", typeflag: tar.TypeReg, mode: 0o755},
+		{name: "share", typeflag: tar.TypeDir, mode: 0o755},
+		{name: "share/readme.txt", body: "docs\n", typeflag: tar.TypeReg, mode: 0o644},
+	})
+	destination := t.TempDir()
+
+	_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
+		ArchivePath:    archivePath,
+		DestinationDir: destination,
+		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
+	})
+
+	require.NoError(t, err)
+	data, err := os.ReadFile(filepath.Join(destination, "bin", "foo"))
+	require.NoError(t, err)
+	assert.Equal(t, "hello\n", string(data))
+	_, err = os.Stat(filepath.Join(destination, "share", "readme.txt"))
+	require.Error(t, err)
+	assert.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestTarGzipExtractorRejectsSkippedPathThatBlocksConfiguredBinary(t *testing.T) {
+	archivePath := writeTarGzip(t, []tarTestEntry{
+		{name: "bin", body: "not-a-directory", typeflag: tar.TypeReg, mode: 0o644},
+		{name: "bin/foo", body: "hello\n", typeflag: tar.TypeReg, mode: 0o755},
+	})
+
+	_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
+		ArchivePath:    archivePath,
+		DestinationDir: t.TempDir(),
+		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), `archive entry "bin" conflicts with configured binary path "bin/foo"`)
+}
+
 func TestTarGzipExtractorMasksWritablePermissionBits(t *testing.T) {
 	archivePath := writeTarGzip(t, []tarTestEntry{
 		{name: "bin", typeflag: tar.TypeDir, mode: 0o777},
