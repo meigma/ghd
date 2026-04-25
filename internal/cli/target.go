@@ -4,19 +4,20 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/meigma/ghd/internal/manifest"
 	"github.com/meigma/ghd/internal/verification"
 )
 
 type packageVersionTarget struct {
 	repository  verification.Repository
-	packageName string
-	version     string
+	packageName manifest.PackageName
+	version     manifest.PackageVersion
 	qualified   bool
 }
 
 type packageInfoTarget struct {
 	repository      verification.Repository
-	packageName     string
+	packageName     manifest.PackageName
 	unqualifiedName string
 }
 
@@ -33,13 +34,22 @@ func parsePackageVersionTarget(command string, value string) (packageVersionTarg
 	if strings.Contains(version, "/") {
 		return packageVersionTarget{}, fmt.Errorf("%s target must be owner/repo/package@version", command)
 	}
+	repository, err := verification.NewRepository(parts[0], parts[1])
+	if err != nil {
+		return packageVersionTarget{}, fmt.Errorf("%s target must be owner/repo/package@version", command)
+	}
+	packageName, err := manifest.NewPackageName(parts[2])
+	if err != nil {
+		return packageVersionTarget{}, fmt.Errorf("%s target must be owner/repo/package@version", command)
+	}
+	packageVersion, err := manifest.NewPackageVersion(version)
+	if err != nil {
+		return packageVersionTarget{}, fmt.Errorf("%s target must be owner/repo/package@version", command)
+	}
 	return packageVersionTarget{
-		repository: verification.Repository{
-			Owner: parts[0],
-			Name:  parts[1],
-		},
-		packageName: parts[2],
-		version:     version,
+		repository:  repository,
+		packageName: packageName,
+		version:     packageVersion,
 		qualified:   true,
 	}, nil
 }
@@ -53,24 +63,34 @@ func parseInstallTarget(value string) (packageVersionTarget, error) {
 	if strings.Contains(version, "/") {
 		return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
 	}
+	packageVersion, err := manifest.NewPackageVersion(version)
+	if err != nil {
+		return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+	}
 	parts := strings.Split(targetPart, "/")
 	switch len(parts) {
 	case 1:
-		if strings.TrimSpace(parts[0]) == "" {
+		packageName, err := manifest.NewPackageName(parts[0])
+		if err != nil {
 			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
 		}
-		return packageVersionTarget{packageName: parts[0], version: version}, nil
+		return packageVersionTarget{packageName: packageName, version: packageVersion}, nil
 	case 3:
 		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
 			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
 		}
+		repository, err := verification.NewRepository(parts[0], parts[1])
+		if err != nil {
+			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+		}
+		packageName, err := manifest.NewPackageName(parts[2])
+		if err != nil {
+			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+		}
 		return packageVersionTarget{
-			repository: verification.Repository{
-				Owner: parts[0],
-				Name:  parts[1],
-			},
-			packageName: parts[2],
-			version:     version,
+			repository:  repository,
+			packageName: packageName,
+			version:     packageVersion,
 			qualified:   true,
 		}, nil
 	default:
@@ -83,11 +103,11 @@ func parseRepositoryTarget(value string) (verification.Repository, error) {
 	if strings.Contains(value, "@") {
 		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
 	}
-	parts := strings.Split(value, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	repository, err := verification.ParseRepository(value)
+	if err != nil {
 		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
 	}
-	return verification.Repository{Owner: parts[0], Name: parts[1]}, nil
+	return repository, nil
 }
 
 func parseUninstallTarget(value string) (string, error) {
@@ -146,25 +166,28 @@ func parseInfoTarget(value string) (packageInfoTarget, error) {
 		}
 		return packageInfoTarget{unqualifiedName: parts[0]}, nil
 	case 2:
-		if parts[0] == "" || parts[1] == "" {
+		repository, err := verification.NewRepository(parts[0], parts[1])
+		if err != nil {
 			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
 		}
 		return packageInfoTarget{
-			repository: verification.Repository{
-				Owner: parts[0],
-				Name:  parts[1],
-			},
+			repository: repository,
 		}, nil
 	case 3:
 		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
 			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
 		}
+		repository, err := verification.NewRepository(parts[0], parts[1])
+		if err != nil {
+			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+		}
+		packageName, err := manifest.NewPackageName(parts[2])
+		if err != nil {
+			return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")
+		}
 		return packageInfoTarget{
-			repository: verification.Repository{
-				Owner: parts[0],
-				Name:  parts[1],
-			},
-			packageName: parts[2],
+			repository:  repository,
+			packageName: packageName,
 		}, nil
 	default:
 		return packageInfoTarget{}, fmt.Errorf("info target must be name, owner/repo, or owner/repo/package")

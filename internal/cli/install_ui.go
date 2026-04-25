@@ -123,9 +123,9 @@ func runInstallForm(ctx context.Context, options Options, mode installPresentati
 }
 
 func installApprovalTitle(approval app.InstallApproval) string {
-	target := strings.TrimSpace(approval.PackageName)
-	if strings.TrimSpace(approval.Version) != "" {
-		target = strings.TrimSpace(target + " " + approval.Version)
+	target := strings.TrimSpace(approval.PackageName.String())
+	if strings.TrimSpace(approval.Version.String()) != "" {
+		target = strings.TrimSpace(target + " " + approval.Version.String())
 	}
 	if target == "" {
 		target = "verified artifact"
@@ -159,8 +159,8 @@ func installApprovalDestination(approval app.InstallApproval) string {
 func installApprovalDescription(approval app.InstallApproval) string {
 	return formatRows([]uiRow{
 		{"Repository", approval.Repository.String()},
-		{"Package", approval.PackageName},
-		{"Version", approval.Version},
+		{"Package", approval.PackageName.String()},
+		{"Version", approval.Version.String()},
 		{"Tag", string(approval.Tag)},
 		{"Asset", approval.AssetName},
 		{"Digest", approval.AssetDigest.String()},
@@ -200,14 +200,14 @@ func renderInstallDownloadProgress(progress app.DownloadProgress, frame string, 
 
 func writeInstallSummary(w io.Writer, result app.VerifiedInstallResult, enhanced bool, color bool) {
 	if !enhanced {
-		fmt.Fprintf(w, "installed %s/%s@%s\n", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName), terminalSafeText(result.Version))
+		fmt.Fprintf(w, "installed %s/%s@%s\n", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName.String()), terminalSafeText(result.Version.String()))
 		if strings.TrimSpace(result.TrustRootPath) != "" {
 			fmt.Fprintf(w, "trust-root %s\n", terminalSafeText(result.TrustRootPath))
 		}
 		return
 	}
 	styles := newUIStyles(color)
-	fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("installed %s/%s@%s", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName), terminalSafeText(result.Version))))
+	fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("installed %s/%s@%s", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName.String()), terminalSafeText(result.Version.String()))))
 	if result.AssetName != "" {
 		fmt.Fprintf(w, "%s %s\n", styles.label.Render("asset"), terminalSafeText(result.AssetName))
 	}

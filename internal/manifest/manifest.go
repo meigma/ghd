@@ -20,6 +20,94 @@ const (
 	versionToken      = "${version}"
 )
 
+// PackageName identifies one package within a repository manifest.
+type PackageName string
+
+// NewPackageName returns a validated package name.
+func NewPackageName(value string) (PackageName, error) {
+	name := PackageName(strings.TrimSpace(value))
+	if err := name.Validate(); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// String returns the raw package name.
+func (n PackageName) String() string {
+	return string(n)
+}
+
+// IsZero reports whether n is unset.
+func (n PackageName) IsZero() bool {
+	return n == ""
+}
+
+// Validate checks that n is a safe manifest package name.
+func (n PackageName) Validate() error {
+	name := string(n)
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("package name must be set")
+	}
+	if err := validateNoControlCharacters("package name", name); err != nil {
+		return err
+	}
+	for _, r := range name {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		switch r {
+		case '.', '_', '-':
+			continue
+		default:
+			return fmt.Errorf("package name %q contains unsupported character %q", name, r)
+		}
+	}
+	return nil
+}
+
+// PackageVersion identifies a literal package version token used for manifest expansion.
+type PackageVersion string
+
+// NewPackageVersion returns a validated package version.
+func NewPackageVersion(value string) (PackageVersion, error) {
+	version := PackageVersion(strings.TrimSpace(value))
+	if err := version.Validate(); err != nil {
+		return "", err
+	}
+	return version, nil
+}
+
+// String returns the raw package version.
+func (v PackageVersion) String() string {
+	return string(v)
+}
+
+// IsZero reports whether v is unset.
+func (v PackageVersion) IsZero() bool {
+	return v == ""
+}
+
+// Validate checks that v is safe to use as a literal manifest expansion token.
+func (v PackageVersion) Validate() error {
+	version := string(v)
+	if strings.TrimSpace(version) == "" {
+		return fmt.Errorf("version must be set")
+	}
+	if version != strings.TrimSpace(version) {
+		return fmt.Errorf("version must not contain leading or trailing whitespace")
+	}
+	if err := validateNoControlCharacters("version", version); err != nil {
+		return err
+	}
+	if version == "." || version == ".." {
+		return fmt.Errorf("version %q must be a path segment", version)
+	}
+	if strings.ContainsAny(version, `/\`) {
+		return fmt.Errorf("version must not contain path separators")
+	}
+	return nil
+}
+
 // Config is the root ghd.toml schema.
 type Config struct {
 	// Version is the ghd.toml schema version.
@@ -39,7 +127,7 @@ type Provenance struct {
 // Package is one installable unit in a repository.
 type Package struct {
 	// Name is the package name within the repository.
-	Name string `toml:"name"`
+	Name PackageName `toml:"name"`
 	// Description is human-readable package text.
 	Description string `toml:"description"`
 	// TagPattern maps a requested version to a GitHub release tag.
@@ -134,7 +222,7 @@ func (c Config) Validate() error {
 		if err := pkg.Validate(); err != nil {
 			return fmt.Errorf("packages[%d]: %w", i, err)
 		}
-		key := strings.ToLower(pkg.Name)
+		key := strings.ToLower(pkg.Name.String())
 		if _, ok := seen[key]; ok {
 			return fmt.Errorf("package %q is declared more than once", pkg.Name)
 		}
@@ -149,8 +237,10 @@ func (p Provenance) TrustedSignerWorkflow() verification.WorkflowIdentity {
 }
 
 // Package returns the package with name.
-func (c Config) Package(name string) (Package, error) {
-	name = strings.TrimSpace(name)
+func (c Config) Package(name PackageName) (Package, error) {
+	if err := name.Validate(); err != nil {
+		return Package{}, err
+	}
 	for _, pkg := range c.Packages {
 		if pkg.Name == name {
 			return pkg, nil
@@ -161,7 +251,7 @@ func (c Config) Package(name string) (Package, error) {
 
 // Validate checks one package declaration.
 func (p Package) Validate() error {
-	if err := validatePackageName(p.Name); err != nil {
+	if err := p.Name.Validate(); err != nil {
 		return err
 	}
 	if err := validateNoControlCharacters("tag pattern", p.TagPattern); err != nil {
@@ -199,13 +289,12 @@ func (p Package) EffectiveTagPattern() string {
 }
 
 // ReleaseTag expands the package tag pattern for version.
-func (p Package) ReleaseTag(version string) (verification.ReleaseTag, error) {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return "", fmt.Errorf("version must be set")
+func (p Package) ReleaseTag(version PackageVersion) (verification.ReleaseTag, error) {
+	if err := version.Validate(); err != nil {
+		return "", err
 	}
 	pattern := p.EffectiveTagPattern()
-	tag := expandVersion(pattern, version)
+	tag := expandVersion(pattern, version.String())
 	if tag == "" {
 		return "", fmt.Errorf("release tag pattern for package %q resolved to an empty tag", p.Name)
 	}
@@ -213,7 +302,7 @@ func (p Package) ReleaseTag(version string) (verification.ReleaseTag, error) {
 }
 
 // VersionForTag extracts one package version from tag when it matches TagPattern exactly.
-func (p Package) VersionForTag(tag verification.ReleaseTag) (string, bool, error) {
+func (p Package) VersionForTag(tag verification.ReleaseTag) (PackageVersion, bool, error) {
 	prefix, suffix, err := versionPatternParts(strings.TrimSpace(p.TagPattern))
 	if err != nil {
 		return "", false, err
@@ -226,11 +315,15 @@ func (p Package) VersionForTag(tag verification.ReleaseTag) (string, bool, error
 	if version == "" {
 		return "", false, nil
 	}
-	return version, true, nil
+	packageVersion, err := NewPackageVersion(version)
+	if err != nil {
+		return "", false, err
+	}
+	return packageVersion, true, nil
 }
 
 // SelectAsset returns the single asset matching platform.
-func (p Package) SelectAsset(platform Platform, version string) (ResolvedAsset, error) {
+func (p Package) SelectAsset(platform Platform, version PackageVersion) (ResolvedAsset, error) {
 	platform = platform.WithDefaults()
 	if platform.OS == "" || platform.Arch == "" {
 		return ResolvedAsset{}, fmt.Errorf("platform OS and architecture must be set")
@@ -288,12 +381,11 @@ func (a Asset) Validate() error {
 }
 
 // ResolveName expands the asset pattern for version.
-func (a Asset) ResolveName(version string) (string, error) {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		return "", fmt.Errorf("version must be set")
+func (a Asset) ResolveName(version PackageVersion) (string, error) {
+	if err := version.Validate(); err != nil {
+		return "", err
 	}
-	name := expandVersion(strings.TrimSpace(a.Pattern), version)
+	name := expandVersion(strings.TrimSpace(a.Pattern), version.String())
 	if name == "" {
 		return "", fmt.Errorf("asset pattern for %s/%s resolved to an empty name", a.OS, a.Arch)
 	}
@@ -320,25 +412,6 @@ func (b Binary) Validate() error {
 	for _, part := range strings.Split(normalized, "/") {
 		if part == ".." {
 			return fmt.Errorf("binary path %q must not contain ..", b.Path)
-		}
-	}
-	return nil
-}
-
-func validatePackageName(name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return fmt.Errorf("package name must be set")
-	}
-	for _, r := range name {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) {
-			continue
-		}
-		switch r {
-		case '.', '_', '-':
-			continue
-		default:
-			return fmt.Errorf("package name %q contains unsupported character %q", name, r)
 		}
 	}
 	return nil

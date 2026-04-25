@@ -8,6 +8,7 @@ import (
 
 	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/config"
+	"github.com/meigma/ghd/internal/manifest"
 )
 
 func newInfoCommand(options Options) *cobra.Command {
@@ -44,8 +45,12 @@ ghd info owner/repo/foo
 				if status != nil {
 					status.Show(fmt.Sprintf("Resolving %s from the local index", terminalSafeText(target.unqualifiedName)))
 				}
+				packageName, err := manifest.NewPackageName(target.unqualifiedName)
+				if err != nil {
+					return err
+				}
 				resolved, err := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
-					PackageName: target.unqualifiedName,
+					PackageName: packageName,
 					IndexDir:    cfg.IndexDir,
 				})
 				if err != nil {
@@ -85,7 +90,7 @@ ghd info owner/repo/foo
 
 func writePackageInfo(options Options, result app.PackageInfoResult) {
 	fmt.Fprintf(options.Out, "repository %s\n", terminalSafeText(result.Repository.String()))
-	fmt.Fprintf(options.Out, "package %s\n", terminalSafeText(result.PackageName))
+	fmt.Fprintf(options.Out, "package %s\n", terminalSafeText(result.PackageName.String()))
 	fmt.Fprintf(options.Out, "signer-workflow %s\n", terminalSafeText(string(result.SignerWorkflow)))
 	fmt.Fprintf(options.Out, "tag-pattern %s\n", terminalSafeText(result.TagPattern))
 	fmt.Fprintf(options.Out, "binaries %s\n", strings.Join(terminalSafeStrings(result.Binaries), ","))

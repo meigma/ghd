@@ -15,7 +15,7 @@ type resolvedInstalledPackageUpdate struct {
 	Package        manifest.Package
 	InstalledAsset manifest.Asset
 	CandidateAsset manifest.Asset
-	LatestVersion  string
+	LatestVersion  manifest.PackageVersion
 	Tag            verification.ReleaseTag
 }
 
@@ -28,8 +28,16 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, fmt.Errorf("installed version %q is not a supported semantic version", record.Version)
 	}
+	packageName, err := manifest.NewPackageName(record.Package)
+	if err != nil {
+		return resolvedInstalledPackageUpdate{}, err
+	}
+	version, err := manifest.NewPackageVersion(record.Version)
+	if err != nil {
+		return resolvedInstalledPackageUpdate{}, err
+	}
 
-	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, record.Package, record.Version, verification.ReleaseTag(record.Tag))
+	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, packageName, version, verification.ReleaseTag(record.Tag))
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
@@ -42,11 +50,11 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, fmt.Errorf("list GitHub releases: %w", err)
 	}
-	candidate, err := latestStablePackageUpdate(ctx, manifests, repository, record.Package, installedAsset, repositoryReleases, installedVersion)
+	candidate, err := latestStablePackageUpdate(ctx, manifests, repository, packageName, installedAsset, repositoryReleases, installedVersion)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
-	if candidate.LatestVersion == "" {
+	if candidate.LatestVersion.IsZero() {
 		return resolvedInstalledPackageUpdate{
 			Repository:     repository,
 			Config:         installedCfg,

@@ -140,9 +140,9 @@ type VerifiedDownloadRequest struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Version is the literal version value used for manifest pattern expansion.
-	Version string
+	Version manifest.PackageVersion
 	// OutputDir receives the downloaded artifact and verification evidence.
 	OutputDir string
 	// Platform optionally overrides the current OS/architecture.
@@ -156,9 +156,9 @@ type VerifiedDownloadResult struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Version is the literal requested version.
-	Version string
+	Version manifest.PackageVersion
 	// Tag is the resolved GitHub release tag.
 	Tag verification.ReleaseTag
 	// AssetName is the concrete release asset name.
@@ -335,8 +335,8 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	record := VerificationRecord{
 		SchemaVersion: 1,
 		Repository:    request.Repository.String(),
-		Package:       request.PackageName,
-		Version:       request.Version,
+		Package:       request.PackageName.String(),
+		Version:       request.Version.String(),
 		Tag:           string(tag),
 		Asset:         selected.Name,
 		Evidence:      evidence,
@@ -360,17 +360,14 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 }
 
 func (r VerifiedDownloadRequest) validate() error {
-	if strings.TrimSpace(r.Repository.Owner) == "" || strings.TrimSpace(r.Repository.Name) == "" {
-		return fmt.Errorf("repository must be owner/repo")
+	if err := r.Repository.Validate(); err != nil {
+		return err
 	}
-	if strings.Contains(r.Repository.Owner, "/") || strings.Contains(r.Repository.Name, "/") {
-		return fmt.Errorf("repository must be owner/repo")
+	if err := r.PackageName.Validate(); err != nil {
+		return err
 	}
-	if strings.TrimSpace(r.PackageName) == "" {
-		return fmt.Errorf("package name must be set")
-	}
-	if strings.TrimSpace(r.Version) == "" {
-		return fmt.Errorf("version must be set")
+	if err := r.Version.Validate(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.OutputDir) == "" {
 		return fmt.Errorf("output directory must be set")
@@ -400,7 +397,7 @@ func (r VerifiedDownloadRequest) reportDownload(progress DownloadProgress) {
 	})
 }
 
-func fetchPackageManifestForVersionAtTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, version string, tag verification.ReleaseTag) (manifest.Config, manifest.Package, error) {
+func fetchPackageManifestForVersionAtTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName manifest.PackageName, version manifest.PackageVersion, tag verification.ReleaseTag) (manifest.Config, manifest.Package, error) {
 	manifestBytes, err := manifests.FetchManifestAtRef(ctx, repository, string(tag))
 	if err != nil {
 		return manifest.Config{}, manifest.Package{}, fmt.Errorf("fetch ghd.toml at %s: %w", tag, err)

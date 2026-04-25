@@ -157,7 +157,7 @@ func TestLatestStableVersionChoosesHighestStableRelease(t *testing.T) {
 	}, installedVersion)
 
 	require.NoError(t, err)
-	assert.Equal(t, "1.10.0", latest)
+	assert.Equal(t, "1.10.0", latest.String())
 }
 
 func TestLatestStableVersionIgnoresDraftsPrereleasesAndInvalidTags(t *testing.T) {
@@ -175,7 +175,7 @@ func TestLatestStableVersionIgnoresDraftsPrereleasesAndInvalidTags(t *testing.T)
 	}, installedVersion)
 
 	require.NoError(t, err)
-	assert.Equal(t, "1.3.0", latest)
+	assert.Equal(t, "1.3.0", latest.String())
 }
 
 func TestLatestStableVersionIgnoresNewerTagsWithoutTheInstalledAssetVariant(t *testing.T) {
@@ -190,7 +190,7 @@ func TestLatestStableVersionIgnoresNewerTagsWithoutTheInstalledAssetVariant(t *t
 	}, installedVersion)
 
 	require.NoError(t, err)
-	assert.Equal(t, "1.3.0", latest)
+	assert.Equal(t, "1.3.0", latest.String())
 }
 
 func TestInstalledPackageCheckerAllowsInstalledPrereleasesAndFindsStableUpgrade(t *testing.T) {

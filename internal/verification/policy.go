@@ -34,7 +34,7 @@ func (r Request) withDefaults() Request {
 }
 
 func (r Request) validate() error {
-	if !r.Repository.valid() {
+	if err := r.Repository.Validate(); err != nil {
 		return newError(KindInvalidRequest, "repository must be owner/repo")
 	}
 	if r.Tag == "" {
@@ -46,7 +46,7 @@ func (r Request) validate() error {
 	if r.Policy.TrustedSignerWorkflow == "" {
 		return newError(KindInvalidRequest, "trusted signer workflow must be set")
 	}
-	if !r.Policy.ExpectedSourceRepository.valid() {
+	if err := r.Policy.ExpectedSourceRepository.Validate(); err != nil {
 		return newError(KindInvalidRequest, "expected source repository must be owner/repo")
 	}
 	if !r.Policy.ExpectedSourceDigest.IsZero() {

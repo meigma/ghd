@@ -70,7 +70,7 @@ type RepositoryRefreshRequest struct {
 // ResolvePackageRequest describes an unqualified package lookup.
 type ResolvePackageRequest struct {
 	// PackageName is the unqualified package name.
-	PackageName string
+	PackageName manifest.PackageName
 	// IndexDir is the local catalog directory.
 	IndexDir string
 }
@@ -80,7 +80,7 @@ type ResolvePackageResult struct {
 	// Repository is the resolved package repository.
 	Repository verification.Repository
 	// PackageName is the resolved package name.
-	PackageName string
+	PackageName manifest.PackageName
 }
 
 // PackageListRequest describes package-discovery list behavior.
@@ -96,7 +96,7 @@ type PackageListResult struct {
 	// Repository is the package's GitHub repository.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Binaries are the exposed command names for the package.
 	Binaries []string
 }
@@ -106,7 +106,7 @@ type PackageInfoRequest struct {
 	// Repository optionally identifies the repository that owns the package.
 	Repository verification.Repository
 	// PackageName optionally identifies one package within Repository.
-	PackageName string
+	PackageName manifest.PackageName
 	// UnqualifiedName optionally resolves one package through the local index.
 	UnqualifiedName string
 	// IndexDir is the local catalog directory for unqualified resolution.
@@ -128,7 +128,7 @@ type PackageInfoResult struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// SignerWorkflow is the repository's trusted signer workflow identity.
 	SignerWorkflow verification.WorkflowIdentity
 	// TagPattern is the effective release tag pattern for the package.
@@ -267,10 +267,14 @@ func (c *RepositoryCatalog) ListPackages(ctx context.Context, request PackageLis
 // InfoPackage returns one package's detailed discovery information.
 func (c *RepositoryCatalog) InfoPackage(ctx context.Context, request PackageInfoRequest) (PackageInfoResult, error) {
 	repository := request.Repository
-	packageName := strings.TrimSpace(request.PackageName)
+	packageName := request.PackageName
 	if strings.TrimSpace(request.UnqualifiedName) != "" {
+		unqualifiedName, err := manifest.NewPackageName(request.UnqualifiedName)
+		if err != nil {
+			return PackageInfoResult{}, err
+		}
 		resolved, err := c.ResolvePackage(ctx, ResolvePackageRequest{
-			PackageName: request.UnqualifiedName,
+			PackageName: unqualifiedName,
 			IndexDir:    request.IndexDir,
 		})
 		if err != nil {
@@ -282,12 +286,17 @@ func (c *RepositoryCatalog) InfoPackage(ctx context.Context, request PackageInfo
 	if repository.IsZero() {
 		return PackageInfoResult{}, fmt.Errorf("info target must identify a repository")
 	}
+	if !packageName.IsZero() {
+		if err := packageName.Validate(); err != nil {
+			return PackageInfoResult{}, err
+		}
+	}
 
 	cfg, err := c.fetchConfig(ctx, repository)
 	if err != nil {
 		return PackageInfoResult{}, err
 	}
-	if packageName == "" {
+	if packageName.IsZero() {
 		if len(cfg.Packages) != 1 {
 			return PackageInfoResult{}, fmt.Errorf("repository %s declares multiple packages; use %s/package", repository, repository)
 		}
@@ -312,7 +321,7 @@ func (c *RepositoryCatalog) fetchRecord(ctx context.Context, repository verifica
 	return catalog.NewRepositoryRecord(repository, cfg, c.now())
 }
 
-func (c *RepositoryCatalog) packageInfoResult(repository verification.Repository, cfg manifest.Config, packageName string) (PackageInfoResult, error) {
+func (c *RepositoryCatalog) packageInfoResult(repository verification.Repository, cfg manifest.Config, packageName manifest.PackageName) (PackageInfoResult, error) {
 	pkg, err := cfg.Package(packageName)
 	if err != nil {
 		return PackageInfoResult{}, err
@@ -324,7 +333,7 @@ func (c *RepositoryCatalog) packageInfoResult(repository verification.Repository
 
 	var binaries []string
 	for _, summary := range record.Packages {
-		if summary.Name == packageName {
+		if summary.Name == packageName.String() {
 			binaries = append([]string(nil), summary.Binaries...)
 			break
 		}
@@ -370,7 +379,7 @@ func packageListResultsFromRecord(record catalog.RepositoryRecord) []PackageList
 	for _, pkg := range record.Packages {
 		results = append(results, PackageListResult{
 			Repository:  record.Repository,
-			PackageName: pkg.Name,
+			PackageName: manifest.PackageName(pkg.Name),
 			Binaries:    append([]string(nil), pkg.Binaries...),
 		})
 	}
@@ -378,11 +387,8 @@ func packageListResultsFromRecord(record catalog.RepositoryRecord) []PackageList
 }
 
 func validateRepositoryRequest(repository verification.Repository, indexDir string) error {
-	if strings.TrimSpace(repository.Owner) == "" || strings.TrimSpace(repository.Name) == "" {
-		return fmt.Errorf("repository must be owner/repo")
-	}
-	if strings.Contains(repository.Owner, "/") || strings.Contains(repository.Name, "/") {
-		return fmt.Errorf("repository must be owner/repo")
+	if err := repository.Validate(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(indexDir) == "" {
 		return fmt.Errorf("index directory must be set")

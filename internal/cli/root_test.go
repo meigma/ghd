@@ -319,8 +319,8 @@ func TestInstallApprovalFactsIncludeVerificationFields(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
-	assert.Equal(t, "foo", approval.PackageName)
-	assert.Equal(t, "1.2.3", approval.Version)
+	assert.Equal(t, "foo", approval.PackageName.String())
+	assert.Equal(t, "1.2.3", approval.Version.String())
 	assert.Equal(t, verification.ReleaseTag("v1.2.3"), approval.Tag)
 	assert.Equal(t, "foo.tar.gz", approval.AssetName)
 	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), approval.AssetDigest.String())
@@ -460,9 +460,9 @@ func TestUpdateInteractiveApprovalCanApprove(t *testing.T) {
 	assert.Equal(t, "owner/repo/foo 1.2.3 1.3.0 updated\n", stdout.String())
 	assert.Empty(t, stderr.String())
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
-	assert.Equal(t, "foo", approval.PackageName)
-	assert.Equal(t, "1.2.3", approval.PreviousVersion)
-	assert.Equal(t, "1.3.0", approval.Version)
+	assert.Equal(t, "foo", approval.PackageName.String())
+	assert.Equal(t, "1.2.3", approval.PreviousVersion.String())
+	assert.Equal(t, "1.3.0", approval.Version.String())
 	assert.Equal(t, verification.ReleaseTag("v1.3.0"), approval.Tag)
 	assert.Equal(t, "foo.tar.gz", approval.AssetName)
 	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), approval.AssetDigest.String())
@@ -1318,9 +1318,9 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 	if request.Approve != nil {
 		if err := request.Approve(ctx, app.UpdateApproval{
 			Repository:              repository,
-			PackageName:             previous.Package,
-			PreviousVersion:         previous.Version,
-			Version:                 newVersion,
+			PackageName:             manifest.PackageName(previous.Package),
+			PreviousVersion:         manifest.PackageVersion(previous.Version),
+			Version:                 manifest.PackageVersion(newVersion),
 			Tag:                     verification.ReleaseTag("v" + newVersion),
 			AssetName:               previous.Package + ".tar.gz",
 			AssetDigest:             digest,
@@ -1504,13 +1504,13 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 		Repository:   request.Repository,
 		PackageName:  request.PackageName,
 		Version:      request.Version,
-		Tag:          verification.ReleaseTag("v" + request.Version),
+		Tag:          verification.ReleaseTag("v" + request.Version.String()),
 		AssetName:    "artifact.tar.gz",
 		ArtifactPath: artifactPath,
 		EvidencePath: evidencePath,
 		Evidence: verification.Evidence{
 			Repository:  request.Repository,
-			Tag:         verification.ReleaseTag("v" + request.Version),
+			Tag:         verification.ReleaseTag("v" + request.Version.String()),
 			AssetDigest: digest,
 		},
 	}, nil
@@ -1527,8 +1527,8 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	}
 	if err := index.CheckBinaryOwnership(state.PackageRef{
 		Repository: request.Repository.String(),
-		Package:    request.PackageName,
-	}, []string{request.PackageName}, state.PackageRef{}); err != nil {
+		Package:    request.PackageName.String(),
+	}, []string{request.PackageName.String()}, state.PackageRef{}); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
@@ -1537,7 +1537,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	}
 	evidence := verification.Evidence{
 		Repository:  request.Repository,
-		Tag:         verification.ReleaseTag("v" + request.Version),
+		Tag:         verification.ReleaseTag("v" + request.Version.String()),
 		AssetDigest: digest,
 		ReleaseTagDigest: func() verification.Digest {
 			releaseDigest, _ := verification.NewDigest("sha1", strings.Repeat("b", 40))
@@ -1562,13 +1562,13 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 			PackageName:             request.PackageName,
 			Version:                 request.Version,
 			Tag:                     evidence.Tag,
-			AssetName:               request.PackageName + ".tar.gz",
+			AssetName:               request.PackageName.String() + ".tar.gz",
 			AssetDigest:             evidence.AssetDigest,
 			ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
 			ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
 			SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
 			BinDir:                  request.BinDir,
-			Binaries:                []string{request.PackageName},
+			Binaries:                []string{request.PackageName.String()},
 		}); err != nil {
 			return app.VerifiedInstallResult{}, err
 		}
@@ -1592,16 +1592,16 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		"github.com",
 		request.Repository.Owner,
 		request.Repository.Name,
-		request.PackageName,
-		request.Version,
+		request.PackageName.String(),
+		request.Version.String(),
 		"sha256-abc123",
 	)
 	extractedPath := filepath.Join(storePath, "extracted")
 	if err := os.MkdirAll(extractedPath, 0o755); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	linkPath := filepath.Join(binDir, request.PackageName)
-	targetPath := filepath.Join(extractedPath, request.PackageName)
+	linkPath := filepath.Join(binDir, request.PackageName.String())
+	targetPath := filepath.Join(extractedPath, request.PackageName.String())
 	linkTarget := targetPath
 	artifactPath := filepath.Join(storePath, "artifact")
 	verificationPath := filepath.Join(storePath, "verification.json")
@@ -1611,7 +1611,7 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	if err := os.WriteFile(artifactPath, []byte("artifact"), 0o600); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	if err := writeTestVerificationRecord(verificationPath, request.Repository, request.PackageName, request.Version); err != nil {
+	if err := writeTestVerificationRecord(verificationPath, request.Repository, request.PackageName.String(), request.Version.String()); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	if err := os.Symlink(linkTarget, linkPath); err != nil {
@@ -1619,16 +1619,16 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	}
 	record := state.Record{
 		Repository:       request.Repository.String(),
-		Package:          request.PackageName,
-		Version:          request.Version,
+		Package:          request.PackageName.String(),
+		Version:          request.Version.String(),
 		Tag:              string(evidence.Tag),
-		Asset:            request.PackageName + ".tar.gz",
+		Asset:            request.PackageName.String() + ".tar.gz",
 		AssetDigest:      evidence.AssetDigest.String(),
 		StorePath:        storePath,
 		ArtifactPath:     artifactPath,
 		ExtractedPath:    extractedPath,
 		VerificationPath: verificationPath,
-		Binaries:         []state.Binary{{Name: request.PackageName, LinkPath: linkPath, TargetPath: linkTarget}},
+		Binaries:         []state.Binary{{Name: request.PackageName.String(), LinkPath: linkPath, TargetPath: linkTarget}},
 		InstalledAt:      time.Unix(1700000000, 0).UTC(),
 	}
 	if _, err := store.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
@@ -1639,10 +1639,10 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		PackageName: request.PackageName,
 		Version:     request.Version,
 		Tag:         evidence.Tag,
-		AssetName:   request.PackageName + ".tar.gz",
+		AssetName:   request.PackageName.String() + ".tar.gz",
 		Evidence:    evidence,
 		Binaries: []app.InstalledBinary{
-			{Name: request.PackageName, LinkPath: linkPath, TargetPath: linkTarget},
+			{Name: request.PackageName.String(), LinkPath: linkPath, TargetPath: linkTarget},
 		},
 	}, nil
 }

@@ -174,7 +174,7 @@ func (c *InstalledPackageChecker) checkRecord(ctx context.Context, record state.
 		return result, nil
 	}
 	result.Status = CheckStatusUpdateAvailable
-	result.LatestVersion = candidate.LatestVersion
+	result.LatestVersion = candidate.LatestVersion.String()
 	return result, nil
 }
 
@@ -213,15 +213,11 @@ func cannotDetermineResult(record state.Record, err error) CheckResult {
 }
 
 func parseRecordRepository(value string) (verification.Repository, error) {
-	parts := strings.Split(strings.TrimSpace(value), "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
-	}
-	return verification.Repository{Owner: parts[0], Name: parts[1]}, nil
+	return verification.ParseRepository(value)
 }
 
-func latestStableVersion(pkg manifest.Package, installedAsset manifest.Asset, releases []RepositoryRelease, installedVersion string) (string, error) {
-	bestVersion := ""
+func latestStableVersion(pkg manifest.Package, installedAsset manifest.Asset, releases []RepositoryRelease, installedVersion string) (manifest.PackageVersion, error) {
+	var bestVersion manifest.PackageVersion
 	bestSemver := ""
 	for _, release := range releases {
 		if release.Draft || release.Prerelease || strings.TrimSpace(release.TagName) == "" {
@@ -234,7 +230,7 @@ func latestStableVersion(pkg manifest.Package, installedAsset manifest.Asset, re
 		if !matched {
 			continue
 		}
-		releaseVersion, err := normalizeStableSemver(version)
+		releaseVersion, err := normalizeStableSemver(version.String())
 		if err != nil {
 			continue
 		}
@@ -256,7 +252,7 @@ func latestStableVersion(pkg manifest.Package, installedAsset manifest.Asset, re
 	return bestVersion, nil
 }
 
-func latestStablePackageUpdate(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, installedAsset manifest.Asset, releases []RepositoryRelease, installedVersion string) (resolvedInstalledPackageUpdate, error) {
+func latestStablePackageUpdate(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName manifest.PackageName, installedAsset manifest.Asset, releases []RepositoryRelease, installedVersion string) (resolvedInstalledPackageUpdate, error) {
 	var best resolvedInstalledPackageUpdate
 	bestSemver := ""
 	for _, release := range releases {
@@ -271,7 +267,7 @@ func latestStablePackageUpdate(ctx context.Context, manifests ManifestSource, re
 		if err != nil {
 			continue
 		}
-		releaseVersion, err := normalizeStableSemver(version)
+		releaseVersion, err := normalizeStableSemver(version.String())
 		if err != nil {
 			continue
 		}
@@ -305,7 +301,7 @@ func latestStablePackageUpdate(ctx context.Context, manifests ManifestSource, re
 	return best, nil
 }
 
-func fetchPackageManifestForReleaseTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName string, tag verification.ReleaseTag) (manifest.Config, manifest.Package, string, error) {
+func fetchPackageManifestForReleaseTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName manifest.PackageName, tag verification.ReleaseTag) (manifest.Config, manifest.Package, manifest.PackageVersion, error) {
 	manifestBytes, err := manifests.FetchManifestAtRef(ctx, repository, string(tag))
 	if err != nil {
 		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("fetch ghd.toml at %s: %w", tag, err)
@@ -354,9 +350,13 @@ func assetForPlatform(pkg manifest.Package, platform manifest.Platform) (manifes
 }
 
 func installedAssetDeclaration(pkg manifest.Package, record state.Record) (manifest.Asset, error) {
+	version, err := manifest.NewPackageVersion(record.Version)
+	if err != nil {
+		return manifest.Asset{}, err
+	}
 	matches := make([]manifest.Asset, 0, 1)
 	for _, asset := range pkg.Assets {
-		name, err := asset.ResolveName(record.Version)
+		name, err := asset.ResolveName(version)
 		if err != nil {
 			return manifest.Asset{}, err
 		}

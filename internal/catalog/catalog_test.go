@@ -39,7 +39,7 @@ func TestIndexResolvesUnqualifiedPackages(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, resolved.Repository)
-	assert.Equal(t, "foo", resolved.PackageName)
+	assert.Equal(t, "foo", resolved.PackageName.String())
 }
 
 func TestIndexResolvesUnqualifiedBinaryNames(t *testing.T) {
@@ -52,7 +52,7 @@ func TestIndexResolvesUnqualifiedBinaryNames(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, resolved.Repository)
-	assert.Equal(t, "bar", resolved.PackageName)
+	assert.Equal(t, "bar", resolved.PackageName.String())
 }
 
 func TestIndexReportsAmbiguousPackages(t *testing.T) {
@@ -131,7 +131,7 @@ func newRecordWithBinaries(t *testing.T, repository verification.Repository, nam
 			SignerWorkflow: repository.String() + "/.github/workflows/release.yml",
 		},
 		Packages: []manifest.Package{
-			{Name: name, Description: description, Binaries: binaries},
+			{Name: manifest.PackageName(name), Description: description, Binaries: binaries},
 		},
 	}, time.Unix(1700000000, 0))
 	require.NoError(t, err)

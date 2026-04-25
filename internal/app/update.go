@@ -145,11 +145,11 @@ type UpdateApproval struct {
 	// Repository is the verified GitHub repository.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// PreviousVersion is the active version that will be replaced.
-	PreviousVersion string
+	PreviousVersion manifest.PackageVersion
 	// Version is the candidate version that will become active.
-	Version string
+	Version manifest.PackageVersion
 	// Tag is the resolved GitHub release tag.
 	Tag verification.ReleaseTag
 	// AssetName is the concrete release asset name.
@@ -361,8 +361,16 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if err != nil {
 		return result, err
 	}
-	if candidate.LatestVersion == "" {
+	if candidate.LatestVersion.IsZero() {
 		return result, nil
+	}
+	packageName, err := manifest.NewPackageName(previous.Package)
+	if err != nil {
+		return result, err
+	}
+	previousVersion, err := manifest.NewPackageVersion(previous.Version)
+	if err != nil {
+		return result, err
 	}
 	previousVerification, err := u.records.ReadVerificationRecord(ctx, previous.VerificationPath)
 	if err != nil {
@@ -428,8 +436,8 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	request.report(UpdateProgressAwaitingApproval, fmt.Sprintf("Reviewing verified update for %s", target))
 	if err := request.approve(ctx, UpdateApproval{
 		Repository:              candidate.Repository,
-		PackageName:             previous.Package,
-		PreviousVersion:         previous.Version,
+		PackageName:             packageName,
+		PreviousVersion:         previousVersion,
 		Version:                 candidate.LatestVersion,
 		Tag:                     tag,
 		AssetName:               assetName,
@@ -448,7 +456,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	layout, err := u.files.CreateStoreLayout(ctx, StoreLayoutRequest{
 		StoreRoot:    request.StoreDir,
 		Repository:   candidate.Repository,
-		PackageName:  previous.Package,
+		PackageName:  packageName,
 		Version:      candidate.LatestVersion,
 		AssetDigest:  evidence.AssetDigest,
 		ArtifactPath: artifactPath,
@@ -472,7 +480,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		SchemaVersion: 1,
 		Repository:    candidate.Repository.String(),
 		Package:       previous.Package,
-		Version:       candidate.LatestVersion,
+		Version:       candidate.LatestVersion.String(),
 		Tag:           string(tag),
 		Asset:         assetName,
 		Evidence:      evidence,
@@ -492,7 +500,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		SchemaVersion:    1,
 		Repository:       candidate.Repository.String(),
 		Package:          previous.Package,
-		Version:          candidate.LatestVersion,
+		Version:          candidate.LatestVersion.String(),
 		Tag:              string(tag),
 		Asset:            assetName,
 		AssetDigest:      evidence.AssetDigest.String(),

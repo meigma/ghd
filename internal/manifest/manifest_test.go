@@ -17,7 +17,70 @@ func TestDecodeValidOnePackageConfig(t *testing.T) {
 	assert.Equal(t, SchemaVersion, cfg.Version)
 	assert.Equal(t, "owner/repo/.github/workflows/release.yml", cfg.Provenance.SignerWorkflow)
 	require.Len(t, cfg.Packages, 1)
-	assert.Equal(t, "foo", cfg.Packages[0].Name)
+	assert.Equal(t, "foo", cfg.Packages[0].Name.String())
+}
+
+func TestNewPackageNameTrimsAndPreservesCase(t *testing.T) {
+	name, err := NewPackageName(" Foo-CLI_1.2 ")
+
+	require.NoError(t, err)
+	assert.Equal(t, PackageName("Foo-CLI_1.2"), name)
+	assert.Equal(t, "Foo-CLI_1.2", name.String())
+	assert.False(t, name.IsZero())
+}
+
+func TestNewPackageNameRejectsUnsafeValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty", value: ""},
+		{name: "slash", value: "foo/bar"},
+		{name: "backslash", value: `foo\bar`},
+		{name: "control character", value: "foo\nbar"},
+		{name: "space", value: "foo bar"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewPackageName(tt.value)
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestNewPackageVersionTrimsAndPreservesText(t *testing.T) {
+	version, err := NewPackageVersion(" V1.2.3+Build ")
+
+	require.NoError(t, err)
+	assert.Equal(t, PackageVersion("V1.2.3+Build"), version)
+	assert.Equal(t, "V1.2.3+Build", version.String())
+	assert.False(t, version.IsZero())
+}
+
+func TestNewPackageVersionRejectsUnsafeValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty", value: ""},
+		{name: "slash", value: "1/2"},
+		{name: "backslash", value: `1\2`},
+		{name: "control character", value: "1\n2"},
+		{name: "dot", value: "."},
+		{name: "dot dot", value: ".."},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewPackageVersion(tt.value)
+
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestPackageResolvesDefaultAndExplicitTagPatterns(t *testing.T) {
@@ -26,12 +89,14 @@ func TestPackageResolvesDefaultAndExplicitTagPatterns(t *testing.T) {
 
 	pkg, err := cfg.Package("foo")
 	require.NoError(t, err)
-	tag, err := pkg.ReleaseTag("1.2.3")
+	version, err := NewPackageVersion("1.2.3")
+	require.NoError(t, err)
+	tag, err := pkg.ReleaseTag(version)
 	require.NoError(t, err)
 	assert.Equal(t, "foo-v1.2.3", string(tag))
 
 	pkg.TagPattern = ""
-	tag, err = pkg.ReleaseTag("1.2.3")
+	tag, err = pkg.ReleaseTag(version)
 	require.NoError(t, err)
 	assert.Equal(t, "v1.2.3", string(tag))
 }
@@ -49,13 +114,25 @@ func TestPackageSelectsPlatformAsset(t *testing.T) {
 	require.NoError(t, err)
 	pkg, err := cfg.Package("foo")
 	require.NoError(t, err)
+	version, err := NewPackageVersion("1.2.3")
+	require.NoError(t, err)
 
-	asset, err := pkg.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, "1.2.3")
+	asset, err := pkg.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, version)
 
 	require.NoError(t, err)
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", asset.Name)
 	assert.Equal(t, "darwin", asset.OS)
 	assert.Equal(t, "arm64", asset.Arch)
+}
+
+func TestAssetResolveNameUsesTypedVersion(t *testing.T) {
+	version, err := NewPackageVersion("1.2.3")
+	require.NoError(t, err)
+
+	name, err := (Asset{OS: "darwin", Arch: "arm64", Pattern: "foo_${version}.tar.gz"}).ResolveName(version)
+
+	require.NoError(t, err)
+	assert.Equal(t, "foo_1.2.3.tar.gz", name)
 }
 
 func TestDecodeRejectsInvalidSchemaVersion(t *testing.T) {
@@ -171,13 +248,15 @@ func TestPackageSelectAssetFailsForMissingOrAmbiguousPlatform(t *testing.T) {
 	require.NoError(t, err)
 	pkg, err := cfg.Package("foo")
 	require.NoError(t, err)
+	version, err := NewPackageVersion("1.2.3")
+	require.NoError(t, err)
 
-	_, err = pkg.SelectAsset(Platform{OS: "linux", Arch: "arm64"}, "1.2.3")
+	_, err = pkg.SelectAsset(Platform{OS: "linux", Arch: "arm64"}, version)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no asset")
 
 	pkg.Assets = append(pkg.Assets, Asset{OS: "darwin", Arch: "arm64", Pattern: "foo2_${version}.tar.gz"})
-	_, err = pkg.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, "1.2.3")
+	_, err = pkg.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, version)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "multiple assets")
 }
@@ -191,13 +270,13 @@ func TestPackageVersionForTagMatchesDefaultAndCustomPatterns(t *testing.T) {
 	version, matched, err := pkg.VersionForTag(verification.ReleaseTag("foo-v1.2.3"))
 	require.NoError(t, err)
 	require.True(t, matched)
-	assert.Equal(t, "1.2.3", version)
+	assert.Equal(t, "1.2.3", version.String())
 
 	pkg.TagPattern = ""
 	version, matched, err = pkg.VersionForTag(verification.ReleaseTag("v1.2.3"))
 	require.NoError(t, err)
 	require.True(t, matched)
-	assert.Equal(t, "1.2.3", version)
+	assert.Equal(t, "1.2.3", version.String())
 }
 
 func TestPackageVersionForTagRejectsNonMatchingTagsAndEmptyVersions(t *testing.T) {
@@ -224,6 +303,15 @@ func TestPackageVersionForTagRejectsInvalidPatterns(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "exactly one")
+}
+
+func TestPackageVersionForTagRejectsUnsafeExtractedVersions(t *testing.T) {
+	pkg := Package{Name: "foo", TagPattern: "foo-${version}"}
+
+	_, _, err := pkg.VersionForTag(verification.ReleaseTag("foo-../bar"))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "path separators")
 }
 
 func validConfig() string {

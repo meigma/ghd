@@ -1,6 +1,10 @@
 package verification
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+	"unicode"
+)
 
 // Repository identifies a GitHub repository.
 type Repository struct {
@@ -8,6 +12,28 @@ type Repository struct {
 	Owner string
 	// Name is the GitHub repository name without the owner.
 	Name string
+}
+
+// NewRepository returns a validated repository identity.
+func NewRepository(owner, name string) (Repository, error) {
+	repository := Repository{
+		Owner: strings.TrimSpace(owner),
+		Name:  strings.TrimSpace(name),
+	}
+	if err := repository.Validate(); err != nil {
+		return Repository{}, err
+	}
+	return repository, nil
+}
+
+// ParseRepository parses owner/repo into a validated repository identity.
+func ParseRepository(value string) (Repository, error) {
+	value = strings.TrimSpace(value)
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 {
+		return Repository{}, fmt.Errorf("repository must be owner/repo")
+	}
+	return NewRepository(parts[0], parts[1])
 }
 
 // String returns owner/name.
@@ -23,11 +49,25 @@ func (r Repository) IsZero() bool {
 	return r.Owner == "" && r.Name == ""
 }
 
-func (r Repository) valid() bool {
-	return r.Owner != "" && r.Name != "" && !strings.Contains(r.Owner, "/") && !strings.Contains(r.Name, "/")
+// Validate checks that r is a complete owner/repo identity.
+func (r Repository) Validate() error {
+	if strings.TrimSpace(r.Owner) == "" || strings.TrimSpace(r.Name) == "" {
+		return fmt.Errorf("repository must be owner/repo")
+	}
+	if r.Owner != strings.TrimSpace(r.Owner) || r.Name != strings.TrimSpace(r.Name) {
+		return fmt.Errorf("repository must be owner/repo")
+	}
+	if strings.ContainsAny(r.Owner, `/\`) || strings.ContainsAny(r.Name, `/\`) {
+		return fmt.Errorf("repository must be owner/repo")
+	}
+	if hasControlCharacter(r.Owner) || hasControlCharacter(r.Name) {
+		return fmt.Errorf("repository must not contain control characters")
+	}
+	return nil
 }
 
-func (r Repository) equal(other Repository) bool {
+// Equal reports whether r and other identify the same repository.
+func (r Repository) Equal(other Repository) bool {
 	return strings.EqualFold(r.Owner, other.Owner) && strings.EqualFold(r.Name, other.Name)
 }
 
@@ -89,4 +129,13 @@ func splitWorkflowIdentity(value string) workflowIdentity {
 		}
 	}
 	return workflowIdentity{path: strings.Trim(value, "/")}
+}
+
+func hasControlCharacter(value string) bool {
+	for _, r := range value {
+		if unicode.IsControl(r) {
+			return true
+		}
+	}
+	return false
 }
