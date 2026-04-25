@@ -554,6 +554,7 @@ func TestInstallerRemoveManagedInstallRejectsPathsOutsideBinRoot(t *testing.T) {
 func TestInstallerRemoveManagedStoreRemovesStorePathUnderRoot(t *testing.T) {
 	storeRoot := t.TempDir()
 	storePath := filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123")
+	versionDir := filepath.Dir(storePath)
 	require.NoError(t, os.MkdirAll(filepath.Join(storePath, "extracted"), 0o755))
 	require.NoError(t, os.WriteFile(filepath.Join(storePath, "artifact"), []byte("artifact"), 0o600))
 	untouched := filepath.Join(storeRoot, "github.com", "owner", "repo", "bar")
@@ -563,7 +564,26 @@ func TestInstallerRemoveManagedStoreRemovesStorePathUnderRoot(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NoDirExists(t, storePath)
+	assert.NoDirExists(t, versionDir)
 	assert.DirExists(t, untouched)
+}
+
+func TestInstallerRemoveManagedStoreKeepsVersionDirWhenAnotherDigestRemains(t *testing.T) {
+	storeRoot := t.TempDir()
+	versionDir := filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3")
+	storePath := filepath.Join(versionDir, "sha256-abc123")
+	siblingStorePath := filepath.Join(versionDir, "sha256-def456")
+	require.NoError(t, os.MkdirAll(filepath.Join(storePath, "extracted"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(storePath, "artifact"), []byte("artifact"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(siblingStorePath, "extracted"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(siblingStorePath, "artifact"), []byte("artifact"), 0o600))
+
+	err := NewInstaller().RemoveManagedStore(context.Background(), storeRoot, storePath)
+
+	require.NoError(t, err)
+	assert.NoDirExists(t, storePath)
+	assert.DirExists(t, versionDir)
+	assert.DirExists(t, siblingStorePath)
 }
 
 func TestInstallerWritesInstallMetadata(t *testing.T) {
