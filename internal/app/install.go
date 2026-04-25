@@ -44,6 +44,8 @@ type InstalledStateStore interface {
 type VerifiedInstallDependencies struct {
 	// Manifests fetches repository manifest bytes.
 	Manifests ManifestSource
+	// Releases lists repository releases for latest-version resolution.
+	Releases RepositoryReleaseSource
 	// Assets resolves concrete release assets.
 	Assets ReleaseAssetSource
 	// Downloader downloads concrete release assets.
@@ -65,6 +67,7 @@ type VerifiedInstallDependencies struct {
 // VerifiedInstaller implements the verified install use case.
 type VerifiedInstaller struct {
 	manifests ManifestSource
+	releases  RepositoryReleaseSource
 	assets    ReleaseAssetSource
 	download  ArtifactDownloader
 	verify    Verifier
@@ -163,6 +166,7 @@ type VerifiedInstallRequest struct {
 	// PackageName is the package name within the repository manifest.
 	PackageName manifest.PackageName
 	// Version is the literal version value used for manifest pattern expansion.
+	// Zero means install the latest eligible stable release.
 	Version manifest.PackageVersion
 	// StoreDir is the root of ghd's managed package store.
 	StoreDir string
@@ -321,6 +325,9 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 	if deps.Manifests == nil {
 		return nil, fmt.Errorf("manifest source must be set")
 	}
+	if deps.Releases == nil {
+		return nil, fmt.Errorf("release source must be set")
+	}
 	if deps.Assets == nil {
 		return nil, fmt.Errorf("release asset source must be set")
 	}
@@ -348,6 +355,7 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 	}
 	return &VerifiedInstaller{
 		manifests: deps.Manifests,
+		releases:  deps.Releases,
 		assets:    deps.Assets,
 		download:  deps.Downloader,
 		verify:    deps.Verifier,
@@ -356,6 +364,82 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 		files:     deps.FileSystem,
 		state:     deps.StateStore,
 		now:       now,
+	}, nil
+}
+
+func (i *VerifiedInstaller) resolveRelease(ctx context.Context, request VerifiedInstallRequest, platform manifest.Platform) (latestStablePackageRelease, error) {
+	manifestBytes, err := i.manifests.FetchManifest(ctx, request.Repository)
+	if err != nil {
+		return latestStablePackageRelease{}, fmt.Errorf("fetch ghd.toml: %w", err)
+	}
+	discoveryCfg, err := manifest.Decode(manifestBytes)
+	if err != nil {
+		return latestStablePackageRelease{}, err
+	}
+	discoveryPkg, err := discoveryCfg.Package(request.PackageName)
+	if err != nil {
+		return latestStablePackageRelease{}, err
+	}
+	if !request.Version.IsZero() {
+		return resolveReleaseForVersion(ctx, i.manifests, request.Repository, request.PackageName, request.Version, discoveryPkg, platform)
+	}
+
+	repositoryReleases, err := i.releases.ListRepositoryReleases(ctx, request.Repository)
+	if err != nil {
+		return latestStablePackageRelease{}, fmt.Errorf("list GitHub releases: %w", err)
+	}
+	candidate, err := latestStablePackageReleaseForPlatform(
+		ctx,
+		i.manifests,
+		request.Repository,
+		request.PackageName,
+		repositoryReleases,
+		platform,
+		"",
+	)
+	if err != nil {
+		return latestStablePackageRelease{}, err
+	}
+	if candidate.Version.IsZero() {
+		return latestStablePackageRelease{}, fmt.Errorf(
+			"no eligible stable release found for %s/%s on %s/%s",
+			request.Repository,
+			request.PackageName,
+			platform.OS,
+			platform.Arch,
+		)
+	}
+	return candidate, nil
+}
+
+func resolveReleaseForVersion(
+	ctx context.Context,
+	manifests ManifestSource,
+	repository verification.Repository,
+	packageName manifest.PackageName,
+	version manifest.PackageVersion,
+	discoveryPkg manifest.Package,
+	platform manifest.Platform,
+) (latestStablePackageRelease, error) {
+	tag, err := discoveryPkg.ReleaseTag(version)
+	if err != nil {
+		return latestStablePackageRelease{}, err
+	}
+	cfg, pkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, packageName, version, tag)
+	if err != nil {
+		return latestStablePackageRelease{}, err
+	}
+	asset, assetName, err := resolvedAssetForPlatform(pkg, version, platform)
+	if err != nil {
+		return latestStablePackageRelease{}, err
+	}
+	return latestStablePackageRelease{
+		Config:    cfg,
+		Package:   pkg,
+		Version:   version,
+		Tag:       tag,
+		Asset:     asset,
+		AssetName: assetName,
 	}, nil
 }
 
@@ -375,41 +459,21 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}
 
 	request.report(InstallProgressFetchingManifest, "Fetching ghd.toml")
-	manifestBytes, err := i.manifests.FetchManifest(ctx, request.Repository)
-	if err != nil {
-		return VerifiedInstallResult{}, fmt.Errorf("fetch ghd.toml: %w", err)
-	}
-	discoveryCfg, err := manifest.Decode(manifestBytes)
-	if err != nil {
-		return VerifiedInstallResult{}, err
-	}
 	request.report(InstallProgressResolvingPackage, "Resolving package and platform asset")
-	discoveryPkg, err := discoveryCfg.Package(request.PackageName)
-	if err != nil {
-		return VerifiedInstallResult{}, err
-	}
-	tag, err := discoveryPkg.ReleaseTag(request.Version)
-	if err != nil {
-		return VerifiedInstallResult{}, err
-	}
-	cfg, pkg, err := fetchPackageManifestForVersionAtTag(ctx, i.manifests, request.Repository, request.PackageName, request.Version, tag)
-	if err != nil {
-		return VerifiedInstallResult{}, err
-	}
-	selected, err := pkg.SelectAsset(platform, request.Version)
+	resolved, err := i.resolveRelease(ctx, request, platform)
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
 	if err := installedState.CheckBinaryOwnership(state.PackageRef{
 		Repository: request.Repository.String(),
 		Package:    request.PackageName.String(),
-	}, manifestBinaryNames(pkg.Binaries), state.PackageRef{}); err != nil {
+	}, manifestBinaryNames(resolved.Package.Binaries), state.PackageRef{}); err != nil {
 		return VerifiedInstallResult{}, err
 	}
 	request.report(InstallProgressResolvingAsset, "Resolving GitHub release asset")
-	releaseAsset, err := i.assets.ResolveReleaseAsset(ctx, request.Repository, tag, selected.Name)
+	releaseAsset, err := i.assets.ResolveReleaseAsset(ctx, request.Repository, resolved.Tag, resolved.AssetName)
 	if err != nil {
-		return VerifiedInstallResult{}, fmt.Errorf("resolve release asset %q: %w", selected.Name, err)
+		return VerifiedInstallResult{}, fmt.Errorf("resolve release asset %q: %w", resolved.AssetName, err)
 	}
 
 	request.report(InstallProgressPreparingDownload, "Preparing download")
@@ -436,10 +500,10 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	request.report(InstallProgressVerifying, "Verifying release and provenance")
 	evidence, err := i.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: request.Repository,
-		Tag:        tag,
+		Tag:        resolved.Tag,
 		AssetPath:  artifactPath,
 		Policy: verification.Policy{
-			TrustedSignerWorkflow: cfg.Provenance.TrustedSignerWorkflow(),
+			TrustedSignerWorkflow: resolved.Config.Provenance.TrustedSignerWorkflow(),
 		},
 	})
 	if err != nil {
@@ -450,16 +514,16 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err := request.approve(ctx, InstallApproval{
 		Repository:              request.Repository,
 		PackageName:             request.PackageName,
-		Version:                 request.Version,
-		Tag:                     tag,
-		AssetName:               selected.Name,
+		Version:                 resolved.Version,
+		Tag:                     resolved.Tag,
+		AssetName:               resolved.AssetName,
 		AssetDigest:             evidence.AssetDigest,
 		ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
 		ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
 		SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
 		TrustRootPath:           request.TrustRootPath,
 		BinDir:                  request.BinDir,
-		Binaries:                manifestBinaryNames(pkg.Binaries),
+		Binaries:                manifestBinaryNames(resolved.Package.Binaries),
 	}); err != nil {
 		return VerifiedInstallResult{}, err
 	}
@@ -469,7 +533,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		StoreRoot:    request.StoreDir,
 		Repository:   request.Repository,
 		PackageName:  request.PackageName,
-		Version:      request.Version,
+		Version:      resolved.Version,
 		AssetDigest:  evidence.AssetDigest,
 		ArtifactPath: artifactPath,
 	})
@@ -480,9 +544,9 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	request.report(InstallProgressExtracting, "Extracting configured binaries")
 	extracted, err := i.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
 		ArchivePath:    layout.ArtifactPath,
-		ArchiveName:    selected.Name,
+		ArchiveName:    resolved.AssetName,
 		DestinationDir: layout.ExtractedDir,
-		Binaries:       pkg.Binaries,
+		Binaries:       resolved.Package.Binaries,
 	})
 	if err != nil {
 		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{
@@ -496,9 +560,9 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		SchemaVersion: 1,
 		Repository:    request.Repository.String(),
 		Package:       request.PackageName.String(),
-		Version:       request.Version.String(),
-		Tag:           string(tag),
-		Asset:         selected.Name,
+		Version:       resolved.Version.String(),
+		Tag:           string(resolved.Tag),
+		Asset:         resolved.AssetName,
 		Evidence:      evidence,
 	}
 	request.report(InstallProgressWritingEvidence, "Writing verification evidence")
@@ -528,9 +592,9 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		SchemaVersion:    1,
 		Repository:       request.Repository.String(),
 		Package:          request.PackageName.String(),
-		Version:          request.Version.String(),
-		Tag:              string(tag),
-		Asset:            selected.Name,
+		Version:          resolved.Version.String(),
+		Tag:              string(resolved.Tag),
+		Asset:            resolved.AssetName,
 		AssetDigest:      evidence.AssetDigest.String(),
 		StorePath:        layout.StorePath,
 		ArtifactPath:     layout.ArtifactPath,
@@ -575,9 +639,9 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	return VerifiedInstallResult{
 		Repository:    request.Repository,
 		PackageName:   request.PackageName,
-		Version:       request.Version,
-		Tag:           tag,
-		AssetName:     selected.Name,
+		Version:       resolved.Version,
+		Tag:           resolved.Tag,
+		AssetName:     resolved.AssetName,
 		StorePath:     layout.StorePath,
 		ArtifactPath:  layout.ArtifactPath,
 		ExtractedPath: layout.ExtractedDir,
@@ -636,8 +700,10 @@ func (r VerifiedInstallRequest) validate() error {
 	if err := r.PackageName.Validate(); err != nil {
 		return err
 	}
-	if err := r.Version.Validate(); err != nil {
-		return err
+	if !r.Version.IsZero() {
+		if err := r.Version.Validate(); err != nil {
+			return err
+		}
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
 		return fmt.Errorf("store directory must be set")

@@ -50,11 +50,19 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, fmt.Errorf("list GitHub releases: %w", err)
 	}
-	candidate, err := latestStablePackageUpdate(ctx, manifests, repository, packageName, installedAsset, repositoryReleases, installedVersion)
+	candidate, err := latestStablePackageReleaseForPlatform(
+		ctx,
+		manifests,
+		repository,
+		packageName,
+		repositoryReleases,
+		manifest.Platform{OS: installedAsset.OS, Arch: installedAsset.Arch},
+		installedVersion,
+	)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
-	if candidate.LatestVersion.IsZero() {
+	if candidate.Version.IsZero() {
 		return resolvedInstalledPackageUpdate{
 			Repository:     repository,
 			Config:         installedCfg,
@@ -63,5 +71,13 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 		}, nil
 	}
 
-	return candidate, nil
+	return resolvedInstalledPackageUpdate{
+		Repository:     repository,
+		Config:         candidate.Config,
+		Package:        candidate.Package,
+		InstalledAsset: installedAsset,
+		CandidateAsset: candidate.Asset,
+		LatestVersion:  candidate.Version,
+		Tag:            candidate.Tag,
+	}, nil
 }

@@ -293,6 +293,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 	}
 	installer, err := app.NewVerifiedInstaller(app.VerifiedInstallDependencies{
 		Manifests:      r.components.githubClient,
+		Releases:       r.components.githubClient,
 		Assets:         r.components.githubClient,
 		Downloader:     r.components.githubClient,
 		Verifier:       coreVerifier,

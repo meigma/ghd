@@ -45,7 +45,9 @@ go run ./cmd/ghd list --index-dir ./index
 go run ./cmd/ghd list owner/repo
 go run ./cmd/ghd info package --index-dir ./index
 go run ./cmd/ghd info owner/repo/package
+go run ./cmd/ghd install owner/repo/package --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd install package --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd --yes --non-interactive install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd installed --state-dir ./state
@@ -65,7 +67,9 @@ Commands that return stable row-style results support `--json`: `list`, `info`,
 Download, install, check, and update now fail closed unless the selected release
 tag contains a root `ghd.toml`. The default-branch manifest is only used to
 discover a candidate release tag; signer workflow, asset pattern, and binary
-path policy come from the manifest at that tag.
+path policy come from the manifest at that tag. When `install` omits
+`@version`, it resolves the latest eligible stable release for the package on
+the target platform before verification.
 
 Interactive `download` now uses stderr-first terminal UX: transient status,
 byte-level download progress when GitHub reports an asset size, and a final

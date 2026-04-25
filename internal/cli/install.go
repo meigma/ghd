@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -17,9 +18,15 @@ type installOptions struct {
 func newInstallCommand(options Options) *cobra.Command {
 	var install installOptions
 	cmd := &cobra.Command{
-		Use:   "install package@version|owner/repo/package@version --store-dir DIR --bin-dir DIR",
+		Use:   "install package[@version]|owner/repo/package[@version] --store-dir DIR --bin-dir DIR",
 		Short: "Install and verify one GitHub release package",
-		Args:  cobra.ExactArgs(1),
+		Example: strings.TrimSpace(`
+ghd install foo --index-dir ./index --store-dir ./store --bin-dir ./bin
+ghd install foo@1.2.3 --index-dir ./index --store-dir ./store --bin-dir ./bin
+ghd install owner/repo/foo --store-dir ./store --bin-dir ./bin
+ghd install owner/repo/foo@1.2.3 --store-dir ./store --bin-dir ./bin
+`),
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			mode := detectInstallPresentationMode(options)
 			var status *statusLine
