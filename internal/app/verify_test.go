@@ -34,6 +34,36 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 		}, results[0])
 	})
 
+	t.Run("success direct binary asset", func(t *testing.T) {
+		tc := newInstalledPackageVerifierTestContext(t)
+		tc.record.Asset = "foo_1.2.3_darwin_arm64"
+		verificationPath, err := fakeVerificationRecordStore{}.WriteVerificationRecord(context.Background(), filepath.Dir(tc.record.VerificationPath), VerificationRecord{
+			SchemaVersion: 1,
+			Repository:    tc.record.Repository,
+			Package:       tc.record.Package,
+			Version:       tc.record.Version,
+			Tag:           tc.record.Tag,
+			Asset:         tc.record.Asset,
+			Evidence: verification.Evidence{
+				Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+				Tag:         verification.ReleaseTag(tc.record.Tag),
+				AssetDigest: mustTestDigest(t, "aa"),
+				ProvenanceAttestation: verification.AttestationEvidence{
+					SignerWorkflow: verification.WorkflowIdentity(tc.record.Repository + "/.github/workflows/release.yml"),
+				},
+			},
+		})
+		require.NoError(t, err)
+		tc.record.VerificationPath = verificationPath
+		tc.state.index = mustStateIndex(t, tc.record)
+
+		results, err := tc.subject.Verify(context.Background(), tc.request)
+
+		require.NoError(t, err)
+		require.Len(t, results, 1)
+		assert.Equal(t, VerifyStatusVerified, results[0].Status)
+	})
+
 	t.Run("missing artifact", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		require.NoError(t, os.Remove(tc.record.ArtifactPath))
@@ -252,7 +282,7 @@ func newInstalledPackageVerifierTestContext(t *testing.T) *installedPackageVerif
 		StateStore:    stateReader,
 		Verifier:      artifactVerifier,
 		EvidenceStore: fakeVerificationRecordStore{},
-		Archives:      fakeVerifyArchiveExtractor{contents: map[string][]byte{"foo": []byte("binary")}},
+		Materializer:  fakeVerifyArchiveExtractor{contents: map[string][]byte{"foo": []byte("binary")}},
 		FileSystem:    fakeInstalledVerificationFileSystem{},
 	})
 	require.NoError(t, err)
@@ -402,11 +432,11 @@ type fakeVerifyArchiveExtractor struct {
 	contents map[string][]byte
 }
 
-func (f fakeVerifyArchiveExtractor) ExtractArchive(_ context.Context, request ArchiveExtractionRequest) ([]ExtractedBinary, error) {
+func (f fakeVerifyArchiveExtractor) MaterializeBinaries(_ context.Context, request ArtifactMaterializationRequest) ([]MaterializedBinary, error) {
 	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
 		return nil, err
 	}
-	out := make([]ExtractedBinary, 0, len(request.Binaries))
+	out := make([]MaterializedBinary, 0, len(request.Binaries))
 	for _, binary := range request.Binaries {
 		targetPath := filepath.Join(request.DestinationDir, filepath.FromSlash(binary.Path))
 		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
@@ -419,7 +449,7 @@ func (f fakeVerifyArchiveExtractor) ExtractArchive(_ context.Context, request Ar
 		if err := os.WriteFile(targetPath, content, 0o755); err != nil {
 			return nil, err
 		}
-		out = append(out, ExtractedBinary{
+		out = append(out, MaterializedBinary{
 			Name:         filepath.Base(binary.Path),
 			RelativePath: binary.Path,
 			Path:         targetPath,

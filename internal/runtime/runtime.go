@@ -298,7 +298,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 		Downloader:     r.components.githubClient,
 		Verifier:       coreVerifier,
 		EvidenceWriter: r.components.evidenceWriter,
-		Archives:       archive.NewTarGzipExtractor(),
+		Materializer:   archive.NewMaterializer(),
 		FileSystem:     filesystem.NewInstaller(),
 		StateStore:     r.components.installedStore,
 	})
@@ -313,7 +313,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 		Verifier:       coreVerifier,
 		EvidenceWriter: r.components.evidenceWriter,
 		EvidenceStore:  r.components.evidenceWriter,
-		Archives:       archive.NewTarGzipExtractor(),
+		Materializer:   archive.NewMaterializer(),
 		FileSystem:     filesystem.NewInstaller(),
 		StateStore:     r.components.installedStore,
 	})
@@ -324,7 +324,7 @@ func (r *Runtime) ensureVerifiedUseCases(ctx context.Context) error {
 		StateStore:    r.components.installedStore,
 		Verifier:      coreVerifier,
 		EvidenceStore: r.components.evidenceWriter,
-		Archives:      archive.NewTarGzipExtractor(),
+		Materializer:  archive.NewMaterializer(),
 		FileSystem:    filesystem.NewInstaller(),
 	})
 	if err != nil {

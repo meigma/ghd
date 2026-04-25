@@ -12,10 +12,10 @@ import (
 	"github.com/meigma/ghd/internal/verification"
 )
 
-// ArchiveExtractor extracts verified archives and returns configured binaries.
-type ArchiveExtractor interface {
-	// ExtractArchive extracts request.ArchivePath into request.DestinationDir.
-	ExtractArchive(ctx context.Context, request ArchiveExtractionRequest) ([]ExtractedBinary, error)
+// ArtifactMaterializer prepares configured binaries from a verified artifact.
+type ArtifactMaterializer interface {
+	// MaterializeBinaries prepares request.ArtifactPath into request.DestinationDir.
+	MaterializeBinaries(ctx context.Context, request ArtifactMaterializationRequest) ([]MaterializedBinary, error)
 }
 
 // InstallFileSystem owns install-time filesystem state and links.
@@ -24,7 +24,7 @@ type InstallFileSystem interface {
 	CreateDownloadDir(ctx context.Context) (string, func(), error)
 	// CreateStoreLayout creates the digest-keyed store layout and copies the artifact.
 	CreateStoreLayout(ctx context.Context, request StoreLayoutRequest) (StoreLayout, error)
-	// LinkBinaries links extracted binaries into the managed bin directory.
+	// LinkBinaries links prepared binaries into the managed bin directory.
 	LinkBinaries(ctx context.Context, request LinkBinariesRequest) ([]InstalledBinary, error)
 	// RemoveManagedInstall removes managed binaries and store contents for one install.
 	RemoveManagedInstall(ctx context.Context, request RemoveManagedInstallRequest) error
@@ -54,8 +54,8 @@ type VerifiedInstallDependencies struct {
 	Verifier Verifier
 	// EvidenceWriter records verification evidence.
 	EvidenceWriter EvidenceWriter
-	// Archives extracts verified archives.
-	Archives ArchiveExtractor
+	// Materializer prepares configured binaries from verified artifacts.
+	Materializer ArtifactMaterializer
 	// FileSystem owns install store and binary exposure behavior.
 	FileSystem InstallFileSystem
 	// StateStore persists active installed package records.
@@ -66,16 +66,16 @@ type VerifiedInstallDependencies struct {
 
 // VerifiedInstaller implements the verified install use case.
 type VerifiedInstaller struct {
-	manifests ManifestSource
-	releases  RepositoryReleaseSource
-	assets    ReleaseAssetSource
-	download  ArtifactDownloader
-	verify    Verifier
-	evidence  EvidenceWriter
-	archives  ArchiveExtractor
-	files     InstallFileSystem
-	state     InstalledStateStore
-	now       func() time.Time
+	manifests    ManifestSource
+	releases     RepositoryReleaseSource
+	assets       ReleaseAssetSource
+	download     ArtifactDownloader
+	verify       Verifier
+	evidence     EvidenceWriter
+	materializer ArtifactMaterializer
+	files        InstallFileSystem
+	state        InstalledStateStore
+	now          func() time.Time
 }
 
 // ErrInstallNotApproved means installation stopped because the verified artifact was not approved.
@@ -103,7 +103,7 @@ const (
 	InstallProgressAwaitingApproval InstallProgressStage = "awaiting-approval"
 	// InstallProgressPreparingStore means install is creating the managed store layout.
 	InstallProgressPreparingStore InstallProgressStage = "preparing-store"
-	// InstallProgressExtracting means install is extracting configured binaries.
+	// InstallProgressExtracting means install is preparing configured binaries.
 	InstallProgressExtracting InstallProgressStage = "extracting"
 	// InstallProgressWritingEvidence means install is writing verification evidence.
 	InstallProgressWritingEvidence InstallProgressStage = "writing-evidence"
@@ -180,7 +180,7 @@ type VerifiedInstallRequest struct {
 	Platform manifest.Platform
 	// Progress receives user-visible install progress. Nil disables progress reports.
 	Progress InstallProgressFunc
-	// Approve approves a verified artifact before extraction, linking, or state writes. Nil approves automatically.
+	// Approve approves a verified artifact before preparing binaries, linking, or state writes. Nil approves automatically.
 	Approve InstallApprovalFunc
 }
 
@@ -200,7 +200,7 @@ type VerifiedInstallResult struct {
 	StorePath string
 	// ArtifactPath is the stored artifact path.
 	ArtifactPath string
-	// ExtractedPath is the extracted archive directory.
+	// ExtractedPath is the prepared binaries directory inside the store.
 	ExtractedPath string
 	// EvidencePath is the local verification evidence path.
 	EvidencePath string
@@ -214,25 +214,25 @@ type VerifiedInstallResult struct {
 	TrustRootPath string
 }
 
-// ArchiveExtractionRequest describes one archive extraction.
-type ArchiveExtractionRequest struct {
-	// ArchivePath is the verified archive to extract.
-	ArchivePath string
-	// ArchiveName is the original release asset name used for type detection.
-	ArchiveName string
-	// DestinationDir receives extracted files.
+// ArtifactMaterializationRequest describes one verified artifact preparation.
+type ArtifactMaterializationRequest struct {
+	// ArtifactPath is the verified stored artifact to materialize.
+	ArtifactPath string
+	// AssetName is the original release asset name used for type detection.
+	AssetName string
+	// DestinationDir receives prepared files.
 	DestinationDir string
-	// Binaries are the configured executable paths expected after extraction.
+	// Binaries are the configured executable paths expected after preparation.
 	Binaries []manifest.Binary
 }
 
-// ExtractedBinary describes a configured executable inside an extracted archive.
-type ExtractedBinary struct {
+// MaterializedBinary describes one configured executable prepared from a verified artifact.
+type MaterializedBinary struct {
 	// Name is the exposed command name.
 	Name string `json:"name"`
-	// RelativePath is the configured path inside the archive.
+	// RelativePath is the configured path inside the prepared binaries directory.
 	RelativePath string `json:"relative_path"`
-	// Path is the absolute extracted binary path.
+	// Path is the absolute prepared binary path.
 	Path string `json:"path"`
 }
 
@@ -258,7 +258,7 @@ type StoreLayout struct {
 	StorePath string
 	// ArtifactPath is the copied artifact path inside StorePath.
 	ArtifactPath string
-	// ExtractedDir is the extraction destination inside StorePath.
+	// ExtractedDir is the prepared binaries destination inside StorePath.
 	ExtractedDir string
 }
 
@@ -266,8 +266,8 @@ type StoreLayout struct {
 type LinkBinariesRequest struct {
 	// BinDir is the managed binary link directory.
 	BinDir string
-	// Binaries are the extracted binaries to expose.
-	Binaries []ExtractedBinary
+	// Binaries are the prepared binaries to expose.
+	Binaries []MaterializedBinary
 }
 
 // RemoveManagedInstallRequest describes managed filesystem state to remove.
@@ -288,7 +288,7 @@ type InstalledBinary struct {
 	Name string `json:"name"`
 	// LinkPath is the managed bin path.
 	LinkPath string `json:"link_path"`
-	// TargetPath is the verified extracted binary path.
+	// TargetPath is the verified prepared binary path.
 	TargetPath string `json:"target_path"`
 }
 
@@ -312,7 +312,7 @@ type InstallRecord struct {
 	StorePath string `json:"store_path"`
 	// ArtifactPath is the copied artifact path inside the store.
 	ArtifactPath string `json:"artifact_path"`
-	// ExtractedPath is the extracted archive directory.
+	// ExtractedPath is the prepared binaries directory inside the store.
 	ExtractedPath string `json:"extracted_path"`
 	// VerificationPath is the verification evidence path.
 	VerificationPath string `json:"verification_path"`
@@ -340,8 +340,8 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 	if deps.EvidenceWriter == nil {
 		return nil, fmt.Errorf("evidence writer must be set")
 	}
-	if deps.Archives == nil {
-		return nil, fmt.Errorf("archive extractor must be set")
+	if deps.Materializer == nil {
+		return nil, fmt.Errorf("artifact materializer must be set")
 	}
 	if deps.FileSystem == nil {
 		return nil, fmt.Errorf("install filesystem must be set")
@@ -354,16 +354,16 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 		now = time.Now
 	}
 	return &VerifiedInstaller{
-		manifests: deps.Manifests,
-		releases:  deps.Releases,
-		assets:    deps.Assets,
-		download:  deps.Downloader,
-		verify:    deps.Verifier,
-		evidence:  deps.EvidenceWriter,
-		archives:  deps.Archives,
-		files:     deps.FileSystem,
-		state:     deps.StateStore,
-		now:       now,
+		manifests:    deps.Manifests,
+		releases:     deps.Releases,
+		assets:       deps.Assets,
+		download:     deps.Downloader,
+		verify:       deps.Verifier,
+		evidence:     deps.EvidenceWriter,
+		materializer: deps.Materializer,
+		files:        deps.FileSystem,
+		state:        deps.StateStore,
+		now:          now,
 	}, nil
 }
 
@@ -541,10 +541,10 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, err
 	}
 
-	request.report(InstallProgressExtracting, "Extracting configured binaries")
-	extracted, err := i.archives.ExtractArchive(ctx, ArchiveExtractionRequest{
-		ArchivePath:    layout.ArtifactPath,
-		ArchiveName:    resolved.AssetName,
+	request.report(InstallProgressExtracting, "Preparing configured binaries")
+	materialized, err := i.materializer.MaterializeBinaries(ctx, ArtifactMaterializationRequest{
+		ArtifactPath:   layout.ArtifactPath,
+		AssetName:      resolved.AssetName,
 		DestinationDir: layout.ExtractedDir,
 		Binaries:       resolved.Package.Binaries,
 	})
@@ -578,7 +578,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	request.report(InstallProgressLinkingBinaries, "Linking binaries")
 	links, err := i.files.LinkBinaries(ctx, LinkBinariesRequest{
 		BinDir:   request.BinDir,
-		Binaries: extracted,
+		Binaries: materialized,
 	})
 	if err != nil {
 		return VerifiedInstallResult{}, i.cleanupManagedInstall(ctx, RemoveManagedInstallRequest{

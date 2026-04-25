@@ -163,6 +163,8 @@ Configuration rules:
 - Asset patterns must contain exactly one `${version}` token.
 - `[[packages.binaries]] path` is the relative path to an executable inside the
   verified asset or extracted archive.
+- Today `ghd` supports `.tar.gz` archives and direct binary assets. Non-archive
+  assets must correspond to exactly one configured binary path.
 - The exposed command name is `basename(path)`.
 - Binary paths must be relative paths without `..`.
 
@@ -294,7 +296,7 @@ rollback simple:
 ```text
 ~/.local/share/ghd/store/github.com/owner/repo/package/version/asset-digest/
   artifact
-  extracted/
+  extracted/   # prepared binaries, even for direct binary assets
   verification.json
 ```
 
@@ -321,7 +323,7 @@ For `ghd install owner/repo/foo@1.2.3`:
 7. Verify the immutable GitHub release attestation for the tag and asset.
 8. Verify the GitHub artifact provenance attestation for the local asset bytes.
 9. Present verified facts and require approval unless `--yes` was supplied.
-10. Extract the archive if needed.
+10. Prepare configured binaries by extracting the archive if needed.
 11. Copy or link only the configured binary paths into the store.
 12. Expose binary links from the managed bin directory.
 13. Record installed package metadata and verification evidence.

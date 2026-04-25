@@ -72,6 +72,10 @@ path policy come from the manifest at that tag. When `install` omits
 `@version`, it resolves the latest eligible stable release for the package on
 the target platform before verification.
 
+Today `install`, `update`, and `verify` support platform assets that are either
+`.tar.gz` archives or direct binary files. Non-archive assets must correspond to
+exactly one configured binary path in the release-tag manifest.
+
 Interactive `download` now uses stderr-first terminal UX: transient status,
 byte-level download progress when GitHub reports an asset size, and a final
 verified summary on stderr. Machine-readable `artifact PATH` and

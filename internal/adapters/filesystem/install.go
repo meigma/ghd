@@ -109,7 +109,7 @@ func (Installer) CreateStoreLayout(ctx context.Context, request app.StoreLayoutR
 	}, nil
 }
 
-// LinkBinaries links extracted binaries into the managed bin directory.
+// LinkBinaries links prepared binaries into the managed bin directory.
 func (Installer) LinkBinaries(ctx context.Context, request app.LinkBinariesRequest) ([]app.InstalledBinary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err

@@ -24,8 +24,8 @@ func TestTarGzipExtractorExtractsConfiguredBinary(t *testing.T) {
 	})
 	destination := t.TempDir()
 
-	result, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-		ArchivePath:    archivePath,
+	result, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+		ArtifactPath:   archivePath,
 		DestinationDir: destination,
 		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 	})
@@ -49,8 +49,8 @@ func TestTarGzipExtractorDoesNotMaterializeUnconfiguredRegularFiles(t *testing.T
 	})
 	destination := t.TempDir()
 
-	_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-		ArchivePath:    archivePath,
+	_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+		ArtifactPath:   archivePath,
 		DestinationDir: destination,
 		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 	})
@@ -70,8 +70,8 @@ func TestTarGzipExtractorRejectsSkippedPathThatBlocksConfiguredBinary(t *testing
 		{name: "bin/foo", body: "hello\n", typeflag: tar.TypeReg, mode: 0o755},
 	})
 
-	_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-		ArchivePath:    archivePath,
+	_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+		ArtifactPath:   archivePath,
 		DestinationDir: t.TempDir(),
 		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 	})
@@ -87,8 +87,8 @@ func TestTarGzipExtractorMasksWritablePermissionBits(t *testing.T) {
 	})
 	destination := t.TempDir()
 
-	_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-		ArchivePath:    archivePath,
+	_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+		ArtifactPath:   archivePath,
 		DestinationDir: destination,
 		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 	})
@@ -140,8 +140,8 @@ func TestTarGzipExtractorVerifiesGzipStream(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-				ArchivePath:    tt.prepare(t),
+			_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+				ArtifactPath:   tt.prepare(t),
 				DestinationDir: t.TempDir(),
 				Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 			})
@@ -195,8 +195,8 @@ func TestTarGzipExtractorRejectsUnsafeEntries(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			archivePath := writeTarGzip(t, []tarTestEntry{tt.entry})
 
-			_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-				ArchivePath:    archivePath,
+			_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+				ArtifactPath:   archivePath,
 				DestinationDir: t.TempDir(),
 				Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 			})
@@ -211,8 +211,8 @@ func TestTarGzipExtractorRejectsUnsupportedArchiveType(t *testing.T) {
 	archivePath := filepath.Join(t.TempDir(), "archive.zip")
 	require.NoError(t, os.WriteFile(archivePath, []byte("zip"), 0o600))
 
-	_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-		ArchivePath:    archivePath,
+	_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+		ArtifactPath:   archivePath,
 		DestinationDir: t.TempDir(),
 		Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 	})
@@ -244,8 +244,8 @@ func TestTarGzipExtractorRejectsMissingOrNonExecutableBinary(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			archivePath := writeTarGzip(t, []tarTestEntry{tt.entry})
 
-			_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-				ArchivePath:    archivePath,
+			_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+				ArtifactPath:   archivePath,
 				DestinationDir: t.TempDir(),
 				Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 			})
@@ -260,8 +260,8 @@ func TestTarGzipExtractorRejectsTarBombLimits(t *testing.T) {
 	t.Run("uncompressed size", func(t *testing.T) {
 		archivePath := writeOversizedTarGzip(t)
 
-		_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-			ArchivePath:    archivePath,
+		_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+			ArtifactPath:   archivePath,
 			DestinationDir: t.TempDir(),
 			Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 		})
@@ -273,8 +273,8 @@ func TestTarGzipExtractorRejectsTarBombLimits(t *testing.T) {
 	t.Run("overflow shape", func(t *testing.T) {
 		archivePath := writeOverflowTarGzip(t)
 
-		_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-			ArchivePath:    archivePath,
+		_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+			ArtifactPath:   archivePath,
 			DestinationDir: t.TempDir(),
 			Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 		})
@@ -290,8 +290,8 @@ func TestTarGzipExtractorRejectsTarBombLimits(t *testing.T) {
 		}
 		archivePath := writeTarGzip(t, entries)
 
-		_, err := NewTarGzipExtractor().ExtractArchive(context.Background(), app.ArchiveExtractionRequest{
-			ArchivePath:    archivePath,
+		_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
+			ArtifactPath:   archivePath,
 			DestinationDir: t.TempDir(),
 			Binaries:       []manifest.Binary{{Path: "bin/foo"}},
 		})

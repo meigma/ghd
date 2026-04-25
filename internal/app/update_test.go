@@ -56,6 +56,42 @@ func TestPackageUpdaterUpdateSingleTargetUpdatedRowAfterSuccessfulStaging(t *tes
 	assert.Equal(t, []string{"state-load", "state-load", "download-dir", "store-layout", "extract", "evidence", "metadata", "replace-binaries", "state-replace", "remove-store", "cleanup"}, tc.events)
 }
 
+func TestPackageUpdaterUpdateSingleTargetToDirectBinaryAsset(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	configureInstalledUpdateRecords(t, tc, record)
+	tc.manifests.data[record.Repository] = []byte(testManifestWithAssetPattern("foo_${version}_darwin_arm64"))
+	tc.manifests.refData[manifestRefKey(record.Repository, record.Tag)] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, "foo-v1.3.0")] = []byte(testManifestWithAssetPattern("foo_${version}_darwin_arm64"))
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.releases.data[record.Repository] = []RepositoryRelease{{
+		TagName:    "foo-v1.3.0",
+		AssetNames: []string{"foo_1.3.0_darwin_arm64"},
+	}}
+	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64", DownloadURL: "https://example.test/foo"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo")
+	materializedPath := filepath.Join(tc.files.layout.ExtractedDir, "bin", "foo")
+	tc.archives.result = []MaterializedBinary{{Name: "foo", RelativePath: "bin/foo", Path: materializedPath}}
+	storeDir := filepath.Join(t.TempDir(), "store-root")
+	binDir := filepath.Join(t.TempDir(), "bin")
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: storeDir,
+		BinDir:   binDir,
+		StateDir: filepath.Join(t.TempDir(), "state"),
+	})
+
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusUpdated, results[0].Status)
+	require.NotNil(t, tc.files.metadata)
+	assert.Equal(t, "foo_1.3.0_darwin_arm64", tc.files.metadata.Asset)
+	require.Len(t, tc.files.replaceRequests, 1)
+	assert.Equal(t, materializedPath, tc.files.replaceRequests[0].Next[0].TargetPath)
+	assert.Equal(t, "foo_1.3.0_darwin_arm64", tc.evidence.record.Asset)
+}
+
 func TestPackageUpdaterReportsProgressInUpdateOrder(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	record := updateInstalledRecord("owner/repo", "1.2.3")
@@ -759,7 +795,7 @@ func newPackageUpdaterTestContext(t *testing.T) *packageUpdaterTestContext {
 		Verifier:       tc.verifier,
 		EvidenceWriter: tc.evidence,
 		EvidenceStore:  tc.evidence,
-		Archives:       tc.archives,
+		Materializer:   tc.archives,
 		FileSystem:     tc.files,
 		StateStore:     tc.state,
 		Now:            func() time.Time { return time.Unix(1700000000, 0).UTC() },
@@ -849,6 +885,10 @@ func testManifestWithSigner(signer string) string {
 
 func testManifestWithTagPattern(pattern string) string {
 	return strings.Replace(testManifest(), "tag_pattern = \"foo-v${version}\"", "tag_pattern = \""+pattern+"\"", 1)
+}
+
+func testManifestWithAssetPattern(pattern string) string {
+	return strings.Replace(testManifest(), "pattern = \"foo_${version}_darwin_arm64.tar.gz\"", "pattern = \""+pattern+"\"", 1)
 }
 
 func testManifestForPackage(packageName string) string {
