@@ -15,19 +15,19 @@ stdout '"refreshed_at":"'
 exec ghd --index-dir index repo refresh owner/repo
 stderr 'refreshed owner/repo'
 
-# Unqualified install resolves through the local index.
-exec ghd --index-dir index --state-dir state --yes --non-interactive install foo@1.2.3 --store-dir store --bin-dir bin
+# Unqualified versionless install resolves through the local index and picks the latest stable release.
+exec ghd --index-dir index --state-dir state --yes --non-interactive install foo --store-dir store --bin-dir bin
 stdout 'binary .*/bin/foo'
-stderr 'installed owner/repo/foo@1.2.3'
+stderr 'installed owner/repo/foo@1.3.0'
 exists bin/foo
 exec ghd --state-dir state installed
-stdout 'owner/repo/foo 1.2.3 foo'
+stdout 'owner/repo/foo 1.3.0 foo'
 exec ghd --state-dir state installed --json
 stdout '"installed":\['
 stdout '"repository":"owner/repo"'
 stdout '"package":"foo"'
 stdout '"target":"owner/repo/foo"'
-stdout '"version":"1.2.3"'
+stdout '"version":"1.3.0"'
 stdout '"binaries":\[\{"name":"foo"'
 ! stderr .
 
@@ -40,7 +40,7 @@ exec ghd --index-dir index repo list
 # Ambiguous unqualified installs require repository qualification.
 exec ghd --index-dir ambiguous repo add owner/one
 exec ghd --index-dir ambiguous repo add owner/two
-! exec ghd --index-dir ambiguous --state-dir ambiguous-state install foo@1.2.3 --store-dir other-store --bin-dir other-bin
+! exec ghd --index-dir ambiguous --state-dir ambiguous-state install foo --store-dir other-store --bin-dir other-bin
 stderr 'package "foo" is ambiguous'
 stderr 'owner/one'
 stderr 'owner/two'
@@ -48,7 +48,7 @@ stderr 'owner/two'
 # Package names are ambiguous with exposed binary names too.
 exec ghd --index-dir binary-ambiguous repo add owner/repo
 exec ghd --index-dir binary-ambiguous repo add owner/binary
-! exec ghd --index-dir binary-ambiguous --state-dir binary-state install foo@1.2.3 --store-dir binary-store --bin-dir binary-bin
+! exec ghd --index-dir binary-ambiguous --state-dir binary-state install foo --store-dir binary-store --bin-dir binary-bin
 stderr 'package "foo" is ambiguous'
 stderr 'owner/repo/foo'
 stderr 'owner/binary/bar'
@@ -56,7 +56,7 @@ stderr 'owner/binary/bar'
 # Unqualified install refreshes indexed repositories before resolution.
 mkdir stale-ambiguous
 cp stale-ambiguous-index.json stale-ambiguous/repositories.json
-! exec ghd --index-dir stale-ambiguous --state-dir stale-state install foo@1.2.3 --store-dir stale-store --bin-dir stale-bin
+! exec ghd --index-dir stale-ambiguous --state-dir stale-state install foo --store-dir stale-store --bin-dir stale-bin
 stderr 'package "foo" is ambiguous'
 stderr 'owner/one/foo'
 stderr 'owner/two/foo'

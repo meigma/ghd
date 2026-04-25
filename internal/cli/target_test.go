@@ -47,6 +47,57 @@ func TestParsePackageVersionTargetRejectsUnsafePackageNamesAndVersions(t *testin
 	}
 }
 
+func TestParseInstallTargetAcceptsQualifiedAndVersionlessTargets(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		repository  verification.Repository
+		packageName manifest.PackageName
+		version     manifest.PackageVersion
+		qualified   bool
+	}{
+		{
+			name:        "unqualified versionless",
+			value:       "foo",
+			packageName: "foo",
+		},
+		{
+			name:        "unqualified explicit version",
+			value:       "foo@1.2.3",
+			packageName: "foo",
+			version:     "1.2.3",
+		},
+		{
+			name:        "qualified versionless",
+			value:       "owner/repo/foo",
+			repository:  verification.Repository{Owner: "owner", Name: "repo"},
+			packageName: "foo",
+			qualified:   true,
+		},
+		{
+			name:        "qualified explicit version",
+			value:       "owner/repo/foo@1.2.3",
+			repository:  verification.Repository{Owner: "owner", Name: "repo"},
+			packageName: "foo",
+			version:     "1.2.3",
+			qualified:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			target, err := parseInstallTarget(tt.value)
+
+			require.NoError(t, err)
+			assert.Equal(t, tt.repository, target.repository)
+			assert.Equal(t, tt.packageName, target.packageName)
+			assert.Equal(t, tt.version, target.version)
+			assert.Equal(t, tt.qualified, target.qualified)
+		})
+	}
+}
+
 func TestParseInstallTargetRejectsUnsafePackageNamesAndVersions(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -69,7 +120,7 @@ func TestParseInstallTargetRejectsUnsafePackageNamesAndVersions(t *testing.T) {
 			_, err := parseInstallTarget(tt.value)
 
 			require.Error(t, err)
-			assert.Contains(t, err.Error(), "install target must be package@version or owner/repo/package@version")
+			assert.Contains(t, err.Error(), installTargetError)
 		})
 	}
 }

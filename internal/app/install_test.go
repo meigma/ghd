@@ -221,6 +221,81 @@ func TestVerifiedInstallerUsesReleaseManifestForAssetBinariesAndSigner(t *testin
 	assert.Equal(t, evidence.AssetDigest, result.Evidence.AssetDigest)
 }
 
+func TestVerifiedInstallerResolvesLatestStableVersionWhenVersionIsOmitted(t *testing.T) {
+	repository := verification.Repository{Owner: "owner", Name: "repo"}
+	assetDigest := mustDigest(t, "sha256", repeatHex("aa", 32))
+	releaseDigest := mustDigest(t, "sha1", repeatHex("bb", 20))
+	tc := newInstallTestContext(t)
+	tc.manifests.data = []byte(testManifest())
+	tc.manifests.refData = map[string][]byte{
+		"foo-v1.2.3": []byte(testManifest()),
+		"foo-v1.3.0": []byte(testManifest()),
+	}
+	tc.releases.data["owner/repo"] = []RepositoryRelease{
+		{TagName: "foo-v1.2.3", AssetNames: []string{"foo_1.2.3_darwin_arm64.tar.gz"}},
+		{TagName: "foo-v1.4.0-rc.1", Prerelease: true, AssetNames: []string{"foo_1.4.0-rc.1_darwin_arm64.tar.gz"}},
+		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
+	}
+	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
+	tc.verifier.evidence = verification.Evidence{
+		Repository:       repository,
+		Tag:              "foo-v1.3.0",
+		AssetDigest:      assetDigest,
+		ReleaseTagDigest: releaseDigest,
+		ReleaseAttestation: verification.AttestationEvidence{
+			AttestationID: "release",
+		},
+		ProvenanceAttestation: verification.AttestationEvidence{
+			AttestationID: "provenance",
+		},
+	}
+	tc.files.downloadDir = t.TempDir()
+	tc.files.layout = StoreLayout{
+		StorePath:    filepath.Join(t.TempDir(), "store"),
+		ArtifactPath: filepath.Join(t.TempDir(), "store", "artifact"),
+		ExtractedDir: filepath.Join(t.TempDir(), "store", "extracted"),
+	}
+	tc.archives.result = []ExtractedBinary{{Name: "foo", RelativePath: "bin/foo", Path: "/store/extracted/bin/foo"}}
+	tc.files.links = []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}
+
+	result, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  repository,
+		PackageName: "foo",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "1.3.0", result.Version.String())
+	assert.Equal(t, verification.ReleaseTag("foo-v1.3.0"), result.Tag)
+	assert.Equal(t, "foo_1.3.0_darwin_arm64.tar.gz", result.AssetName)
+	assert.Equal(t, verification.ReleaseTag("foo-v1.3.0"), tc.assets.tag)
+	assert.Equal(t, "foo_1.3.0_darwin_arm64.tar.gz", tc.assets.assetName)
+	require.Len(t, tc.state.saved.Records, 1)
+	assert.Equal(t, "1.3.0", tc.state.saved.Records[0].Version)
+}
+
+func TestVerifiedInstallerSkipsReleaseListingWhenVersionIsExplicit(t *testing.T) {
+	tc := newInstallTestContext(t)
+	givenSuccessfulInstallFixture(t, tc)
+
+	_, err := tc.subject.Install(context.Background(), VerifiedInstallRequest{
+		Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+		PackageName: "foo",
+		Version:     "1.2.3",
+		StoreDir:    filepath.Join(t.TempDir(), "store-root"),
+		BinDir:      filepath.Join(t.TempDir(), "bin"),
+		StateDir:    filepath.Join(t.TempDir(), "state"),
+		Platform:    manifest.Platform{OS: "darwin", Arch: "arm64"},
+	})
+
+	require.NoError(t, err)
+	assert.Empty(t, tc.releases.requests)
+}
+
 func TestVerifiedInstallerDoesNotMutateWhenApprovalDeclines(t *testing.T) {
 	tc := newInstallTestContext(t)
 	givenSuccessfulInstallFixture(t, tc)
@@ -489,6 +564,7 @@ func TestVerifiedInstallerRemovesStoreWhenExtractionFails(t *testing.T) {
 
 type installTestContext struct {
 	manifests  *fakeManifestSource
+	releases   *fakeRepositoryReleaseSource
 	assets     *fakeReleaseAssetSource
 	downloader *fakeArtifactDownloader
 	verifier   *fakeVerifier
@@ -504,6 +580,7 @@ func newInstallTestContext(t *testing.T) *installTestContext {
 	t.Helper()
 	tc := &installTestContext{
 		manifests:  &fakeManifestSource{},
+		releases:   &fakeRepositoryReleaseSource{data: map[string][]RepositoryRelease{}, err: map[string]error{}},
 		assets:     &fakeReleaseAssetSource{},
 		downloader: &fakeArtifactDownloader{},
 		verifier:   &fakeVerifier{},
@@ -514,6 +591,7 @@ func newInstallTestContext(t *testing.T) *installTestContext {
 	tc.state = &fakeInstalledStateStore{events: &tc.events, index: state.NewIndex()}
 	subject, err := NewVerifiedInstaller(VerifiedInstallDependencies{
 		Manifests:      tc.manifests,
+		Releases:       tc.releases,
 		Assets:         tc.assets,
 		Downloader:     tc.downloader,
 		Verifier:       tc.verifier,

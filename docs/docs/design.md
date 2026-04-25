@@ -197,6 +197,7 @@ Installation:
 
 ```sh
 ghd install foo
+ghd install foo@1.2.3
 ghd install owner/repo/foo
 ghd install owner/repo/foo@1.2.3
 ```
@@ -227,6 +228,9 @@ Behavior notes:
   contract.
 - `install owner/repo/foo` can be a one-off install without adding the
   repository to the index.
+- When `install` omits `@version`, it resolves the latest eligible stable
+  release for that package and platform before verification. Prereleases still
+  require an explicit version.
 - `install` refuses binary-name collisions against active installed packages
   before downloading release assets.
 - Interactive `install` shows transient status with byte-level download progress
@@ -318,6 +322,11 @@ For `ghd install owner/repo/foo@1.2.3`:
 11. Copy or link only the configured binary paths into the store.
 12. Expose binary links from the managed bin directory.
 13. Record installed package metadata and verification evidence.
+
+For `ghd install owner/repo/foo` or `ghd install foo`, first resolve the latest
+eligible stable release for the package on the target platform, then continue
+through the same verified install pipeline with that concrete
+`owner/repo/foo@version`.
 
 The temporary download should not be executable. Installation should only expose
 the final verified binary after all verification steps succeed.

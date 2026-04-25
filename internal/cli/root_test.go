@@ -183,6 +183,44 @@ func TestInstallYesNonInteractiveKeepsPlainOutput(t *testing.T) {
 	assert.Equal(t, fmt.Sprintf("binary %s\n", filepath.Join(binDir, "foo")), stdout.String())
 }
 
+func TestInstallWithoutVersionUsesResolvedVersionInApprovalAndSummary(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var approval app.InstallApproval
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	root := NewRootCommand(Options{
+		In:    strings.NewReader(""),
+		Out:   &stdout,
+		Err:   &stderr,
+		Viper: viper.New(),
+		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
+			return testRuntime{}, nil
+		},
+		InstallConfirmation: func(_ context.Context, got app.InstallApproval) error {
+			approval = got
+			return nil
+		},
+	})
+	root.SetArgs([]string{
+		"--state-dir", stateDir,
+		"install", "owner/repo/foo",
+		"--store-dir", storeDir,
+		"--bin-dir", binDir,
+	})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "1.3.0", approval.Version.String())
+	assert.Equal(t, verification.ReleaseTag("v1.3.0"), approval.Tag)
+	assert.Equal(t, "installed owner/repo/foo@1.3.0\n", stderr.String())
+	assert.Empty(t, stdout.String())
+}
+
 func TestInstallInteractiveDoesNotWriteBinaryStdout(t *testing.T) {
 	t.Helper()
 
@@ -1517,6 +1555,9 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 }
 
 func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallRequest) (app.VerifiedInstallResult, error) {
+	if request.Version.IsZero() {
+		request.Version = "1.3.0"
+	}
 	if request.Progress != nil {
 		request.Progress(app.InstallProgress{Stage: app.InstallProgressCheckingState, Message: "Checking installed packages"})
 	}

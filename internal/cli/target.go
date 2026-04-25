@@ -8,6 +8,8 @@ import (
 	"github.com/meigma/ghd/internal/verification"
 )
 
+const installTargetError = "install target must be package, package@version, owner/repo/package, or owner/repo/package@version"
+
 type packageVersionTarget struct {
 	repository  verification.Repository
 	packageName manifest.PackageName
@@ -57,35 +59,39 @@ func parsePackageVersionTarget(command string, value string) (packageVersionTarg
 func parseInstallTarget(value string) (packageVersionTarget, error) {
 	value = strings.TrimSpace(value)
 	targetPart, version, found := strings.Cut(value, "@")
-	if !found || strings.TrimSpace(version) == "" {
-		return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
-	}
-	if strings.Contains(version, "/") {
-		return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
-	}
-	packageVersion, err := manifest.NewPackageVersion(version)
-	if err != nil {
-		return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+	var packageVersion manifest.PackageVersion
+	if found {
+		if strings.TrimSpace(version) == "" {
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
+		}
+		if strings.Contains(version, "/") {
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
+		}
+		var err error
+		packageVersion, err = manifest.NewPackageVersion(version)
+		if err != nil {
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
+		}
 	}
 	parts := strings.Split(targetPart, "/")
 	switch len(parts) {
 	case 1:
 		packageName, err := manifest.NewPackageName(parts[0])
 		if err != nil {
-			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
 		}
 		return packageVersionTarget{packageName: packageName, version: packageVersion}, nil
 	case 3:
 		if parts[0] == "" || parts[1] == "" || parts[2] == "" {
-			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
 		}
 		repository, err := verification.NewRepository(parts[0], parts[1])
 		if err != nil {
-			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
 		}
 		packageName, err := manifest.NewPackageName(parts[2])
 		if err != nil {
-			return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+			return packageVersionTarget{}, fmt.Errorf(installTargetError)
 		}
 		return packageVersionTarget{
 			repository:  repository,
@@ -94,7 +100,7 @@ func parseInstallTarget(value string) (packageVersionTarget, error) {
 			qualified:   true,
 		}, nil
 	default:
-		return packageVersionTarget{}, fmt.Errorf("install target must be package@version or owner/repo/package@version")
+		return packageVersionTarget{}, fmt.Errorf(installTargetError)
 	}
 }
 

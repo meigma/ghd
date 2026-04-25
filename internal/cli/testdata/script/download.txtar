@@ -37,14 +37,21 @@ exec ghd --state-dir state uninstall owner/repo/foo --store-dir store --bin-dir 
 stderr 'uninstalled owner/repo/foo@1.2.3'
 ! stdout .
 
+# Qualified versionless install picks the latest stable release directly from the repository.
+exec ghd --state-dir latest-state --yes --non-interactive install owner/repo/foo --store-dir latest-store --bin-dir latest-bin
+stdout 'binary .*/latest-bin/foo'
+stderr 'installed owner/repo/foo@1.3.0'
+exec ghd --state-dir latest-state installed
+stdout 'owner/repo/foo 1.3.0 foo'
+
 # Install refuses binary names already owned in installed state before writing store contents.
 ! exec ghd --state-dir collision-state install owner/repo/foo@1.2.3 --store-dir collision-store --bin-dir collision-bin
 stderr 'binary "foo" is already owned by owner/other/bar'
 ! exists collision-store
 
 # Malformed install targets fail cleanly.
-! exec ghd --state-dir malformed-state install foo --store-dir store --bin-dir bin
-stderr 'install target must be package@version or owner/repo/package@version'
+! exec ghd --state-dir malformed-state install owner/repo --store-dir store --bin-dir bin
+stderr 'install target must be package, package@version, owner/repo/package, or owner/repo/package@version'
 
 # Empty installed state is quiet and successful.
 exec ghd --state-dir empty-state installed
@@ -65,9 +72,10 @@ stderr 'uninstall target must be name or owner/repo/package'
 # Install help is scriptable and quiet on stderr.
 exec ghd install --help
 stdout 'Usage:'
-stdout 'install package@version|owner/repo/package@version --store-dir DIR --bin-dir DIR'
+stdout 'install package\[@version\]\|owner/repo/package\[@version\] --store-dir DIR --bin-dir DIR'
 stdout '--store-dir'
 stdout '--bin-dir'
+stdout 'ghd install owner/repo/foo --store-dir ./store --bin-dir ./bin'
 ! stderr .
 
 # Installed help is scriptable and quiet on stderr.
