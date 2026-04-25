@@ -1,129 +1,88 @@
 # ghd
 
-`ghd` is an experimental CLI for discovering, verifying, and installing GitHub
-release assets only after the selected artifact passes strict integrity and
-provenance checks.
+`ghd` is an experimental CLI for installing GitHub release assets only after the
+selected artifact passes strict release integrity and provenance checks.
 
-The repository currently contains the initial product/security design, docs
-scaffolding, and early `download` / `install` prototype commands.
+It is built for repositories that publish binaries through GitHub Releases,
+enable immutable releases, and generate GitHub artifact attestations with SLSA
+provenance.
 
-## Quick Start
+## Status
 
-### Prerequisites
+`ghd` does not have a public release yet. When the first release is available,
+install it by manually downloading the matching asset from
+[GitHub Releases](https://github.com/meigma/ghd/releases) and placing the `ghd`
+binary on your `PATH`. A dogfood self-update path is planned later.
 
+## Usage
+
+Verify and download one release asset without installing it:
+
+```sh
+ghd --non-interactive download owner/repo/package@version --output ./out
+```
+
+Index a repository and install one package:
+
+```sh
+ghd --non-interactive repo add owner/repo
+ghd --yes --non-interactive install package
+```
+
+Check, update, and re-verify installed packages:
+
+```sh
+ghd check package
+ghd --yes --non-interactive update package
+ghd verify package
+```
+
+Commands with stable result data support `--json`: `list`, `info`, `installed`,
+`check`, `verify`, `update`, `doctor`, and `repo list`.
+
+## Documentation
+
+The user-facing docs site is planned for <https://ghd.meigma.dev>.
+
+Local source:
+
+- [Get started](docs/docs/getting-started.md)
+- [Manage packages](docs/docs/manage-packages.md)
+- [Security model](docs/docs/security-model.md)
+- [Reference](docs/docs/reference.md)
+- [Design history](docs/docs/design.md)
+
+## Development
+
+Prerequisites:
+
+- Go
 - Node.js 20 or newer for the documentation site
 - npm
 - Moon, when running the same task graph used by CI
 
-### Preview the docs
+Install documentation dependencies:
 
 ```sh
 cd docs
 npm ci
-npm run start
 ```
 
-### Build the docs
+Build and typecheck the docs:
 
 ```sh
 moon run docs:build
+moon run docs:typecheck
 ```
 
-## Usage
-
-The prototype command surface currently supports package discovery, direct
-verified downloads, repository indexing, one-off verified installs,
-installed-state management, read-only update checks, batch re-verification,
-environment diagnostics, batch updates, and JSON output for result-oriented
-discovery and lifecycle commands:
+Run the Go tests:
 
 ```sh
-go run ./cmd/ghd download owner/repo/package@version --output ./out
-go run ./cmd/ghd repo add owner/repo --index-dir ./index
-go run ./cmd/ghd repo list --index-dir ./index
-go run ./cmd/ghd list --index-dir ./index
-go run ./cmd/ghd list owner/repo
-go run ./cmd/ghd info package --index-dir ./index
-go run ./cmd/ghd info owner/repo/package
-go run ./cmd/ghd install owner/repo/package --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd install package --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd install package@version --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd --yes --non-interactive install owner/repo/package@version --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd installed --state-dir ./state
-go run ./cmd/ghd check --state-dir ./state --all
-go run ./cmd/ghd verify package --state-dir ./state
-go run ./cmd/ghd verify --state-dir ./state --all
-go run ./cmd/ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd update package --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd --yes --non-interactive update package --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd --yes --approve-signer-change --non-interactive update package --state-dir ./state --store-dir ./store --bin-dir ./bin
-go run ./cmd/ghd update --state-dir ./state --store-dir ./store --bin-dir ./bin --all
-go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
+go test ./...
 ```
 
-Commands that return stable row-style results support `--json`: `list`, `info`,
-`installed`, `check`, `verify`, `update`, `doctor`, and `repo list`.
-
-Download, install, check, and update now fail closed unless the selected release
-tag contains a root `ghd.toml`. The default-branch manifest is only used to
-discover a candidate release tag; signer workflow, asset pattern, and binary
-path policy come from the manifest at that tag. When `install` omits
-`@version`, it resolves the latest eligible stable release for the package on
-the target platform before verification.
-
-Today `install`, `update`, and `verify` support platform assets that are either
-`.tar.gz` archives or direct binary files. Non-archive assets must correspond to
-exactly one configured binary path in the release-tag manifest.
-
-Interactive `download` now uses stderr-first terminal UX: transient status,
-byte-level download progress when GitHub reports an asset size, and a final
-verified summary on stderr. Machine-readable `artifact PATH` and
-`verification PATH` lines stay on stdout only in the plain automation path,
-including non-TTY and `--non-interactive` usage.
-
-Interactive `install` and `update` run with transient terminal status, show
-byte-level download progress when GitHub reports an asset size, and ask for
-approval after verification but before exposing or swapping binaries. The
-approval prompt summarizes the source, destination, and trust result, with full
-provenance facts behind `View details`. Automation should pass
-`--yes --non-interactive` to keep output plain and approve ordinary verified
-actions without prompting. If `update` would rotate the trusted release signer,
-automation must additionally pass `--approve-signer-change`; interactive `update`
-shows a dedicated signer-change approval instead. `install` emits the stable
-`binary PATH` stdout lines only in non-interactive mode, while `update`
-preserves its result rows and `--json` output.
-
-Interactive `uninstall` now uses transient terminal status plus a final stderr
-summary of what was removed, but it remains immediate and non-confirming by
-design. `--non-interactive` keeps the existing one-line stderr result without
-any richer terminal framing.
-
-`list`, `info`, `check`, `verify`, `doctor`, and `repo list` now render richer
-human-oriented views when stdout is a terminal. Their automation-facing
-contracts stay unchanged: `--json` preserves structured output, and
-`--non-interactive` forces the existing plain row or labeled text output
-without transient status text.
-
-Interactive `repo add`, `repo refresh`, and `repo remove` now show transient
-stderr status plus concise stderr summaries on a terminal, while keeping their
-existing one-line stderr output in the plain non-interactive path. `repo
-remove` still updates only the local index; it does not uninstall anything.
-
-Start with the design document for the intended full product shape:
-
-- [Initial Design](docs/docs/design.md)
-
-`check`, `verify`, and `doctor` are intentionally read-only in the current
-prototype. Binary ownership collisions are refused early; richer ownership
-transfer, shim UX, and structured output for mutating status-only commands
-beyond the current human-facing terminal summaries remain future work.
-
-## Documentation
-
-- Docs landing page: [docs/docs/index.md](docs/docs/index.md)
-- Initial architecture and security design: [docs/docs/design.md](docs/docs/design.md)
-- Project process and agent guidance: [AGENTS.md](AGENTS.md)
+Cloudflare Pages should use the `docs` directory as the app root, `npm run
+build` as the build command, and `build` as the output directory.
 
 ## Support
 

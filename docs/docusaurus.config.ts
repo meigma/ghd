@@ -4,12 +4,12 @@ import type * as Preset from '@docusaurus/preset-classic';
 
 const config: Config = {
   title: 'GitHub Downloader',
-  tagline: 'Design notes for the ghd CLI',
+  tagline: 'Verified GitHub release downloads for CLI tools',
   future: {
     v4: true,
   },
-  url: 'https://meigma.github.io',
-  baseUrl: '/ghd/',
+  url: 'https://ghd.meigma.dev',
+  baseUrl: '/',
   organizationName: 'meigma',
   projectName: 'ghd',
   onBrokenLinks: 'throw',
@@ -29,7 +29,7 @@ const config: Config = {
         docs: {
           path: 'docs',
           routeBasePath: '/',
-          sidebarPath: false,
+          sidebarPath: './sidebars.ts',
           breadcrumbs: false,
           editUrl: 'https://github.com/meigma/ghd/edit/master/docs/',
         },
@@ -48,6 +48,12 @@ const config: Config = {
     navbar: {
       title: 'GitHub Downloader',
       items: [
+        {
+          type: 'docSidebar',
+          sidebarId: 'docs',
+          label: 'Docs',
+          position: 'left',
+        },
         {
           href: 'https://github.com/meigma/ghd',
           label: 'GitHub',
