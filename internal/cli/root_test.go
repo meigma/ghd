@@ -369,6 +369,178 @@ func TestInstallApprovalFactsIncludeVerificationFields(t *testing.T) {
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
 }
 
+func TestUpdateSignerChangeNonInteractiveWithoutApproveSignerChangeReturnsResultRow(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/rotate/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "update", "owner/rotate/foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.Error(t, err)
+	assert.Equal(t, "could not update 1 installed package", err.Error())
+	assert.Equal(t, "owner/rotate/foo 1.2.3 1.2.3 cannot-update update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive\n", stdout.String())
+	assert.Empty(t, stderr.String())
+	record := requireInstalledRecord(t, stateDir, "owner/rotate", "foo")
+	assert.Equal(t, "1.2.3", record.Version)
+}
+
+func TestUpdateSignerChangeYesApproveSignerChangeNonInteractiveKeepsPlainRows(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/rotate/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--approve-signer-change", "--non-interactive", "update", "owner/rotate/foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/rotate/foo 1.2.3 1.3.0 updated\n", stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
+func TestUpdateSignerChangeInteractiveApprovalCanApprove(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	var approval app.UpdateApproval
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/rotate/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		UpdateConfirmation: func(_ context.Context, got app.UpdateApproval) error {
+			approval = got
+			return nil
+		},
+	}, "--state-dir", stateDir, "update", "owner/rotate/foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/rotate/foo 1.2.3 1.3.0 updated\n", stdout.String())
+	assert.Empty(t, stderr.String())
+	assert.True(t, approval.SignerChanged)
+	assert.Equal(t, verification.WorkflowIdentity("owner/rotate/.github/workflows/release.yml"), approval.TrustedSignerWorkflow)
+	assert.Equal(t, verification.WorkflowIdentity("owner/rotate/.github/workflows/release-v2.yml"), approval.CandidateSignerWorkflow)
+}
+
+func TestUpdateSignerChangeDeclineReturnsSignerChangeReason(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/rotate/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		UpdateConfirmation: func(context.Context, app.UpdateApproval) error {
+			return app.ErrUpdateSignerChangeNotApproved
+		},
+	}, "--state-dir", stateDir, "update", "owner/rotate/foo", "--store-dir", storeDir, "--bin-dir", binDir)
+
+	require.Error(t, err)
+	assert.Equal(t, "could not update 1 installed package", err.Error())
+	assert.Equal(t, "owner/rotate/foo 1.2.3 1.2.3 cannot-update update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive\n", stdout.String())
+	assert.Empty(t, stderr.String())
+	record := requireInstalledRecord(t, stateDir, "owner/rotate", "foo")
+	assert.Equal(t, "1.2.3", record.Version)
+}
+
+func TestUpdateSignerChangeWritesNewSignerForVerify(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	stateDir := t.TempDir()
+	storeDir := t.TempDir()
+	binDir := t.TempDir()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/rotate/foo@1.2.3", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+	require.NoError(t, executeTestRoot(Options{
+		In:             strings.NewReader(""),
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+	}, "--state-dir", stateDir, "--yes", "--approve-signer-change", "--non-interactive", "update", "owner/rotate/foo", "--store-dir", storeDir, "--bin-dir", binDir))
+	stdout.Reset()
+	stderr.Reset()
+
+	err := executeTestRoot(Options{
+		Out:            &stdout,
+		Err:            &stderr,
+		RuntimeFactory: testRuntimeFactory,
+		StdoutTTY:      boolPtr(true),
+		StderrTTY:      boolPtr(true),
+		ColorEnabled:   boolPtr(false),
+	}, "--non-interactive", "--state-dir", stateDir, "verify", "owner/rotate/foo")
+
+	require.NoError(t, err)
+	assert.Equal(t, "owner/rotate/foo 1.3.0 verified\n", stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
 func TestUpdateYesNonInteractiveKeepsPlainRows(t *testing.T) {
 	t.Helper()
 
@@ -506,7 +678,9 @@ func TestUpdateInteractiveApprovalCanApprove(t *testing.T) {
 	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), approval.AssetDigest.String())
 	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
 	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.SignerWorkflow)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.TrustedSignerWorkflow)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.CandidateSignerWorkflow)
+	assert.False(t, approval.SignerChanged)
 	assert.Equal(t, binDir, approval.BinDir)
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
 }
@@ -1353,6 +1527,8 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 		return app.UpdateInstalledResult{}, err
 	}
 	newVersion := "1.3.0"
+	trustedSigner := testSignerWorkflowForVersion(repository, previous.Version)
+	candidateSigner := testSignerWorkflowForVersion(repository, newVersion)
 	if request.Approve != nil {
 		if err := request.Approve(ctx, app.UpdateApproval{
 			Repository:              repository,
@@ -1364,7 +1540,9 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 			AssetDigest:             digest,
 			ReleasePredicateType:    verification.ReleasePredicateV02,
 			ProvenancePredicateType: verification.SLSAPredicateV1,
-			SignerWorkflow:          verification.WorkflowIdentity(previous.Repository + "/.github/workflows/release.yml"),
+			TrustedSignerWorkflow:   trustedSigner,
+			CandidateSignerWorkflow: candidateSigner,
+			SignerChanged:           trustedSigner != candidateSigner,
 			BinDir:                  request.BinDir,
 			Binaries:                []string{previous.Package},
 		}); err != nil {
@@ -1390,8 +1568,8 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 	newStorePath := filepath.Join(
 		storeRoot,
 		"github.com",
-		"owner",
-		"repo",
+		repository.Owner,
+		repository.Name,
 		previous.Package,
 		newVersion,
 		"sha256-abc123",
@@ -1409,7 +1587,7 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 	if err := os.WriteFile(newArtifactPath, []byte("artifact"), 0o600); err != nil {
 		return app.UpdateInstalledResult{}, err
 	}
-	if err := writeTestVerificationRecord(newVerificationPath, verification.Repository{Owner: "owner", Name: "repo"}, previous.Package, newVersion); err != nil {
+	if err := writeTestVerificationRecord(newVerificationPath, repository, previous.Package, newVersion); err != nil {
 		return app.UpdateInstalledResult{}, err
 	}
 	nextBinaries := []app.InstalledBinary{
@@ -1717,8 +1895,15 @@ func (testRuntimeManifestSource) FetchManifest(_ context.Context, repository ver
 	return toml.Marshal(cfg)
 }
 
-func (testRuntimeManifestSource) FetchManifestAtRef(ctx context.Context, repository verification.Repository, _ string) ([]byte, error) {
-	return testRuntimeManifestSource{}.FetchManifest(ctx, repository)
+func (testRuntimeManifestSource) FetchManifestAtRef(_ context.Context, repository verification.Repository, ref string) ([]byte, error) {
+	cfg, err := testManifestConfig(repository)
+	if err != nil {
+		return nil, err
+	}
+	if version := testVersionFromRef(ref); version != "" {
+		cfg.Provenance.SignerWorkflow = string(testSignerWorkflowForVersion(repository, version))
+	}
+	return toml.Marshal(cfg)
 }
 
 func testManifestConfig(repository verification.Repository) (manifest.Config, error) {
@@ -1807,6 +1992,25 @@ func (testReleaseVerifier) VerifyReleaseAsset(_ context.Context, request verific
 	}, nil
 }
 
+func testSignerWorkflowForVersion(repository verification.Repository, version string) verification.WorkflowIdentity {
+	if repository.Name == "rotate" && version == "1.3.0" {
+		return verification.WorkflowIdentity(repository.String() + "/.github/workflows/release-v2.yml")
+	}
+	return verification.WorkflowIdentity(repository.String() + "/.github/workflows/release.yml")
+}
+
+func testVersionFromRef(ref string) string {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return ""
+	}
+	idx := strings.LastIndex(ref, "v")
+	if idx == -1 || idx == len(ref)-1 {
+		return ""
+	}
+	return ref[idx+1:]
+}
+
 type testArchiveExtractor struct{}
 
 func (testArchiveExtractor) ExtractArchive(_ context.Context, request app.ArchiveExtractionRequest) ([]app.ExtractedBinary, error) {
@@ -1876,7 +2080,7 @@ func writeTestVerificationRecord(path string, repository verification.Repository
 			Tag:         verification.ReleaseTag("v" + version),
 			AssetDigest: digest,
 			ProvenanceAttestation: verification.AttestationEvidence{
-				SignerWorkflow: verification.WorkflowIdentity(repository.String() + "/.github/workflows/release.yml"),
+				SignerWorkflow: testSignerWorkflowForVersion(repository, version),
 			},
 		},
 	})

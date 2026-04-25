@@ -68,3 +68,16 @@ func TestRepositoryJSONShapeRemainsObject(t *testing.T) {
 	require.NoError(t, err)
 	assert.JSONEq(t, `{"Owner":"owner","Name":"repo"}`, string(raw))
 }
+
+func TestWorkflowIdentitySameWorkflowPathIgnoresRefAndURLForm(t *testing.T) {
+	assert.True(t,
+		WorkflowIdentity("meigma/ghd-test/.github/workflows/release.yml").SameWorkflowPath(
+			WorkflowIdentity("https://github.com/meigma/ghd-test/.github/workflows/release.yml@refs/tags/v1.0.1"),
+		),
+	)
+	assert.False(t,
+		WorkflowIdentity("meigma/ghd-test/.github/workflows/release.yml").SameWorkflowPath(
+			WorkflowIdentity("https://github.com/meigma/ghd-test/.github/workflows/release-v2.yml@refs/tags/v1.0.4"),
+		),
+	)
+}

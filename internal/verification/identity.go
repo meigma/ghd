@@ -77,6 +77,16 @@ type ReleaseTag string
 // WorkflowIdentity identifies a trusted GitHub Actions workflow path.
 type WorkflowIdentity string
 
+// SameWorkflowPath reports whether w and other refer to the same workflow file, ignoring any ref qualifier.
+func (w WorkflowIdentity) SameWorkflowPath(other WorkflowIdentity) bool {
+	left := splitWorkflowIdentity(string(w))
+	right := splitWorkflowIdentity(string(other))
+	if left.path == "" || right.path == "" {
+		return false
+	}
+	return left.pathMatches(right.path)
+}
+
 func (w WorkflowIdentity) matches(observed WorkflowIdentity) bool {
 	expected := splitWorkflowIdentity(string(w))
 	actual := splitWorkflowIdentity(string(observed))

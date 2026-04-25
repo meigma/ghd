@@ -91,6 +91,9 @@ const (
 // ErrUpdateNotApproved means update stopped because the verified artifact was not approved.
 var ErrUpdateNotApproved = errors.New("update was not approved")
 
+// ErrUpdateSignerChangeNotApproved means update stopped because it would rotate the trusted release signer.
+var ErrUpdateSignerChangeNotApproved = errors.New("update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive")
+
 // UpdateProgressStage identifies one user-visible update step.
 type UpdateProgressStage string
 
@@ -160,8 +163,12 @@ type UpdateApproval struct {
 	ReleasePredicateType string
 	// ProvenancePredicateType is the accepted provenance predicate type.
 	ProvenancePredicateType string
-	// SignerWorkflow is the accepted provenance signer workflow.
-	SignerWorkflow verification.WorkflowIdentity
+	// TrustedSignerWorkflow is the signer previously trusted by the installed package.
+	TrustedSignerWorkflow verification.WorkflowIdentity
+	// CandidateSignerWorkflow is the signer declared by the candidate release and accepted during verification.
+	CandidateSignerWorkflow verification.WorkflowIdentity
+	// SignerChanged reports whether the candidate signer differs from the previously trusted signer.
+	SignerChanged bool
 	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
 	TrustRootPath string
 	// BinDir receives exposed binary links if the update proceeds.
@@ -248,6 +255,8 @@ type UpdateRequest struct {
 	StateDir string
 	// TrustRootPath is the custom Sigstore trusted_root.json path, when configured.
 	TrustRootPath string
+	// AllowSignerChange approves signer rotation when no interactive callback is present.
+	AllowSignerChange bool
 	// Progress receives user-visible update progress. Nil disables progress reports.
 	Progress UpdateProgressFunc
 	// Approve approves a verified artifact before extraction, linking, or state writes. Nil approves automatically.
@@ -383,6 +392,11 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if strings.TrimSpace(string(trustedSignerWorkflow)) == "" {
 		return result, fmt.Errorf("verification evidence for %s/%s@%s has no trusted signer workflow", previous.Repository, previous.Package, previous.Version)
 	}
+	candidateSignerWorkflow := candidate.Config.Provenance.TrustedSignerWorkflow()
+	if strings.TrimSpace(string(candidateSignerWorkflow)) == "" {
+		return result, fmt.Errorf("candidate manifest for %s/%s@%s has no trusted signer workflow", previous.Repository, previous.Package, candidate.LatestVersion)
+	}
+	signerChanged := !trustedSignerWorkflow.SameWorkflowPath(candidateSignerWorkflow)
 	request.report(UpdateProgressCheckingBinaries, fmt.Sprintf("Checking %s binary ownership", target))
 	if err := u.checkBinaryOwnership(ctx, request.StateDir, previous, candidate.Package.Binaries); err != nil {
 		return result, err
@@ -426,7 +440,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		Tag:        tag,
 		AssetPath:  artifactPath,
 		Policy: verification.Policy{
-			TrustedSignerWorkflow: trustedSignerWorkflow,
+			TrustedSignerWorkflow: candidateSignerWorkflow,
 		},
 	})
 	if err != nil {
@@ -444,7 +458,9 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		AssetDigest:             evidence.AssetDigest,
 		ReleasePredicateType:    evidence.ReleaseAttestation.PredicateType,
 		ProvenancePredicateType: evidence.ProvenanceAttestation.PredicateType,
-		SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
+		TrustedSignerWorkflow:   trustedSignerWorkflow,
+		CandidateSignerWorkflow: candidateSignerWorkflow,
+		SignerChanged:           signerChanged,
 		TrustRootPath:           request.TrustRootPath,
 		BinDir:                  request.BinDir,
 		Binaries:                manifestBinaryNames(candidate.Package.Binaries),
@@ -662,6 +678,12 @@ func (r UpdateRequest) reportDownload(progress DownloadProgress) {
 }
 
 func (r UpdateRequest) approve(ctx context.Context, approval UpdateApproval) error {
+	if approval.SignerChanged && r.Approve == nil {
+		if r.AllowSignerChange {
+			return nil
+		}
+		return ErrUpdateSignerChangeNotApproved
+	}
 	if r.Approve == nil {
 		return nil
 	}
