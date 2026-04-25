@@ -76,12 +76,27 @@ func TestIndexReportsAmbiguousPackages(t *testing.T) {
 	assert.Contains(t, err.Error(), "owner/two/foo")
 }
 
-func TestIndexReportsAmbiguousPackageAndBinaryNames(t *testing.T) {
+func TestIndexPrefersExactPackageNameOverBinaryNames(t *testing.T) {
 	index := NewIndex()
 	var err error
 	index, err = index.UpsertRepository(newRecord(t, verification.Repository{Owner: "owner", Name: "one"}, "foo", "Foo CLI"))
 	require.NoError(t, err)
 	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "two"}, "bar", "Bar CLI", []manifest.Binary{{Path: "bin/foo"}}))
+	require.NoError(t, err)
+
+	resolved, err := index.ResolvePackage("foo")
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.Repository{Owner: "owner", Name: "one"}, resolved.Repository)
+	assert.Equal(t, "foo", resolved.PackageName.String())
+}
+
+func TestIndexReportsAmbiguousBinaryNamesWithoutExactPackageMatch(t *testing.T) {
+	index := NewIndex()
+	var err error
+	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "one"}, "bar", "Bar CLI", []manifest.Binary{{Path: "bin/foo"}}))
+	require.NoError(t, err)
+	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "two"}, "baz", "Baz CLI", []manifest.Binary{{Path: "bin/foo"}}))
 	require.NoError(t, err)
 
 	_, err = index.ResolvePackage("foo")
@@ -90,11 +105,11 @@ func TestIndexReportsAmbiguousPackageAndBinaryNames(t *testing.T) {
 	var ambiguous AmbiguousPackageError
 	require.ErrorAs(t, err, &ambiguous)
 	assert.Equal(t, []ResolvedPackage{
-		{Repository: verification.Repository{Owner: "owner", Name: "one"}, PackageName: "foo"},
-		{Repository: verification.Repository{Owner: "owner", Name: "two"}, PackageName: "bar"},
+		{Repository: verification.Repository{Owner: "owner", Name: "one"}, PackageName: "bar"},
+		{Repository: verification.Repository{Owner: "owner", Name: "two"}, PackageName: "baz"},
 	}, ambiguous.Matches)
-	assert.Contains(t, err.Error(), "owner/one/foo")
-	assert.Contains(t, err.Error(), "owner/two/bar")
+	assert.Contains(t, err.Error(), "owner/one/bar")
+	assert.Contains(t, err.Error(), "owner/two/baz")
 }
 
 func TestNewRepositoryRecordSummarizesManifestPackages(t *testing.T) {
