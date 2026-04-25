@@ -143,8 +143,8 @@ func writePackageListJSON(options Options, results []app.PackageListResult) erro
 		repository := result.Repository.String()
 		packages = append(packages, packageListItemJSON{
 			Repository: repository,
-			Package:    result.PackageName,
-			Target:     packageTarget(repository, result.PackageName),
+			Package:    result.PackageName.String(),
+			Target:     packageTarget(repository, result.PackageName.String()),
 			Binaries:   copyStrings(result.Binaries),
 		})
 	}
@@ -164,8 +164,8 @@ func writePackageInfoJSON(options Options, result app.PackageInfoResult) error {
 	return writeJSON(options, packageInfoJSON{
 		Package: packageInfoItemJSON{
 			Repository:     repository,
-			Package:        result.PackageName,
-			Target:         packageTarget(repository, result.PackageName),
+			Package:        result.PackageName.String(),
+			Target:         packageTarget(repository, result.PackageName.String()),
 			SignerWorkflow: string(result.SignerWorkflow),
 			TagPattern:     result.TagPattern,
 			Binaries:       copyStrings(result.Binaries),

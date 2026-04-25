@@ -78,7 +78,7 @@ ghd --non-interactive list owner/repo
 
 func writePackageList(options Options, results []app.PackageListResult) {
 	for _, result := range results {
-		target := terminalSafeText(result.Repository.String() + "/" + result.PackageName)
+		target := terminalSafeText(result.Repository.String() + "/" + result.PackageName.String())
 		if len(result.Binaries) == 0 {
 			fmt.Fprintln(options.Out, target)
 			continue

@@ -46,13 +46,13 @@ type ResolvedPackage struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 }
 
 // AmbiguousPackageError reports an unqualified package name with multiple matches.
 type AmbiguousPackageError struct {
 	// PackageName is the unqualified package name.
-	PackageName string
+	PackageName manifest.PackageName
 	// Matches are packages that expose PackageName as a package or binary name.
 	Matches []ResolvedPackage
 }
@@ -61,7 +61,7 @@ type AmbiguousPackageError struct {
 func (e AmbiguousPackageError) Error() string {
 	matches := make([]string, 0, len(e.Matches))
 	for _, match := range e.Matches {
-		matches = append(matches, match.Repository.String()+"/"+match.PackageName)
+		matches = append(matches, match.Repository.String()+"/"+match.PackageName.String())
 	}
 	sort.Strings(matches)
 	return fmt.Sprintf("package %q is ambiguous; qualify one of: %s", e.PackageName, strings.Join(matches, ", "))
@@ -80,7 +80,7 @@ func NewRepositoryRecord(repository verification.Repository, cfg manifest.Config
 	packages := make([]PackageSummary, 0, len(cfg.Packages))
 	for _, pkg := range cfg.Packages {
 		packages = append(packages, PackageSummary{
-			Name:        pkg.Name,
+			Name:        pkg.Name.String(),
 			Description: strings.TrimSpace(pkg.Description),
 			Binaries:    exposedBinaryNames(pkg.Binaries),
 		})
@@ -133,8 +133,8 @@ func (i Index) Validate() error {
 			return fmt.Errorf("repository %s has no indexed packages", record.Repository)
 		}
 		for _, pkg := range record.Packages {
-			if strings.TrimSpace(pkg.Name) == "" {
-				return fmt.Errorf("repository %s has an indexed package without a name", record.Repository)
+			if _, err := manifest.NewPackageName(pkg.Name); err != nil {
+				return fmt.Errorf("repository %s has an indexed package without a valid name", record.Repository)
 			}
 		}
 	}
@@ -191,18 +191,17 @@ func (i Index) Repository(repository verification.Repository) (RepositoryRecord,
 }
 
 // ResolvePackage resolves an unqualified package name through the index.
-func (i Index) ResolvePackage(packageName string) (ResolvedPackage, error) {
-	packageName = strings.TrimSpace(packageName)
-	if packageName == "" {
-		return ResolvedPackage{}, fmt.Errorf("package name must be set")
+func (i Index) ResolvePackage(packageName manifest.PackageName) (ResolvedPackage, error) {
+	if err := packageName.Validate(); err != nil {
+		return ResolvedPackage{}, err
 	}
 	candidates := map[string]ResolvedPackage{}
 	for _, record := range i.Repositories {
 		for _, pkg := range record.Packages {
-			if pkg.Name == packageName || pkg.exposesBinary(packageName) {
+			if pkg.Name == packageName.String() || pkg.exposesBinary(packageName.String()) {
 				candidate := ResolvedPackage{
 					Repository:  record.Repository,
-					PackageName: pkg.Name,
+					PackageName: manifest.PackageName(pkg.Name),
 				}
 				candidates[repositoryKey(record.Repository)+"/"+strings.ToLower(pkg.Name)] = candidate
 			}
@@ -213,8 +212,8 @@ func (i Index) ResolvePackage(packageName string) (ResolvedPackage, error) {
 		matches = append(matches, candidate)
 	}
 	sort.Slice(matches, func(a, b int) bool {
-		left := strings.ToLower(matches[a].Repository.String() + "/" + matches[a].PackageName)
-		right := strings.ToLower(matches[b].Repository.String() + "/" + matches[b].PackageName)
+		left := strings.ToLower(matches[a].Repository.String() + "/" + matches[a].PackageName.String())
+		right := strings.ToLower(matches[b].Repository.String() + "/" + matches[b].PackageName.String())
 		return left < right
 	})
 	switch len(matches) {
@@ -237,13 +236,7 @@ func (p PackageSummary) exposesBinary(name string) bool {
 }
 
 func validateRepository(repository verification.Repository) error {
-	if strings.TrimSpace(repository.Owner) == "" || strings.TrimSpace(repository.Name) == "" {
-		return fmt.Errorf("repository must be owner/repo")
-	}
-	if strings.Contains(repository.Owner, "/") || strings.Contains(repository.Name, "/") {
-		return fmt.Errorf("repository must be owner/repo")
-	}
-	return nil
+	return repository.Validate()
 }
 
 func repositoryKey(repository verification.Repository) string {

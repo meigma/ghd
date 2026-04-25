@@ -130,7 +130,7 @@ func runUpdateForm(ctx context.Context, options Options, mode updatePresentation
 }
 
 func updateApprovalTitle(approval app.UpdateApproval) string {
-	target := strings.TrimSpace(approval.PackageName)
+	target := strings.TrimSpace(approval.PackageName.String())
 	version := updateVersionChange(approval)
 	if target == "" {
 		target = "verified artifact"
@@ -142,8 +142,8 @@ func updateApprovalTitle(approval app.UpdateApproval) string {
 }
 
 func updateVersionChange(approval app.UpdateApproval) string {
-	previous := strings.TrimSpace(approval.PreviousVersion)
-	next := strings.TrimSpace(approval.Version)
+	previous := strings.TrimSpace(approval.PreviousVersion.String())
+	next := strings.TrimSpace(approval.Version.String())
 	if previous == "" {
 		return next
 	}
@@ -180,9 +180,9 @@ func updateApprovalDestination(approval app.UpdateApproval) string {
 func updateApprovalDescription(approval app.UpdateApproval) string {
 	return formatRows([]uiRow{
 		{"Repository", approval.Repository.String()},
-		{"Package", approval.PackageName},
-		{"Previous", approval.PreviousVersion},
-		{"Current", approval.Version},
+		{"Package", approval.PackageName.String()},
+		{"Previous", approval.PreviousVersion.String()},
+		{"Current", approval.Version.String()},
 		{"Tag", string(approval.Tag)},
 		{"Asset", approval.AssetName},
 		{"Digest", approval.AssetDigest.String()},

@@ -40,7 +40,7 @@ func (s *statusLine) UpdateDownloadAsset(progress app.DownloadProgress) {
 }
 
 func writeDownloadSummary(w io.Writer, result app.VerifiedDownloadResult, enhanced bool, color bool, trustRootPath string) {
-	target := terminalSafeText(result.Repository.String() + "/" + result.PackageName + "@" + result.Version)
+	target := terminalSafeText(result.Repository.String() + "/" + result.PackageName.String() + "@" + result.Version.String())
 	if !enhanced {
 		fmt.Fprintf(w, "verified %s\n", target)
 		return

@@ -141,7 +141,7 @@ func TestRepositoryCatalogInfoPackageResolvesUnqualifiedName(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, result.Repository)
-	assert.Equal(t, "foo", result.PackageName)
+	assert.Equal(t, "foo", result.PackageName.String())
 	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), result.SignerWorkflow)
 	assert.Equal(t, "v${version}", result.TagPattern)
 	assert.Equal(t, []string{"foo"}, result.Binaries)
@@ -181,7 +181,7 @@ func TestRepositoryCatalogInfoPackageAutoSelectsSinglePackageRepository(t *testi
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, "foo", result.PackageName)
+	assert.Equal(t, "foo", result.PackageName.String())
 	assert.Equal(t, "v${version}", result.TagPattern)
 }
 
@@ -305,7 +305,7 @@ func repositoryRecord(t *testing.T, repository verification.Repository, cfg mani
 
 func singlePackageManifestConfig(packageName string, tagPattern string) manifest.Config {
 	pkg := manifest.Package{
-		Name:        packageName,
+		Name:        manifest.PackageName(packageName),
 		Description: "Test package",
 		Assets: []manifest.Asset{
 			{OS: "darwin", Arch: "arm64", Pattern: packageName + "_${version}_darwin_arm64.tar.gz"},

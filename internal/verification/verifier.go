@@ -161,7 +161,7 @@ func (v *Verifier) verifyProvenanceAttestation(ctx context.Context, attestations
 			continue
 		}
 		// The certificate must bind provenance to the expected source repository.
-		if !verified.Certificate.SourceRepository.equal(policy.ExpectedSourceRepository) {
+		if !verified.Certificate.SourceRepository.Equal(policy.ExpectedSourceRepository) {
 			fallback = mismatch(KindSourceRepositoryMismatch, "provenance source repository is %s, not %s", verified.Certificate.SourceRepository, policy.ExpectedSourceRepository)
 			continue
 		}

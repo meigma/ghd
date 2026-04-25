@@ -71,8 +71,8 @@ func renderPackageListTTY(results []app.PackageListResult, repository verificati
 		fmt.Fprintln(&b, styles.accent.Render(terminalSafeText(group.repository)))
 		nameWidth := len("package")
 		for _, pkg := range group.packages {
-			if len(pkg.PackageName) > nameWidth {
-				nameWidth = len(pkg.PackageName)
+			if len(pkg.PackageName.String()) > nameWidth {
+				nameWidth = len(pkg.PackageName.String())
 			}
 		}
 		fmt.Fprintf(&b, "  %-*s %s\n", nameWidth, styles.label.Render("package"), styles.label.Render("binaries"))
@@ -81,7 +81,7 @@ func renderPackageListTTY(results []app.PackageListResult, repository verificati
 				&b,
 				"  %-*s %s\n",
 				nameWidth,
-				terminalSafeText(pkg.PackageName),
+				terminalSafeText(pkg.PackageName.String()),
 				strings.Join(terminalSafeStrings(pkg.Binaries), ", "),
 			)
 		}
@@ -100,11 +100,11 @@ func renderPackageInfoTTY(result app.PackageInfoResult, color bool) string {
 	styles := newUIStyles(color)
 	var b strings.Builder
 
-	fmt.Fprintln(&b, styles.title.Render(fmt.Sprintf("package %s", terminalSafeText(packageTarget(result.Repository.String(), result.PackageName)))))
+	fmt.Fprintln(&b, styles.title.Render(fmt.Sprintf("package %s", terminalSafeText(packageTarget(result.Repository.String(), result.PackageName.String())))))
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, formatRows([]uiRow{
 		{"Repository", result.Repository.String()},
-		{"Package", result.PackageName},
+		{"Package", result.PackageName.String()},
 		{"Signer", string(result.SignerWorkflow)},
 		{"Tag pattern", result.TagPattern},
 		{"Binaries", strings.Join(result.Binaries, ", ")},

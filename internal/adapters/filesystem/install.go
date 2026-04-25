@@ -590,11 +590,11 @@ func resolveStoreLayout(request app.StoreLayoutRequest) (resolvedStoreLayout, er
 	if err != nil {
 		return resolvedStoreLayout{}, err
 	}
-	pkg, err := cleanPathSegment("package name", request.PackageName)
+	pkg, err := cleanPathSegment("package name", request.PackageName.String())
 	if err != nil {
 		return resolvedStoreLayout{}, err
 	}
-	version, err := cleanPathSegment("version", request.Version)
+	version, err := cleanPathSegment("version", request.Version.String())
 	if err != nil {
 		return resolvedStoreLayout{}, err
 	}

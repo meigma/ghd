@@ -164,9 +164,9 @@ func TestPackageUpdaterApprovalReceivesVerifiedFacts(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, approval.Repository)
-	assert.Equal(t, "foo", approval.PackageName)
-	assert.Equal(t, "1.2.3", approval.PreviousVersion)
-	assert.Equal(t, "1.3.0", approval.Version)
+	assert.Equal(t, "foo", approval.PackageName.String())
+	assert.Equal(t, "1.2.3", approval.PreviousVersion.String())
+	assert.Equal(t, "1.3.0", approval.Version.String())
 	assert.Equal(t, verification.ReleaseTag("foo-v1.3.0"), approval.Tag)
 	assert.Equal(t, "foo_1.3.0_darwin_arm64.tar.gz", approval.AssetName)
 	assert.Equal(t, tc.verifier.evidence.AssetDigest, approval.AssetDigest)

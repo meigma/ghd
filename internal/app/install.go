@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -131,9 +130,9 @@ type InstallApproval struct {
 	// Repository is the verified GitHub repository.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Version is the requested package version.
-	Version string
+	Version manifest.PackageVersion
 	// Tag is the resolved GitHub release tag.
 	Tag verification.ReleaseTag
 	// AssetName is the concrete release asset name.
@@ -162,9 +161,9 @@ type VerifiedInstallRequest struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Version is the literal version value used for manifest pattern expansion.
-	Version string
+	Version manifest.PackageVersion
 	// StoreDir is the root of ghd's managed package store.
 	StoreDir string
 	// BinDir receives links to installed binaries.
@@ -186,9 +185,9 @@ type VerifiedInstallResult struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Version is the literal requested version.
-	Version string
+	Version manifest.PackageVersion
 	// Tag is the resolved GitHub release tag.
 	Tag verification.ReleaseTag
 	// AssetName is the concrete release asset name.
@@ -240,9 +239,9 @@ type StoreLayoutRequest struct {
 	// Repository is the GitHub repository that owns the package.
 	Repository verification.Repository
 	// PackageName is the package name within the repository manifest.
-	PackageName string
+	PackageName manifest.PackageName
 	// Version is the literal requested version.
-	Version string
+	Version manifest.PackageVersion
 	// AssetDigest is the verified local artifact digest.
 	AssetDigest verification.Digest
 	// ArtifactPath is the verified temporary artifact path.
@@ -371,8 +370,8 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
-	if _, ok := installedState.Record(request.Repository.String(), request.PackageName); ok {
-		return VerifiedInstallResult{}, state.DuplicateInstallError{Repository: request.Repository.String(), Package: request.PackageName}
+	if _, ok := installedState.Record(request.Repository.String(), request.PackageName.String()); ok {
+		return VerifiedInstallResult{}, state.DuplicateInstallError{Repository: request.Repository.String(), Package: request.PackageName.String()}
 	}
 
 	request.report(InstallProgressFetchingManifest, "Fetching ghd.toml")
@@ -403,7 +402,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}
 	if err := installedState.CheckBinaryOwnership(state.PackageRef{
 		Repository: request.Repository.String(),
-		Package:    request.PackageName,
+		Package:    request.PackageName.String(),
 	}, manifestBinaryNames(pkg.Binaries), state.PackageRef{}); err != nil {
 		return VerifiedInstallResult{}, err
 	}
@@ -496,8 +495,8 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	verificationRecord := VerificationRecord{
 		SchemaVersion: 1,
 		Repository:    request.Repository.String(),
-		Package:       request.PackageName,
-		Version:       request.Version,
+		Package:       request.PackageName.String(),
+		Version:       request.Version.String(),
 		Tag:           string(tag),
 		Asset:         selected.Name,
 		Evidence:      evidence,
@@ -528,8 +527,8 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	installRecord := InstallRecord{
 		SchemaVersion:    1,
 		Repository:       request.Repository.String(),
-		Package:          request.PackageName,
-		Version:          request.Version,
+		Package:          request.PackageName.String(),
+		Version:          request.Version.String(),
 		Tag:              string(tag),
 		Asset:            selected.Name,
 		AssetDigest:      evidence.AssetDigest.String(),
@@ -631,20 +630,14 @@ func (r VerifiedInstallRequest) approve(ctx context.Context, approval InstallApp
 }
 
 func (r VerifiedInstallRequest) validate() error {
-	if strings.TrimSpace(r.Repository.Owner) == "" || strings.TrimSpace(r.Repository.Name) == "" {
-		return fmt.Errorf("repository must be owner/repo")
+	if err := r.Repository.Validate(); err != nil {
+		return err
 	}
-	if strings.Contains(r.Repository.Owner, "/") || strings.Contains(r.Repository.Name, "/") {
-		return fmt.Errorf("repository must be owner/repo")
+	if err := r.PackageName.Validate(); err != nil {
+		return err
 	}
-	if strings.TrimSpace(r.PackageName) == "" {
-		return fmt.Errorf("package name must be set")
-	}
-	if strings.TrimSpace(r.Version) == "" {
-		return fmt.Errorf("version must be set")
-	}
-	if strings.Contains(r.Version, "/") || strings.Contains(r.Version, string(filepath.Separator)) {
-		return fmt.Errorf("version must not contain path separators")
+	if err := r.Version.Validate(); err != nil {
+		return err
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
 		return fmt.Errorf("store directory must be set")

@@ -462,11 +462,11 @@ func optionalRepository(value string) (verification.Repository, error) {
 	value = strings.TrimSuffix(value, ".git")
 	value = strings.Trim(value, "/")
 
-	parts := strings.Split(value, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+	repository, err := verification.ParseRepository(value)
+	if err != nil {
 		return verification.Repository{}, fmt.Errorf("source repository URI %q is not a GitHub owner/repo URI", value)
 	}
-	return verification.Repository{Owner: parts[0], Name: parts[1]}, nil
+	return repository, nil
 }
 
 func nestedStruct(parent *structpb.Struct, key string) *structpb.Struct {
