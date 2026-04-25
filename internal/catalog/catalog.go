@@ -195,18 +195,32 @@ func (i Index) ResolvePackage(packageName manifest.PackageName) (ResolvedPackage
 	if err := packageName.Validate(); err != nil {
 		return ResolvedPackage{}, err
 	}
-	candidates := map[string]ResolvedPackage{}
+	target := packageName.String()
+	exactMatches := map[string]ResolvedPackage{}
+	binaryMatches := map[string]ResolvedPackage{}
 	for _, record := range i.Repositories {
 		for _, pkg := range record.Packages {
-			if pkg.Name == packageName.String() || pkg.exposesBinary(packageName.String()) {
-				candidate := ResolvedPackage{
-					Repository:  record.Repository,
-					PackageName: manifest.PackageName(pkg.Name),
-				}
-				candidates[repositoryKey(record.Repository)+"/"+strings.ToLower(pkg.Name)] = candidate
+			candidate := ResolvedPackage{
+				Repository:  record.Repository,
+				PackageName: manifest.PackageName(pkg.Name),
+			}
+			key := repositoryKey(record.Repository) + "/" + strings.ToLower(pkg.Name)
+			if pkg.Name == target {
+				exactMatches[key] = candidate
+				continue
+			}
+			if pkg.exposesBinary(target) {
+				binaryMatches[key] = candidate
 			}
 		}
 	}
+	if len(exactMatches) != 0 {
+		return resolvePackageCandidates(packageName, exactMatches)
+	}
+	return resolvePackageCandidates(packageName, binaryMatches)
+}
+
+func resolvePackageCandidates(packageName manifest.PackageName, candidates map[string]ResolvedPackage) (ResolvedPackage, error) {
 	matches := make([]ResolvedPackage, 0, len(candidates))
 	for _, candidate := range candidates {
 		matches = append(matches, candidate)

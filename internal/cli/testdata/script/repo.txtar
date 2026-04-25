@@ -45,13 +45,15 @@ stderr 'package "foo" is ambiguous'
 stderr 'owner/one'
 stderr 'owner/two'
 
-# Package names are ambiguous with exposed binary names too.
+# Exact package-name matches win over exposed binary-name matches.
 exec ghd --index-dir binary-ambiguous repo add owner/repo
 exec ghd --index-dir binary-ambiguous repo add owner/binary
-! exec ghd --index-dir binary-ambiguous --state-dir binary-state install foo --store-dir binary-store --bin-dir binary-bin
-stderr 'package "foo" is ambiguous'
-stderr 'owner/repo/foo'
-stderr 'owner/binary/bar'
+exec ghd --index-dir binary-ambiguous --state-dir binary-state --yes --non-interactive install foo --store-dir binary-store --bin-dir binary-bin
+stdout 'binary .*/binary-bin/foo'
+stderr 'installed owner/repo/foo@1.3.0'
+exists binary-bin/foo
+exec ghd --state-dir binary-state installed
+stdout 'owner/repo/foo 1.3.0 foo'
 
 # Unqualified install refreshes indexed repositories before resolution.
 mkdir stale-ambiguous
