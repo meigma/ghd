@@ -250,8 +250,11 @@ Behavior notes:
 - `update` applies an available update through the same verification path as
   install and refuses updates that would expose a binary owned by another
   installed package. Interactive update uses transient status, byte-level
-  download progress, and verified-artifact approval before swapping binaries;
-  `--yes --non-interactive` keeps result output plain for automation.
+  download progress, and verified-artifact approval before swapping binaries.
+  Ordinary verified updates can use `--yes --non-interactive`; signer-workflow
+  changes require interactive approval or `--yes --approve-signer-change
+  --non-interactive`. This first slice approves signer rotation by workflow
+  identity only, not workflow digest.
 - Interactive `uninstall` uses transient terminal status plus a final stderr
   summary of what was removed, but it remains immediate and non-confirming by
   design. `--non-interactive` keeps the existing one-line stderr result.
@@ -501,8 +504,8 @@ release-readiness gaps. Byte-level download progress for the standalone
 - What local database format is enough for the first release?
 - Should binary exposure use symlinks only, or should `ghd` use shims from the
   start?
-- How should users approve an upstream signer workflow change after a repository
-  has already been added?
+- Should a future signer-rotation flow pin signer workflow digests in addition
+  to workflow identity?
 - What is the exact UX for future binary ownership transfer or shim-based
   coexistence between installed packages?
 

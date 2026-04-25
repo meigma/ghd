@@ -122,7 +122,7 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.PersistentFlags().String("index-dir", "", "local repository index directory")
 	root.PersistentFlags().String("state-dir", "", "local installed package state directory")
 	root.PersistentFlags().Bool("non-interactive", false, "disable prompts, colors, and transient terminal UI")
-	root.PersistentFlags().Bool("yes", false, "approve verified install and update actions without prompting")
+	root.PersistentFlags().Bool("yes", false, "approve verified install actions and ordinary verified updates without prompting")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
 	root.AddCommand(newListCommand(options))

@@ -172,12 +172,14 @@ func TestPackageUpdaterApprovalReceivesVerifiedFacts(t *testing.T) {
 	assert.Equal(t, tc.verifier.evidence.AssetDigest, approval.AssetDigest)
 	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
 	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.SignerWorkflow)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.TrustedSignerWorkflow)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.CandidateSignerWorkflow)
+	assert.False(t, approval.SignerChanged)
 	assert.Equal(t, "/managed/bin", approval.BinDir)
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
 }
 
-func TestPackageUpdaterPinsUpdateVerificationToInstalledSigner(t *testing.T) {
+func TestPackageUpdaterPinsUpdateVerificationToCandidateSignerWhenChanged(t *testing.T) {
 	tc := newPackageUpdaterTestContext(t)
 	record := updateInstalledRecord("owner/repo", "1.2.3")
 	configureInstalledUpdateRecords(t, tc, record)
@@ -189,16 +191,108 @@ func TestPackageUpdaterPinsUpdateVerificationToInstalledSigner(t *testing.T) {
 		AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"},
 	}}
 	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.verifier.evidence.ProvenanceAttestation.SignerWorkflow = "owner/repo/.github/workflows/evil.yml"
 
 	_, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:            "foo",
+		StoreDir:          filepath.Join(t.TempDir(), "store-root"),
+		BinDir:            filepath.Join(t.TempDir(), "bin"),
+		StateDir:          filepath.Join(t.TempDir(), "state"),
+		AllowSignerChange: true,
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/evil.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+}
+
+func TestPackageUpdaterSignerChangeApprovalReceivesOldAndNewSigner(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	configureInstalledUpdateRecords(t, tc, record)
+	tc.manifests.data[record.Repository] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, "foo-v1.3.0")] = []byte(testManifestWithSigner("owner/repo/.github/workflows/release-v2.yml"))
+	tc.releases.data[record.Repository] = []RepositoryRelease{{
+		TagName:    "foo-v1.3.0",
+		AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"},
+	}}
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.verifier.evidence.ProvenanceAttestation.SignerWorkflow = "owner/repo/.github/workflows/release-v2.yml"
+	var approval UpdateApproval
+
+	_, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:   "foo",
+		StoreDir: filepath.Join(t.TempDir(), "store-root"),
+		BinDir:   "/managed/bin",
+		StateDir: filepath.Join(t.TempDir(), "state"),
+		Approve: func(_ context.Context, got UpdateApproval) error {
+			approval = got
+			return nil
+		},
+	})
+
+	require.NoError(t, err)
+	assert.True(t, approval.SignerChanged)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.TrustedSignerWorkflow)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release-v2.yml"), approval.CandidateSignerWorkflow)
+}
+
+func TestPackageUpdaterSignerChangeRequiresExplicitApprovalWhenNoCallbackProvided(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	configureInstalledUpdateRecords(t, tc, record)
+	tc.manifests.data[record.Repository] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, "foo-v1.3.0")] = []byte(testManifestWithSigner("owner/repo/.github/workflows/release-v2.yml"))
+	tc.releases.data[record.Repository] = []RepositoryRelease{{
+		TagName:    "foo-v1.3.0",
+		AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"},
+	}}
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.verifier.evidence.ProvenanceAttestation.SignerWorkflow = "owner/repo/.github/workflows/release-v2.yml"
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
 		Target:   "foo",
 		StoreDir: filepath.Join(t.TempDir(), "store-root"),
 		BinDir:   filepath.Join(t.TempDir(), "bin"),
 		StateDir: filepath.Join(t.TempDir(), "state"),
 	})
 
+	require.Error(t, err)
+	var incomplete UpdateIncompleteError
+	require.ErrorAs(t, err, &incomplete)
+	assert.Equal(t, 1, incomplete.Failed)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusCannotUpdate, results[0].Status)
+	assert.Contains(t, results[0].Reason, ErrUpdateSignerChangeNotApproved.Error())
+	assert.False(t, tc.files.storeCalled)
+	assert.Nil(t, tc.evidence.record)
+}
+
+func TestPackageUpdaterSignerChangeAutoApprovesWhenExplicitlyAllowed(t *testing.T) {
+	tc := newPackageUpdaterTestContext(t)
+	record := updateInstalledRecord("owner/repo", "1.2.3")
+	configureInstalledUpdateRecords(t, tc, record)
+	tc.manifests.data[record.Repository] = []byte(testManifest())
+	tc.manifests.refData[manifestRefKey(record.Repository, "foo-v1.3.0")] = []byte(testManifestWithSigner("owner/repo/.github/workflows/release-v2.yml"))
+	tc.releases.data[record.Repository] = []RepositoryRelease{{
+		TagName:    "foo-v1.3.0",
+		AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"},
+	}}
+	configureSuccessfulUpdateFixture(t, tc, "1.3.0")
+	tc.verifier.evidence.ProvenanceAttestation.SignerWorkflow = "owner/repo/.github/workflows/release-v2.yml"
+
+	results, err := tc.subject.Update(context.Background(), UpdateRequest{
+		Target:            "foo",
+		StoreDir:          filepath.Join(t.TempDir(), "store-root"),
+		BinDir:            filepath.Join(t.TempDir(), "bin"),
+		StateDir:          filepath.Join(t.TempDir(), "state"),
+		AllowSignerChange: true,
+	})
+
 	require.NoError(t, err)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+	require.Len(t, results, 1)
+	assert.Equal(t, UpdateStatusUpdated, results[0].Status)
+	require.NotNil(t, tc.evidence.record)
+	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release-v2.yml"), tc.evidence.record.Evidence.ProvenanceAttestation.SignerWorkflow)
 }
 
 func TestPackageUpdaterCannotUpdateWhenInstalledTagManifestDrifts(t *testing.T) {

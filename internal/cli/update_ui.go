@@ -21,8 +21,9 @@ const (
 
 type updatePresentationMode struct {
 	presentationMode
-	yes       bool
-	canPrompt bool
+	yes                 bool
+	canPrompt           bool
+	approveSignerChange bool
 }
 
 func detectUpdatePresentationMode(options Options, jsonOutput bool) updatePresentationMode {
@@ -35,6 +36,7 @@ func detectUpdatePresentationMode(options Options, jsonOutput bool) updatePresen
 		mode.nonInteractive = true
 	}
 	yes := options.Viper.GetBool("yes")
+	approveSignerChange := options.Viper.GetBool("approve-signer-change")
 	inputTTY := readerIsTerminal(options.In)
 	errTTY := writerIsTerminal(options.Err)
 	canPrompt := !mode.nonInteractive && inputTTY && errTTY
@@ -42,9 +44,10 @@ func detectUpdatePresentationMode(options Options, jsonOutput bool) updatePresen
 		canPrompt = true
 	}
 	return updatePresentationMode{
-		presentationMode: mode,
-		yes:              yes,
-		canPrompt:        canPrompt,
+		presentationMode:    mode,
+		yes:                 yes,
+		canPrompt:           canPrompt,
+		approveSignerChange: approveSignerChange,
 	}
 }
 
@@ -66,11 +69,20 @@ func updateApprovalCallback(options Options, mode updatePresentationMode, status
 		if status != nil {
 			status.Clear()
 		}
-		if mode.yes {
-			return nil
-		}
-		if !mode.canPrompt {
-			return fmt.Errorf("update requires approval after verification; rerun with --yes to approve non-interactively")
+		if approval.SignerChanged {
+			if mode.yes && mode.approveSignerChange {
+				return nil
+			}
+			if !mode.canPrompt {
+				return app.ErrUpdateSignerChangeNotApproved
+			}
+		} else {
+			if mode.yes {
+				return nil
+			}
+			if !mode.canPrompt {
+				return fmt.Errorf("update requires approval after verification; rerun with --yes to approve non-interactively")
+			}
 		}
 		confirm := options.UpdateConfirmation
 		if confirm == nil {
@@ -89,12 +101,15 @@ func promptUpdateApproval(ctx context.Context, options Options, mode updatePrese
 			Title(updateApprovalTitle(approval)).
 			Description(updateApprovalSummary(approval)).
 			Options(
-				huh.NewOption("Update", updateApprovalActionUpdate),
+				huh.NewOption(updateApprovalActionLabel(approval), updateApprovalActionUpdate),
 				huh.NewOption("View details", updateApprovalActionDetails),
 				huh.NewOption("Skip", updateApprovalActionSkip),
 			).
 			Value(&action)
 		if err := runUpdateForm(ctx, options, mode, huh.NewGroup(selectAction)); err != nil {
+			if approval.SignerChanged && errors.Is(err, app.ErrUpdateNotApproved) {
+				return app.ErrUpdateSignerChangeNotApproved
+			}
 			return err
 		}
 		switch action {
@@ -105,6 +120,9 @@ func promptUpdateApproval(ctx context.Context, options Options, mode updatePrese
 				return err
 			}
 		default:
+			if approval.SignerChanged {
+				return app.ErrUpdateSignerChangeNotApproved
+			}
 			return app.ErrUpdateNotApproved
 		}
 	}
@@ -112,7 +130,7 @@ func promptUpdateApproval(ctx context.Context, options Options, mode updatePrese
 
 func showUpdateApprovalDetails(ctx context.Context, options Options, mode updatePresentationMode, approval app.UpdateApproval) error {
 	note := huh.NewNote().
-		Title("Verified update details").
+		Title(updateApprovalDetailsTitle(approval)).
 		Description(escapeNoteDescription(updateApprovalDescription(approval))).
 		Next(true).
 		NextLabel("Back")
@@ -135,10 +153,30 @@ func updateApprovalTitle(approval app.UpdateApproval) string {
 	if target == "" {
 		target = "verified artifact"
 	}
+	if approval.SignerChanged {
+		if version == "" {
+			return fmt.Sprintf("Release signer changed for %s", target)
+		}
+		return fmt.Sprintf("Release signer changed for %s %s", target, version)
+	}
 	if version == "" {
 		return fmt.Sprintf("Update %s?", target)
 	}
 	return fmt.Sprintf("Update %s %s?", target, version)
+}
+
+func updateApprovalActionLabel(approval app.UpdateApproval) string {
+	if approval.SignerChanged {
+		return "Approve signer change and update"
+	}
+	return "Update"
+}
+
+func updateApprovalDetailsTitle(approval app.UpdateApproval) string {
+	if approval.SignerChanged {
+		return "Verified signer change details"
+	}
+	return "Verified update details"
 }
 
 func updateVersionChange(approval app.UpdateApproval) string {
@@ -154,13 +192,31 @@ func updateVersionChange(approval app.UpdateApproval) string {
 }
 
 func updateApprovalSummary(approval app.UpdateApproval) string {
-	return formatRows([]uiRow{
+	rows := []uiRow{
 		{"From", approval.Repository.String()},
 		{"Version", updateVersionChange(approval)},
 		{"To", updateApprovalDestination(approval)},
 		{"Verified", trustRootVerificationLabel(approval.TrustRootPath)},
 		{"Trust root", approval.TrustRootPath},
-	}, 9)
+	}
+	if !approval.SignerChanged {
+		return formatRows(rows, 9)
+	}
+	rows = []uiRow{
+		{"From", approval.Repository.String()},
+		{"Version", updateVersionChange(approval)},
+		{"Trusted signer", string(approval.TrustedSignerWorkflow)},
+		{"New signer", string(approval.CandidateSignerWorkflow)},
+		{"To", updateApprovalDestination(approval)},
+		{"Verified", trustRootVerificationLabel(approval.TrustRootPath)},
+		{"Trust root", approval.TrustRootPath},
+	}
+	return strings.Join([]string{
+		"This update was signed by a different release signer than the one trusted by your current install.",
+		"Approving this update will also change the signer trusted for future updates and verify runs for this package.",
+		"",
+		formatRows(rows, 14),
+	}, "\n")
 }
 
 func updateApprovalDestination(approval app.UpdateApproval) string {
@@ -178,7 +234,7 @@ func updateApprovalDestination(approval app.UpdateApproval) string {
 }
 
 func updateApprovalDescription(approval app.UpdateApproval) string {
-	return formatRows([]uiRow{
+	rows := []uiRow{
 		{"Repository", approval.Repository.String()},
 		{"Package", approval.PackageName.String()},
 		{"Previous", approval.PreviousVersion.String()},
@@ -188,11 +244,21 @@ func updateApprovalDescription(approval app.UpdateApproval) string {
 		{"Digest", approval.AssetDigest.String()},
 		{"Release", approval.ReleasePredicateType},
 		{"Provenance", approval.ProvenancePredicateType},
-		{"Signer", string(approval.SignerWorkflow)},
 		{"Trust root", approval.TrustRootPath},
 		{"Bin dir", approval.BinDir},
 		{"Binaries", strings.Join(approval.Binaries, ", ")},
-	}, 10)
+	}
+	if approval.SignerChanged {
+		rows = append(rows[:9], append([]uiRow{
+			{"Trusted signer", string(approval.TrustedSignerWorkflow)},
+			{"New signer", string(approval.CandidateSignerWorkflow)},
+		}, rows[9:]...)...)
+	} else {
+		rows = append(rows[:9], append([]uiRow{
+			{"Signer", string(approval.CandidateSignerWorkflow)},
+		}, rows[9:]...)...)
+	}
+	return formatRows(rows, 14)
 }
 
 func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanced bool, color bool, trustRootPath string) {

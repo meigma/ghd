@@ -55,6 +55,7 @@ go run ./cmd/ghd verify --state-dir ./state --all
 go run ./cmd/ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd update package --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd --yes --non-interactive update package --state-dir ./state --store-dir ./store --bin-dir ./bin
+go run ./cmd/ghd --yes --approve-signer-change --non-interactive update package --state-dir ./state --store-dir ./store --bin-dir ./bin
 go run ./cmd/ghd update --state-dir ./state --store-dir ./store --bin-dir ./bin --all
 go run ./cmd/ghd uninstall package --state-dir ./state --store-dir ./store --bin-dir ./bin
 ```
@@ -78,10 +79,12 @@ byte-level download progress when GitHub reports an asset size, and ask for
 approval after verification but before exposing or swapping binaries. The
 approval prompt summarizes the source, destination, and trust result, with full
 provenance facts behind `View details`. Automation should pass
-`--yes --non-interactive` to keep output plain and approve the verified action
-without prompting; `install` emits the stable `binary PATH` stdout lines only in
-non-interactive mode, while `update` preserves its result rows and `--json`
-output.
+`--yes --non-interactive` to keep output plain and approve ordinary verified
+actions without prompting. If `update` would rotate the trusted release signer,
+automation must additionally pass `--approve-signer-change`; interactive `update`
+shows a dedicated signer-change approval instead. `install` emits the stable
+`binary PATH` stdout lines only in non-interactive mode, while `update`
+preserves its result rows and `--json` output.
 
 Interactive `uninstall` now uses transient terminal status plus a final stderr
 summary of what was removed, but it remains immediate and non-confirming by
