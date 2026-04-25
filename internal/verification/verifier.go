@@ -48,8 +48,8 @@ func (v *Verifier) VerifyReleaseAsset(ctx context.Context, request Request) (Evi
 		return Evidence{}, wrapError(KindFetchProvenanceAttestations, err, "fetch provenance attestations for %s", assetDigest)
 	}
 	policy := request.Policy
-	if policy.ExpectedSourceRef == "" {
-		policy.ExpectedSourceRef = "refs/tags/" + string(request.Tag)
+	if policy.ExpectedSourceRef.IsZero() {
+		policy.ExpectedSourceRef = request.Tag.RefName()
 	}
 	if policy.ExpectedSourceDigest.IsZero() && !releaseResolution.SourceDigest.IsZero() {
 		policy.ExpectedSourceDigest = releaseResolution.SourceDigest
@@ -156,7 +156,12 @@ func (v *Verifier) verifyProvenanceAttestation(ctx context.Context, attestations
 			continue
 		}
 		// The certificate SAN is the non-forgeable workflow identity and must match the trusted workflow.
-		if !policy.TrustedSignerWorkflow.matches(WorkflowIdentity(verified.Certificate.SubjectAlternativeName)) {
+		subjectWorkflow, err := NewWorkflowIdentity(verified.Certificate.SubjectAlternativeName)
+		if err != nil {
+			fallback = mismatch(KindProvenanceIdentityMismatch, "provenance attestation %s has invalid certificate identity %q", attestation.ID, verified.Certificate.SubjectAlternativeName)
+			continue
+		}
+		if !policy.TrustedSignerWorkflow.matches(subjectWorkflow) {
 			fallback = mismatch(KindProvenanceIdentityMismatch, "provenance attestation %s has certificate identity %q, not %s", attestation.ID, verified.Certificate.SubjectAlternativeName, policy.TrustedSignerWorkflow)
 			continue
 		}
@@ -176,7 +181,7 @@ func (v *Verifier) verifyProvenanceAttestation(ctx context.Context, attestations
 			continue
 		}
 		// If configured, require provenance to come from the exact expected source ref.
-		if policy.ExpectedSourceRef != "" && verified.Certificate.SourceRef != policy.ExpectedSourceRef {
+		if !policy.ExpectedSourceRef.IsZero() && verified.Certificate.SourceRef != policy.ExpectedSourceRef {
 			fallback = mismatch(KindSourceRefMismatch, "provenance source ref is %s, not %s", verified.Certificate.SourceRef, policy.ExpectedSourceRef)
 			continue
 		}

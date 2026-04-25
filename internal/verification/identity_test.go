@@ -69,6 +69,119 @@ func TestRepositoryJSONShapeRemainsObject(t *testing.T) {
 	assert.JSONEq(t, `{"Owner":"owner","Name":"repo"}`, string(raw))
 }
 
+func TestNewReleaseTagAcceptsGitTagRefNames(t *testing.T) {
+	tests := []struct {
+		name string
+		tag  string
+		ref  SourceRef
+	}{
+		{name: "semantic tag", tag: "v1.2.3", ref: "refs/tags/v1.2.3"},
+		{name: "slash delimited tag", tag: "release/v1.2.3", ref: "refs/tags/release/v1.2.3"},
+		{name: "build metadata", tag: "v1.2.3+build.1", ref: "refs/tags/v1.2.3+build.1"},
+		{name: "github encoded characters", tag: "v#1%1", ref: "refs/tags/v#1%1"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			tag, err := NewReleaseTag(tt.tag)
+
+			require.NoError(t, err)
+			assert.Equal(t, ReleaseTag(tt.tag), tag)
+			assert.Equal(t, tt.tag, tag.String())
+			assert.Equal(t, tt.ref, tag.RefName())
+		})
+	}
+}
+
+func TestNewReleaseTagRejectsUnsafeGitRefNames(t *testing.T) {
+	tests := []struct {
+		name string
+		tag  string
+	}{
+		{name: "empty", tag: ""},
+		{name: "leading whitespace", tag: " v1.2.3"},
+		{name: "control character", tag: "v1.2.3\n"},
+		{name: "traversal", tag: "release/../v1.2.3"},
+		{name: "double dot", tag: "release..v1.2.3"},
+		{name: "reflog syntax", tag: "release@{v1.2.3"},
+		{name: "leading slash", tag: "/v1.2.3"},
+		{name: "trailing slash", tag: "v1.2.3/"},
+		{name: "double slash", tag: "release//v1.2.3"},
+		{name: "lock suffix", tag: "release.lock"},
+		{name: "dot prefix component", tag: ".release/v1.2.3"},
+		{name: "dot suffix component", tag: "release./v1.2.3"},
+		{name: "space", tag: "release v1.2.3"},
+		{name: "tilde", tag: "release~v1.2.3"},
+		{name: "caret", tag: "release^v1.2.3"},
+		{name: "colon", tag: "release:v1.2.3"},
+		{name: "question", tag: "release?v1.2.3"},
+		{name: "asterisk", tag: "release*v1.2.3"},
+		{name: "open bracket", tag: "release[v1.2.3"},
+		{name: "backslash", tag: `release\v1.2.3`},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewReleaseTag(tt.tag)
+
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestNewSourceRefRequiresFullyQualifiedGitRef(t *testing.T) {
+	ref, err := NewSourceRef("refs/tags/release/v1.2.3")
+
+	require.NoError(t, err)
+	assert.Equal(t, SourceRef("refs/tags/release/v1.2.3"), ref)
+	assert.Equal(t, "refs/tags/release/v1.2.3", ref.String())
+	assert.False(t, ref.IsZero())
+
+	_, err = NewSourceRef("v1.2.3")
+	require.Error(t, err)
+}
+
+func TestNewWorkflowIdentityCanonicalizesGitHubWorkflow(t *testing.T) {
+	workflow, err := NewWorkflowIdentity("https://github.com/Owner/Repo/.github/workflows/release.yml@refs/heads/main")
+
+	require.NoError(t, err)
+	assert.Equal(t, WorkflowIdentity("Owner/Repo/.github/workflows/release.yml@refs/heads/main"), workflow)
+	assert.Equal(t, "Owner/Repo/.github/workflows/release.yml@refs/heads/main", workflow.String())
+}
+
+func TestNewWorkflowIdentityRejectsInvalidValues(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "empty", value: ""},
+		{name: "leading whitespace", value: " owner/repo/.github/workflows/release.yml"},
+		{name: "http url", value: "http://github.com/owner/repo/.github/workflows/release.yml"},
+		{name: "wrong host", value: "https://example.com/owner/repo/.github/workflows/release.yml"},
+		{name: "missing repo", value: "owner/.github/workflows/release.yml"},
+		{name: "outside workflow directory", value: "owner/repo/.github/actions/release.yml"},
+		{name: "absolute path", value: "/owner/repo/.github/workflows/release.yml"},
+		{name: "empty path component", value: "owner/repo/.github/workflows//release.yml"},
+		{name: "path traversal", value: "owner/repo/.github/workflows/../release.yml"},
+		{name: "backslash", value: `owner/repo/.github/workflows\release.yml`},
+		{name: "control character", value: "owner/repo/.github/workflows/release.yml\n"},
+		{name: "non yaml", value: "owner/repo/.github/workflows/release.json"},
+		{name: "empty ref", value: "owner/repo/.github/workflows/release.yml@"},
+		{name: "invalid ref", value: "owner/repo/.github/workflows/release.yml@main"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewWorkflowIdentity(tt.value)
+
+			require.Error(t, err)
+		})
+	}
+}
+
 func TestWorkflowIdentitySameWorkflowPathIgnoresRefAndURLForm(t *testing.T) {
 	assert.True(t,
 		WorkflowIdentity("meigma/ghd-test/.github/workflows/release.yml").SameWorkflowPath(

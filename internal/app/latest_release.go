@@ -38,7 +38,10 @@ func latestStablePackageReleaseForPlatform(
 		if release.Draft || release.Prerelease || strings.TrimSpace(release.TagName) == "" {
 			continue
 		}
-		tag := verification.ReleaseTag(release.TagName)
+		tag, err := verification.NewReleaseTag(release.TagName)
+		if err != nil {
+			continue
+		}
 		cfg, pkg, version, err := fetchPackageManifestForReleaseTag(ctx, manifests, repository, packageName, tag)
 		if err != nil {
 			continue

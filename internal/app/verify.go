@@ -175,9 +175,13 @@ func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record stat
 	if err != nil {
 		return err
 	}
+	tag, err := verification.NewReleaseTag(record.Tag)
+	if err != nil {
+		return fmt.Errorf("installed record for %s/%s@%s has invalid release tag %q: %w", record.Repository, record.Package, record.Version, record.Tag, err)
+	}
 	evidence, err := v.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: repository,
-		Tag:        verification.ReleaseTag(record.Tag),
+		Tag:        tag,
 		AssetPath:  record.ArtifactPath,
 		Policy: verification.Policy{
 			TrustedSignerWorkflow: signerWorkflow,

@@ -147,6 +147,13 @@ signer_workflow = "owner/repo/.github/workflows/release.yml"
 	assert.Contains(t, err.Error(), "unsupported ghd.toml version")
 }
 
+func TestDecodeRejectsInvalidSignerWorkflow(t *testing.T) {
+	_, err := Decode([]byte(strings.ReplaceAll(validConfig(), "owner/repo/.github/workflows/release.yml", "owner/repo/.github/actions/release.yml")))
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "provenance.signer_workflow")
+}
+
 func TestDecodeRejectsUnsafeBinaryPaths(t *testing.T) {
 	tests := []struct {
 		name string
@@ -305,10 +312,21 @@ func TestPackageVersionForTagRejectsInvalidPatterns(t *testing.T) {
 	assert.Contains(t, err.Error(), "exactly one")
 }
 
-func TestPackageVersionForTagRejectsUnsafeExtractedVersions(t *testing.T) {
-	pkg := Package{Name: "foo", TagPattern: "foo-${version}"}
+func TestPackageReleaseTagRejectsInvalidExpandedTag(t *testing.T) {
+	version, err := NewPackageVersion("1.2.3")
+	require.NoError(t, err)
+	pkg := Package{Name: "foo", TagPattern: ".bad-${version}"}
 
-	_, _, err := pkg.VersionForTag(verification.ReleaseTag("foo-../bar"))
+	_, err = pkg.ReleaseTag(version)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid tag")
+}
+
+func TestPackageVersionForTagRejectsUnsafeExtractedVersions(t *testing.T) {
+	pkg := Package{Name: "foo", TagPattern: "foo-${version}-end"}
+
+	_, _, err := pkg.VersionForTag(verification.ReleaseTag("foo-1/2-end"))
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "path separators")
