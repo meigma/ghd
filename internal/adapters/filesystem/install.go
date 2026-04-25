@@ -560,7 +560,40 @@ func removeManagedStorePath(root *os.Root, relStorePath string) error {
 	if err := root.RemoveAll(relStorePath); err != nil {
 		return fmt.Errorf("remove managed store path: %w", err)
 	}
+	parentRel := filepath.Dir(relStorePath)
+	if parentRel == "." || parentRel == "" {
+		return nil
+	}
+	parentEmpty, err := managedStoreDirectoryEmpty(root, parentRel)
+	if err != nil {
+		return err
+	}
+	if !parentEmpty {
+		return nil
+	}
+	if err := root.Remove(parentRel); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("remove empty managed store parent: %w", err)
+	}
 	return nil
+}
+
+func managedStoreDirectoryEmpty(root *os.Root, relDir string) (bool, error) {
+	dir, err := root.Open(relDir)
+	if os.IsNotExist(err) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("open managed store parent: %w", err)
+	}
+	defer dir.Close()
+	_, err = dir.ReadDir(1)
+	if errors.Is(err, io.EOF) {
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read managed store parent: %w", err)
+	}
+	return false, nil
 }
 
 type resolvedStoreLayout struct {
