@@ -10,6 +10,13 @@ import (
 	"github.com/meigma/ghd/internal/cli"
 )
 
+//nolint:gochecknoglobals // GoReleaser injects release metadata with -ldflags -X.
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
 	os.Exit(run())
 }
@@ -19,7 +26,12 @@ func run() int {
 	defer stop()
 
 	root := cli.NewRootCommand(cli.Options{
-		In:  os.Stdin,
+		In: os.Stdin,
+		Build: cli.BuildInfo{
+			Version: version,
+			Commit:  commit,
+			Date:    date,
+		},
 		Out: os.Stdout,
 		Err: os.Stderr,
 	})

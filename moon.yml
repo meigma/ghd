@@ -18,6 +18,7 @@ tasks:
     inputs:
       - '.golangci.yml'
       - 'cmd/**/*.go'
+      - 'example/**/*.go'
       - 'go.mod'
       - 'go.sum'
       - 'internal/**/*.go'
@@ -29,6 +30,7 @@ tasks:
     toolchains: ['go']
     inputs:
       - 'cmd/**/*.go'
+      - 'example/**/*.go'
       - 'go.mod'
       - 'go.sum'
       - 'internal/**/*.go'

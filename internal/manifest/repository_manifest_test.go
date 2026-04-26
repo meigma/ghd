@@ -16,16 +16,29 @@ func TestRepositoryManifest(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "meigma/ghd/.github/workflows/release.yml", cfg.Provenance.SignerWorkflow)
 
-	pkg, err := cfg.Package(PackageName("ghd-example"))
+	ghd, err := cfg.Package(PackageName("ghd"))
 	require.NoError(t, err)
-	assert.Equal(t, PackageName("ghd-example"), pkg.Name)
-	assert.Equal(t, []Binary{{Path: "ghd-example"}}, pkg.Binaries)
+	assert.Equal(t, PackageName("ghd"), ghd.Name)
+	assert.Equal(t, []Binary{{Path: "ghd"}}, ghd.Binaries)
 
-	tag, err := pkg.ReleaseTag(PackageVersion("1.2.3"))
+	tag, err := ghd.ReleaseTag(PackageVersion("1.2.3"))
+	require.NoError(t, err)
+	assert.Equal(t, "v1.2.3", tag.String())
+
+	asset, err := ghd.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, PackageVersion("1.2.3"))
+	require.NoError(t, err)
+	assert.Equal(t, "ghd_1.2.3_darwin_arm64", asset.Name)
+
+	example, err := cfg.Package(PackageName("ghd-example"))
+	require.NoError(t, err)
+	assert.Equal(t, PackageName("ghd-example"), example.Name)
+	assert.Equal(t, []Binary{{Path: "ghd-example"}}, example.Binaries)
+
+	tag, err = example.ReleaseTag(PackageVersion("1.2.3"))
 	require.NoError(t, err)
 	assert.Equal(t, "example-v1.2.3", tag.String())
 
-	asset, err := pkg.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, PackageVersion("1.2.3"))
+	asset, err = example.SelectAsset(Platform{OS: "darwin", Arch: "arm64"}, PackageVersion("1.2.3"))
 	require.NoError(t, err)
 	assert.Equal(t, "ghd-example_1.2.3_darwin_arm64", asset.Name)
 }
