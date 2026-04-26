@@ -19,6 +19,21 @@ jobs:
       issues: write
       pull-requests: write
     steps:
+      - name: Detect release PR merge
+        id: release-merge
+        shell: bash
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          subject="$(printf '%s\n' "${COMMIT_MESSAGE}" | sed -n '1p')"
+
+          if [[ "${subject}" =~ ^chore\(master\):\ release\ .+\ \(#[0-9]+\)$ ]]; then
+            echo "value=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "value=false" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Mint GitHub App token
         id: app-token
         uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
@@ -26,9 +41,49 @@ jobs:
           client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Run Release Please
+      - name: Create release from merged Release Please PR
+        if: steps.release-merge.outputs.value == 'true'
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          skip-github-pull-request: true
+
+      - name: Ensure draft release tag exists
+        if: steps.release-merge.outputs.value == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
+          tag_name="$(jq -r --arg sha "${RELEASE_SHA}" '[.[] | select(.draft == true and .target_commitish == $sha)][0].tag_name // empty' <<<"${releases}")"
+
+          if [[ -z "${tag_name}" ]]; then
+            echo "No draft release found for ${RELEASE_SHA}" >&2
+            exit 1
+          fi
+
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag_name}" >/dev/null 2>&1; then
+            echo "Tag ${tag_name} already exists"
+            exit 0
+          fi
+
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f "ref=refs/tags/${tag_name}" \
+            -f "sha=${RELEASE_SHA}" \
+            >/dev/null
+
+      - name: Open or update Release Please PR
+        if: steps.release-merge.outputs.value != 'true'
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          skip-github-release: true
