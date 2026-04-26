@@ -88,7 +88,7 @@ block_force_pushes = true
 
 bypass = [
   { type = "repository_admin_role", mode = "always" },
-  # { type = "app", slug = "meigma-release-please", mode = "always" },
+  { type = "app", slug = "meigma-release-please", mode = "always" },
 ]
 
 [rulesets.tags_default.status_checks]

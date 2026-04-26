@@ -34,5 +34,12 @@ jobs:
           auto-setup: true
           cache-base: ${{ github.event.repository.default_branch }}
 
+      - name: Check GoReleaser config
+        uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
+        with:
+          distribution: goreleaser
+          version: v2.15.4
+          args: check
+
       - name: Run Moon CI
         run: moon ci --summary minimal
