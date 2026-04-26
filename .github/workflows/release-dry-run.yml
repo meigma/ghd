@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - master
+  pull_request:
+    branches:
+      - master
   workflow_dispatch:
 
 permissions: {}
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   release-dry-run:
+    if: github.event_name != 'pull_request' || github.head_ref == 'feat/session-033-example-publisher-pipeline'
     runs-on: ubuntu-latest
     permissions:
       contents: read
