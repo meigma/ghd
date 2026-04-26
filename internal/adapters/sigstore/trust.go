@@ -3,6 +3,7 @@ package sigstore
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -56,7 +57,7 @@ func (TrustedRootChecker) ValidateTrustedRoot(ctx context.Context, path string) 
 	}
 	path = strings.TrimSpace(path)
 	if path == "" {
-		return fmt.Errorf("trusted root path must be set")
+		return errors.New("trusted root path must be set")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

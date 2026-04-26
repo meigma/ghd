@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -101,10 +102,10 @@ type EnvironmentDoctor struct {
 // NewEnvironmentDoctor creates an environment diagnostics use case.
 func NewEnvironmentDoctor(deps EnvironmentDoctorDependencies) (*EnvironmentDoctor, error) {
 	if deps.GitHub == nil {
-		return nil, fmt.Errorf("GitHub doctor checker must be set")
+		return nil, errors.New("GitHub doctor checker must be set")
 	}
 	if deps.TrustedRoot == nil {
-		return nil, fmt.Errorf("trusted root checker must be set")
+		return nil, errors.New("trusted root checker must be set")
 	}
 	return &EnvironmentDoctor{
 		github:      deps.GitHub,
@@ -172,27 +173,51 @@ func doctorDirectoryCheck(id string, directory string) DoctorResult {
 	switch {
 	case err == nil:
 		if !info.IsDir() {
-			return DoctorResult{ID: id, Status: DoctorStatusFail, Message: fmt.Sprintf("%s path %s exists but is not a directory", id, root)}
+			return DoctorResult{
+				ID:      id,
+				Status:  DoctorStatusFail,
+				Message: fmt.Sprintf("%s path %s exists but is not a directory", id, root),
+			}
 		}
-		file, err := os.CreateTemp(root, ".ghd-doctor-*")
-		if err != nil {
-			return DoctorResult{ID: id, Status: DoctorStatusFail, Message: fmt.Sprintf("%s directory %s is not writable: %v", id, root, err)}
+		file, createErr := os.CreateTemp(root, ".ghd-doctor-*")
+		if createErr != nil {
+			return DoctorResult{
+				ID:      id,
+				Status:  DoctorStatusFail,
+				Message: fmt.Sprintf("%s directory %s is not writable: %v", id, root, createErr),
+			}
 		}
 		tempPath := file.Name()
 		_ = file.Close()
 		_ = os.Remove(tempPath)
-		return DoctorResult{ID: id, Status: DoctorStatusPass, Message: fmt.Sprintf("%s directory %s is writable", id, root)}
+		return DoctorResult{
+			ID:      id,
+			Status:  DoctorStatusPass,
+			Message: fmt.Sprintf("%s directory %s is writable", id, root),
+		}
 	case !os.IsNotExist(err):
-		return DoctorResult{ID: id, Status: DoctorStatusFail, Message: fmt.Sprintf("inspect %s path %s: %v", id, root, err)}
+		return DoctorResult{
+			ID:      id,
+			Status:  DoctorStatusFail,
+			Message: fmt.Sprintf("inspect %s path %s: %v", id, root, err),
+		}
 	}
 
 	parent, err := nearestExistingParent(root)
 	if err != nil {
-		return DoctorResult{ID: id, Status: DoctorStatusFail, Message: fmt.Sprintf("resolve parent for %s path %s: %v", id, root, err)}
+		return DoctorResult{
+			ID:      id,
+			Status:  DoctorStatusFail,
+			Message: fmt.Sprintf("resolve parent for %s path %s: %v", id, root, err),
+		}
 	}
 	file, err := os.CreateTemp(parent, ".ghd-doctor-*")
 	if err != nil {
-		return DoctorResult{ID: id, Status: DoctorStatusFail, Message: fmt.Sprintf("%s directory %s cannot be created from parent %s: %v", id, root, parent, err)}
+		return DoctorResult{
+			ID:      id,
+			Status:  DoctorStatusFail,
+			Message: fmt.Sprintf("%s directory %s cannot be created from parent %s: %v", id, root, parent, err),
+		}
 	}
 	tempPath := file.Name()
 	_ = file.Close()
@@ -207,7 +232,7 @@ func doctorDirectoryCheck(id string, directory string) DoctorResult {
 func doctorDirectoryRoot(directory string) (string, error) {
 	directory = strings.TrimSpace(directory)
 	if directory == "" {
-		return "", fmt.Errorf("directory must be set")
+		return "", errors.New("directory must be set")
 	}
 	root, err := filepath.Abs(filepath.Clean(directory))
 	if err != nil {
@@ -224,7 +249,7 @@ func nearestExistingParent(path string) (string, error) {
 	for {
 		parent := filepath.Dir(current)
 		if parent == current {
-			return "", fmt.Errorf("no existing parent found")
+			return "", errors.New("no existing parent found")
 		}
 		info, err := os.Stat(parent)
 		if err == nil {
@@ -280,14 +305,22 @@ func (d *EnvironmentDoctor) doctorGitHubAPI(ctx context.Context, githubToken str
 	}
 	if strings.TrimSpace(githubToken) == "" {
 		return DoctorResult{
-			ID:      "github-api",
-			Status:  DoctorStatusWarn,
-			Message: fmt.Sprintf("GitHub token is not set; unauthenticated core rate limit remaining %d/%d", status.CoreRemaining, status.CoreLimit),
+			ID:     "github-api",
+			Status: DoctorStatusWarn,
+			Message: fmt.Sprintf(
+				"GitHub token is not set; unauthenticated core rate limit remaining %d/%d",
+				status.CoreRemaining,
+				status.CoreLimit,
+			),
 		}
 	}
 	return DoctorResult{
-		ID:      "github-api",
-		Status:  DoctorStatusPass,
-		Message: fmt.Sprintf("GitHub API reachable; core rate limit remaining %d/%d", status.CoreRemaining, status.CoreLimit),
+		ID:     "github-api",
+		Status: DoctorStatusPass,
+		Message: fmt.Sprintf(
+			"GitHub API reachable; core rate limit remaining %d/%d",
+			status.CoreRemaining,
+			status.CoreLimit,
+		),
 	}
 }

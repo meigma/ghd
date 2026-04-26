@@ -38,25 +38,30 @@ func (Installer) CreateDownloadDir(ctx context.Context) (string, func(), error) 
 }
 
 // PublishVerifiedArtifact copies a verified artifact into an output directory without overwriting.
-func (Installer) PublishVerifiedArtifact(ctx context.Context, sourcePath string, outputDir string, assetName string) (string, error) {
+func (Installer) PublishVerifiedArtifact(
+	ctx context.Context,
+	sourcePath string,
+	outputDir string,
+	assetName string,
+) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(sourcePath) == "" {
-		return "", fmt.Errorf("source artifact path must be set")
+		return "", errors.New("source artifact path must be set")
 	}
 	name, err := cleanPathSegment("release asset name", assetName)
 	if err != nil {
 		return "", err
 	}
 	if strings.TrimSpace(outputDir) == "" {
-		return "", fmt.Errorf("output directory must be set")
+		return "", errors.New("output directory must be set")
 	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, privateDirMode); err != nil {
 		return "", fmt.Errorf("create output directory: %w", err)
 	}
 	destination := filepath.Join(outputDir, name)
-	if err := copyFileExclusive(sourcePath, destination, 0o600); err != nil {
+	if err := copyFileExclusive(sourcePath, destination, privateFileMode); err != nil {
 		return "", err
 	}
 	return destination, nil
@@ -71,8 +76,8 @@ func (Installer) CreateStoreLayout(ctx context.Context, request app.StoreLayoutR
 	if err != nil {
 		return app.StoreLayout{}, err
 	}
-	if err := os.MkdirAll(layout.storeRoot, 0o755); err != nil {
-		return app.StoreLayout{}, fmt.Errorf("create store root: %w", err)
+	if mkdirErr := os.MkdirAll(layout.storeRoot, privateDirMode); mkdirErr != nil {
+		return app.StoreLayout{}, fmt.Errorf("create store root: %w", mkdirErr)
 	}
 	root, err := os.OpenRoot(layout.storeRoot)
 	if err != nil {
@@ -82,23 +87,23 @@ func (Installer) CreateStoreLayout(ctx context.Context, request app.StoreLayoutR
 	if err := rejectSymlinkComponents(root, layout.relStorePath); err != nil {
 		return app.StoreLayout{}, err
 	}
-	if err := root.MkdirAll(layout.relStoreParent, 0o755); err != nil {
+	if err := root.MkdirAll(layout.relStoreParent, privateDirMode); err != nil {
 		return app.StoreLayout{}, fmt.Errorf("create store parent: %w", err)
 	}
-	if err := root.Mkdir(layout.relStorePath, 0o755); err != nil {
+	if err := root.Mkdir(layout.relStorePath, privateDirMode); err != nil {
 		if os.IsExist(err) {
 			return app.StoreLayout{}, fmt.Errorf("store path %s already exists", layout.StorePath)
 		}
 		return app.StoreLayout{}, fmt.Errorf("create store path: %w", err)
 	}
-	if err := root.Mkdir(layout.relExtractedDir, 0o755); err != nil {
+	if err := root.Mkdir(layout.relExtractedDir, privateDirMode); err != nil {
 		_ = removeManagedStorePath(root, layout.relStorePath)
 		if os.IsExist(err) {
 			return app.StoreLayout{}, fmt.Errorf("extracted store directory %s already exists", layout.ExtractedDir)
 		}
 		return app.StoreLayout{}, fmt.Errorf("create extraction directory: %w", err)
 	}
-	if err := copyFileExclusiveRoot(root, request.ArtifactPath, layout.relArtifactPath, 0o600); err != nil {
+	if err := copyFileExclusiveRoot(root, request.ArtifactPath, layout.relArtifactPath, privateFileMode); err != nil {
 		_ = removeManagedStorePath(root, layout.relStorePath)
 		return app.StoreLayout{}, err
 	}
@@ -118,10 +123,10 @@ func (Installer) LinkBinaries(ctx context.Context, request app.LinkBinariesReque
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(binRoot, 0o755); err != nil {
+	if err := os.MkdirAll(binRoot, privateDirMode); err != nil {
 		return nil, fmt.Errorf("create bin directory: %w", err)
 	}
-	if _, err := createManagedBinaryLinks(ctx, binRoot, planned, false); err != nil {
+	if err := createManagedBinaryLinks(ctx, binRoot, planned, false); err != nil {
 		return nil, err
 	}
 	return planned, nil
@@ -155,7 +160,7 @@ func (Installer) ReplaceManagedBinaries(ctx context.Context, request app.Replace
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(binRoot, 0o755); err != nil {
+	if err := os.MkdirAll(binRoot, privateDirMode); err != nil {
 		return fmt.Errorf("create bin directory: %w", err)
 	}
 	if err := validateManagedBinarySet(binRoot, request.Next); err != nil {
@@ -165,13 +170,21 @@ func (Installer) ReplaceManagedBinaries(ctx context.Context, request app.Replace
 		return err
 	}
 	if err := removeManagedBinaryLinks(ctx, binRoot, request.Previous); err != nil {
-		if restoreErr := restoreManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, request.Previous); restoreErr != nil {
+		if restoreErr := restoreManagedBinaryLinks(
+			context.WithoutCancel(ctx),
+			binRoot,
+			request.Previous,
+		); restoreErr != nil {
 			return errors.Join(err, fmt.Errorf("restore previous managed binaries: %w", restoreErr))
 		}
 		return err
 	}
-	if _, err := createManagedBinaryLinks(ctx, binRoot, request.Next, false); err != nil {
-		if restoreErr := restoreManagedBinaryLinks(context.WithoutCancel(ctx), binRoot, request.Previous); restoreErr != nil {
+	if err := createManagedBinaryLinks(ctx, binRoot, request.Next, false); err != nil {
+		if restoreErr := restoreManagedBinaryLinks(
+			context.WithoutCancel(ctx),
+			binRoot,
+			request.Previous,
+		); restoreErr != nil {
 			return errors.Join(err, fmt.Errorf("restore previous managed binaries: %w", restoreErr))
 		}
 		return err
@@ -198,10 +211,10 @@ func (Installer) VerifyManagedBinaryLink(ctx context.Context, linkPath string, e
 		return err
 	}
 	if strings.TrimSpace(linkPath) == "" {
-		return fmt.Errorf("managed binary link path must be set")
+		return errors.New("managed binary link path must be set")
 	}
 	if strings.TrimSpace(expectedTargetPath) == "" {
-		return fmt.Errorf("managed binary target path must be set")
+		return errors.New("managed binary target path must be set")
 	}
 	info, err := os.Lstat(linkPath)
 	if err != nil {
@@ -253,14 +266,14 @@ type managedBinaryLink struct {
 
 func resolveManagedBinaryPlan(request app.LinkBinariesRequest) (string, []app.InstalledBinary, error) {
 	if strings.TrimSpace(request.BinDir) == "" {
-		return "", nil, fmt.Errorf("bin directory must be set")
+		return "", nil, errors.New("bin directory must be set")
 	}
 	binRoot, err := cleanBinRoot(request.BinDir)
 	if err != nil {
 		return "", nil, err
 	}
 	if len(request.Binaries) == 0 {
-		return "", nil, fmt.Errorf("at least one binary must be linked")
+		return "", nil, errors.New("at least one binary must be linked")
 	}
 	planned := make([]app.InstalledBinary, 0, len(request.Binaries))
 	for _, binary := range request.Binaries {
@@ -285,7 +298,11 @@ func validateManagedBinarySet(binRoot string, binaries []app.InstalledBinary) er
 	return err
 }
 
-func resolveManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) ([]managedBinaryLink, error) {
+func resolveManagedBinaryLinks(
+	ctx context.Context,
+	binRoot string,
+	binaries []app.InstalledBinary,
+) ([]managedBinaryLink, error) {
 	if len(binaries) == 0 {
 		return nil, nil
 	}
@@ -348,23 +365,32 @@ func ensureManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 			return fmt.Errorf("read binary link %s: %w", link.binary.LinkPath, err)
 		}
 		if target != link.binary.TargetPath {
-			return fmt.Errorf("refusing to remove binary link %s with unexpected target %s", link.binary.LinkPath, target)
+			return fmt.Errorf(
+				"refusing to remove binary link %s with unexpected target %s",
+				link.binary.LinkPath,
+				target,
+			)
 		}
 	}
 	return nil
 }
 
-func createManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary, allowExistingExpected bool) ([]app.InstalledBinary, error) {
+func createManagedBinaryLinks(
+	ctx context.Context,
+	binRoot string,
+	binaries []app.InstalledBinary,
+	allowExistingExpected bool,
+) error {
 	if len(binaries) == 0 {
-		return nil, nil
+		return nil
 	}
 	links, err := resolveManagedBinaryLinks(ctx, binRoot, binaries)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	root, err := os.OpenRoot(binRoot)
 	if err != nil {
-		return nil, fmt.Errorf("open bin root: %w", err)
+		return fmt.Errorf("open bin root: %w", err)
 	}
 	defer root.Close()
 	created := make([]app.InstalledBinary, 0, len(links))
@@ -374,32 +400,34 @@ func createManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 	for _, link := range links {
 		if err := ctx.Err(); err != nil {
 			cleanup()
-			return nil, err
+			return err
 		}
 		if err := root.Symlink(link.binary.TargetPath, link.rel); err != nil {
-			if os.IsExist(err) && allowExistingExpected {
-				info, statErr := root.Lstat(link.rel)
-				if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-					target, readErr := root.Readlink(link.rel)
-					if readErr == nil && target == link.binary.TargetPath {
-						continue
-					}
-				}
+			if os.IsExist(err) && allowExistingExpected && managedBinaryLinkMatches(root, link) {
+				continue
 			}
 			cleanup()
 			if os.IsExist(err) {
-				return nil, fmt.Errorf("binary link %s already exists", link.binary.LinkPath)
+				return fmt.Errorf("binary link %s already exists", link.binary.LinkPath)
 			}
-			return nil, fmt.Errorf("link binary %s: %w", link.binary.Name, err)
+			return fmt.Errorf("link binary %s: %w", link.binary.Name, err)
 		}
 		created = append(created, link.binary)
 	}
-	return created, nil
+	return nil
+}
+
+func managedBinaryLinkMatches(root *os.Root, link managedBinaryLink) bool {
+	info, err := root.Lstat(link.rel)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		return false
+	}
+	target, err := root.Readlink(link.rel)
+	return err == nil && target == link.binary.TargetPath
 }
 
 func restoreManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) error {
-	_, err := createManagedBinaryLinks(ctx, binRoot, binaries, true)
-	return err
+	return createManagedBinaryLinks(ctx, binRoot, binaries, true)
 }
 
 func removeManagedBinaryLinks(ctx context.Context, binRoot string, binaries []app.InstalledBinary) error {
@@ -447,7 +475,10 @@ func removeManagedBinaryLinks(ctx context.Context, binRoot string, binaries []ap
 			continue
 		}
 		if target != binary.TargetPath {
-			errs = append(errs, fmt.Errorf("refusing to remove binary link %s with unexpected target %s", binary.LinkPath, target))
+			errs = append(
+				errs,
+				fmt.Errorf("refusing to remove binary link %s with unexpected target %s", binary.LinkPath, target),
+			)
 			continue
 		}
 		if err := root.Remove(link.rel); err != nil {
@@ -463,14 +494,14 @@ func (Installer) WriteInstallMetadata(ctx context.Context, storePath string, rec
 		return "", err
 	}
 	if strings.TrimSpace(storePath) == "" {
-		return "", fmt.Errorf("store path must be set")
+		return "", errors.New("store path must be set")
 	}
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode install metadata: %w", err)
 	}
 	data = append(data, '\n')
-	return writeFileAtomic(storePath, "install.json", data, 0o644)
+	return writeFileAtomic(storePath, "install.json", data, metadataMode)
 }
 
 func copyFileExclusive(source string, destination string, mode os.FileMode) error {
@@ -612,8 +643,8 @@ func resolveStoreLayout(request app.StoreLayoutRequest) (resolvedStoreLayout, er
 	if err != nil {
 		return resolvedStoreLayout{}, err
 	}
-	if err := validateStoreDigest(request.AssetDigest.Algorithm, request.AssetDigest.Hex); err != nil {
-		return resolvedStoreLayout{}, err
+	if digestErr := validateStoreDigest(request.AssetDigest.Algorithm, request.AssetDigest.Hex); digestErr != nil {
+		return resolvedStoreLayout{}, digestErr
 	}
 	owner, err := cleanPathSegment("repository owner", request.Repository.Owner)
 	if err != nil {
@@ -632,7 +663,7 @@ func resolveStoreLayout(request app.StoreLayoutRequest) (resolvedStoreLayout, er
 		return resolvedStoreLayout{}, err
 	}
 	if strings.TrimSpace(request.ArtifactPath) == "" {
-		return resolvedStoreLayout{}, fmt.Errorf("artifact path must be set")
+		return resolvedStoreLayout{}, errors.New("artifact path must be set")
 	}
 	relStorePath := filepath.Join(
 		"github.com",
@@ -683,7 +714,7 @@ func cleanManagedRoot(label string, value string) (string, error) {
 func cleanStoreRelativePath(storeRoot string, storePath string) (string, error) {
 	storePath = strings.TrimSpace(storePath)
 	if storePath == "" {
-		return "", fmt.Errorf("store path must be set")
+		return "", errors.New("store path must be set")
 	}
 	if !filepath.IsAbs(storePath) {
 		return "", fmt.Errorf("recorded store path %s must be absolute", storePath)
@@ -693,7 +724,8 @@ func cleanStoreRelativePath(storeRoot string, storePath string) (string, error) 
 	if err != nil {
 		return "", fmt.Errorf("compare store path to root: %w", err)
 	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) || !filepath.IsLocal(rel) {
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) ||
+		!filepath.IsLocal(rel) {
 		return "", fmt.Errorf("store path %s is not under store root %s", storePath, storeRoot)
 	}
 	return filepath.Clean(rel), nil
@@ -702,7 +734,7 @@ func cleanStoreRelativePath(storeRoot string, storePath string) (string, error) 
 func cleanBinRelativePath(binRoot string, linkPath string) (string, error) {
 	linkPath = strings.TrimSpace(linkPath)
 	if linkPath == "" {
-		return "", fmt.Errorf("binary link path must be set")
+		return "", errors.New("binary link path must be set")
 	}
 	if !filepath.IsAbs(linkPath) {
 		return "", fmt.Errorf("recorded binary link path %s must be absolute", linkPath)
@@ -712,7 +744,8 @@ func cleanBinRelativePath(binRoot string, linkPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("compare binary link path to root: %w", err)
 	}
-	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) || !filepath.IsLocal(rel) {
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(os.PathSeparator)) || filepath.IsAbs(rel) ||
+		!filepath.IsLocal(rel) {
 		return "", fmt.Errorf("binary link path %s is not under bin root %s", linkPath, binRoot)
 	}
 	return filepath.Clean(rel), nil
@@ -720,7 +753,7 @@ func cleanBinRelativePath(binRoot string, linkPath string) (string, error) {
 
 func rejectSymlinkComponents(root *os.Root, rel string) error {
 	current := ""
-	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+	for part := range strings.SplitSeq(rel, string(os.PathSeparator)) {
 		if part == "" || part == "." {
 			continue
 		}
@@ -767,7 +800,7 @@ func validateStoreDigest(algorithm string, value string) error {
 }
 
 func writeFileAtomic(dir string, name string, data []byte, mode os.FileMode) (string, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, privateDirMode); err != nil {
 		return "", fmt.Errorf("create output directory: %w", err)
 	}
 	finalPath := filepath.Join(dir, name)

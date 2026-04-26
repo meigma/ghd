@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -13,6 +14,8 @@ import (
 	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/verification"
 )
+
+const filesystemSHA256DigestBytes = 32
 
 func TestInstallerPublishesVerifiedArtifactExclusively(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "artifact.tar.gz")
@@ -61,7 +64,6 @@ func TestInstallerPublishVerifiedArtifactRejectsUnsafeNames(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewInstaller().PublishVerifiedArtifact(context.Background(), source, t.TempDir(), tt.assetName)
 
@@ -84,7 +86,7 @@ func TestInstallerPublishVerifiedArtifactRemovesPartialCopy(t *testing.T) {
 func TestInstallerCreatesDigestKeyedStoreLayout(t *testing.T) {
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
-	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem("aa", 32))
+	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem())
 	require.NoError(t, err)
 	storeRoot := t.TempDir()
 
@@ -108,16 +110,11 @@ func TestInstallerCreatesDigestKeyedStoreLayout(t *testing.T) {
 }
 
 func TestInstallerCreatesAbsoluteStoreLayoutFromRelativeStoreRoot(t *testing.T) {
-	oldwd, err := os.Getwd()
-	require.NoError(t, err)
 	workdir := t.TempDir()
-	require.NoError(t, os.Chdir(workdir))
-	t.Cleanup(func() {
-		require.NoError(t, os.Chdir(oldwd))
-	})
+	t.Chdir(workdir)
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
-	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem("aa", 32))
+	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem())
 	require.NoError(t, err)
 	storeRoot, err := filepath.Abs("store")
 	require.NoError(t, err)
@@ -132,14 +129,18 @@ func TestInstallerCreatesAbsoluteStoreLayoutFromRelativeStoreRoot(t *testing.T) 
 	})
 
 	require.NoError(t, err)
-	assert.Equal(t, filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-"+digest.Hex), layout.StorePath)
+	assert.Equal(
+		t,
+		filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-"+digest.Hex),
+		layout.StorePath,
+	)
 	assert.FileExists(t, layout.ArtifactPath)
 }
 
 func TestInstallerRequiresFreshExtractionDirectory(t *testing.T) {
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
-	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem("aa", 32))
+	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem())
 	require.NoError(t, err)
 	storeRoot := t.TempDir()
 	storePath := filepath.Join(storeRoot, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-"+digest.Hex)
@@ -221,7 +222,6 @@ func TestInstallerRemoveManagedInstallRejectsUnsafeStorePaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			err := NewInstaller().RemoveManagedInstall(context.Background(), app.RemoveManagedInstallRequest{
 				StoreRoot: tt.storeRoot,
@@ -257,7 +257,7 @@ func TestInstallerRemoveManagedInstallRejectsSymlinkedStoreComponents(t *testing
 func TestInstallerCreateStoreLayoutRejectsSymlinkedStoreComponents(t *testing.T) {
 	artifact := filepath.Join(t.TempDir(), "artifact.tar.gz")
 	require.NoError(t, os.WriteFile(artifact, []byte("artifact"), 0o600))
-	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem("aa", 32))
+	digest, err := verification.NewDigest("sha256", repeatHexForFilesystem())
 	require.NoError(t, err)
 	storeRoot := t.TempDir()
 	outside := t.TempDir()
@@ -321,13 +321,8 @@ func TestInstallerLinksBinariesAndFailsClosedOnCollision(t *testing.T) {
 
 func TestInstallerLinksBinariesWithAbsolutePathsFromRelativeBinRoot(t *testing.T) {
 	installer := NewInstaller()
-	originalDir, err := os.Getwd()
-	require.NoError(t, err)
 	workDir := t.TempDir()
-	require.NoError(t, os.Chdir(workDir))
-	t.Cleanup(func() {
-		require.NoError(t, os.Chdir(originalDir))
-	})
+	t.Chdir(workDir)
 	target := filepath.Join(t.TempDir(), "foo")
 	require.NoError(t, os.WriteFile(target, []byte("foo"), 0o755))
 	wantLinkPath, err := filepath.Abs(filepath.Join("bin", "foo"))
@@ -610,10 +605,6 @@ func TestInstallerWritesInstallMetadata(t *testing.T) {
 	assert.Equal(t, "/bin/foo", record.Binaries[0].LinkPath)
 }
 
-func repeatHexForFilesystem(value string, count int) string {
-	out := ""
-	for range count {
-		out += value
-	}
-	return out
+func repeatHexForFilesystem() string {
+	return strings.Repeat("aa", filesystemSHA256DigestBytes)
 }

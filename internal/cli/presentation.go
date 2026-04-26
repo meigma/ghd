@@ -14,6 +14,13 @@ import (
 	"golang.org/x/term"
 )
 
+const (
+	huhButtonHorizontalPadding = 2
+	byteUnit                   = 1024
+	maxOneByteRune             = 0xff
+	roundNearest               = 0.5
+)
+
 type presentationMode struct {
 	nonInteractive bool
 	dynamic        bool
@@ -51,12 +58,17 @@ func detectPresentationMode(options Options) presentationMode {
 
 func readerIsTerminal(r io.Reader) bool {
 	file, ok := r.(*os.File)
-	return ok && term.IsTerminal(int(file.Fd()))
+	return ok && fileIsTerminal(file)
 }
 
 func writerIsTerminal(w io.Writer) bool {
 	file, ok := w.(*os.File)
-	return ok && term.IsTerminal(int(file.Fd()))
+	return ok && fileIsTerminal(file)
+}
+
+func fileIsTerminal(file *os.File) bool {
+	//nolint:gosec // x/term requires an int file descriptor.
+	return term.IsTerminal(int(file.Fd()))
 }
 
 func colorEnabled() bool {
@@ -204,7 +216,7 @@ func huhTheme(color bool) huh.Theme {
 	}
 	return huh.ThemeFunc(func(isDark bool) *huh.Styles {
 		styles := huh.ThemeBase(isDark)
-		button := lipgloss.NewStyle().Padding(0, 2).MarginRight(1)
+		button := lipgloss.NewStyle().Padding(0, huhButtonHorizontalPadding).MarginRight(1)
 		styles.Focused.FocusedButton = button
 		styles.Focused.BlurredButton = button
 		styles.Blurred.FocusedButton = button
@@ -250,7 +262,7 @@ func terminalSafeText(value string) string {
 			b.WriteString(`\x1b`)
 		default:
 			if unicode.IsControl(char) {
-				if char <= 0xff {
+				if char <= maxOneByteRune {
 					fmt.Fprintf(&b, "\\x%02x", char)
 					continue
 				}
@@ -288,10 +300,7 @@ func renderProgressBar(ratio float64, width int, styles uiStyles) string {
 	if ratio > 1 {
 		ratio = 1
 	}
-	filled := int(ratio*float64(width) + 0.5)
-	if filled > width {
-		filled = width
-	}
+	filled := min(int(ratio*float64(width)+roundNearest), width)
 	fill := strings.Repeat("#", filled)
 	empty := strings.Repeat("-", width-filled)
 	return "[" + styles.accent.Render(fill) + styles.muted.Render(empty) + "]"
@@ -301,15 +310,15 @@ func formatByteCount(bytes int64) string {
 	if bytes < 0 {
 		bytes = 0
 	}
-	if bytes < 1024 {
+	if bytes < byteUnit {
 		return fmt.Sprintf("%d B", bytes)
 	}
 	value := float64(bytes)
 	for _, unit := range []string{"KiB", "MiB", "GiB", "TiB"} {
-		value = value / 1024
-		if value < 1024 {
+		value /= byteUnit
+		if value < byteUnit {
 			return fmt.Sprintf("%.1f %s", value, unit)
 		}
 	}
-	return fmt.Sprintf("%.1f PiB", value/1024)
+	return fmt.Sprintf("%.1f PiB", value/byteUnit)
 }

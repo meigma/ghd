@@ -7,6 +7,8 @@ import (
 	"github.com/meigma/ghd/internal/app"
 )
 
+const downloadSummaryLabelWidth = 10
+
 type downloadPresentationMode struct {
 	presentationMode
 }
@@ -39,8 +41,16 @@ func (s *statusLine) UpdateDownloadAsset(progress app.DownloadProgress) {
 	s.UpdateLine(line)
 }
 
-func writeDownloadSummary(w io.Writer, result app.VerifiedDownloadResult, enhanced bool, color bool, trustRootPath string) {
-	target := terminalSafeText(result.Repository.String() + "/" + result.PackageName.String() + "@" + result.Version.String())
+func writeDownloadSummary(
+	w io.Writer,
+	result app.VerifiedDownloadResult,
+	enhanced bool,
+	color bool,
+	trustRootPath string,
+) {
+	target := terminalSafeText(
+		result.Repository.String() + "/" + result.PackageName.String() + "@" + result.Version.String(),
+	)
 	if !enhanced {
 		fmt.Fprintf(w, "verified %s\n", target)
 		return
@@ -57,5 +67,5 @@ func writeDownloadSummary(w io.Writer, result app.VerifiedDownloadResult, enhanc
 		{"Digest", result.Evidence.AssetDigest.String()},
 		{"Verified", trustRootVerificationLabel(trustRootPath)},
 		{"Trust root", trustRootPath},
-	}, 10))
+	}, downloadSummaryLabelWidth))
 }

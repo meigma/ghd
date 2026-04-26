@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -28,18 +29,22 @@ func (InstalledStore) LoadInstalledState(ctx context.Context, stateDir string) (
 		return state.Index{}, err
 	}
 	if strings.TrimSpace(stateDir) == "" {
-		return state.Index{}, fmt.Errorf("state directory must be set")
+		return state.Index{}, errors.New("state directory must be set")
 	}
 	return loadInstalledStateFile(stateDir)
 }
 
 // AddInstalledRecord adds an active installed package record under a state lock.
-func (InstalledStore) AddInstalledRecord(ctx context.Context, stateDir string, record state.Record) (state.Index, error) {
+func (InstalledStore) AddInstalledRecord(
+	ctx context.Context,
+	stateDir string,
+	record state.Record,
+) (state.Index, error) {
 	if err := ctx.Err(); err != nil {
 		return state.Index{}, err
 	}
 	if strings.TrimSpace(stateDir) == "" {
-		return state.Index{}, fmt.Errorf("state directory must be set")
+		return state.Index{}, errors.New("state directory must be set")
 	}
 	unlock, err := acquireInstalledStateLock(ctx, stateDir)
 	if err != nil {
@@ -62,12 +67,17 @@ func (InstalledStore) AddInstalledRecord(ctx context.Context, stateDir string, r
 }
 
 // RemoveInstalledRecord removes an active installed package record under a state lock.
-func (InstalledStore) RemoveInstalledRecord(ctx context.Context, stateDir string, repository string, packageName string) (state.Index, error) {
+func (InstalledStore) RemoveInstalledRecord(
+	ctx context.Context,
+	stateDir string,
+	repository string,
+	packageName string,
+) (state.Index, error) {
 	if err := ctx.Err(); err != nil {
 		return state.Index{}, err
 	}
 	if strings.TrimSpace(stateDir) == "" {
-		return state.Index{}, fmt.Errorf("state directory must be set")
+		return state.Index{}, errors.New("state directory must be set")
 	}
 	unlock, err := acquireInstalledStateLock(ctx, stateDir)
 	if err != nil {
@@ -90,12 +100,16 @@ func (InstalledStore) RemoveInstalledRecord(ctx context.Context, stateDir string
 }
 
 // ReplaceInstalledRecord replaces one active installed package record under a state lock.
-func (InstalledStore) ReplaceInstalledRecord(ctx context.Context, stateDir string, record state.Record) (state.Index, error) {
+func (InstalledStore) ReplaceInstalledRecord(
+	ctx context.Context,
+	stateDir string,
+	record state.Record,
+) (state.Index, error) {
 	if err := ctx.Err(); err != nil {
 		return state.Index{}, err
 	}
 	if strings.TrimSpace(stateDir) == "" {
-		return state.Index{}, fmt.Errorf("state directory must be set")
+		return state.Index{}, errors.New("state directory must be set")
 	}
 	unlock, err := acquireInstalledStateLock(ctx, stateDir)
 	if err != nil {
@@ -145,7 +159,7 @@ func saveInstalledStateFile(stateDir string, index state.Index) error {
 		return fmt.Errorf("encode installed state: %w", err)
 	}
 	data = append(data, '\n')
-	_, err = writeFileAtomic(stateDir, installedStateFile, data, 0o644)
+	_, err = writeFileAtomic(stateDir, installedStateFile, data, metadataMode)
 	return err
 }
 

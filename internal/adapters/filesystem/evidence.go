@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,13 +26,14 @@ func (EvidenceWriter) ReadVerificationRecord(ctx context.Context, path string) (
 		return app.VerificationRecord{}, err
 	}
 	if strings.TrimSpace(path) == "" {
-		return app.VerificationRecord{}, fmt.Errorf("verification path must be set")
+		return app.VerificationRecord{}, errors.New("verification path must be set")
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return app.VerificationRecord{}, fmt.Errorf("read verification record: %w", err)
 	}
 	var record app.VerificationRecord
+	//nolint:musttag // verification.json intentionally preserves nested evidence field names.
 	if err := json.Unmarshal(data, &record); err != nil {
 		return app.VerificationRecord{}, fmt.Errorf("decode verification record: %w", err)
 	}
@@ -42,17 +44,22 @@ func (EvidenceWriter) ReadVerificationRecord(ctx context.Context, path string) (
 }
 
 // WriteVerificationEvidence writes verification.json into outputDir.
-func (EvidenceWriter) WriteVerificationEvidence(ctx context.Context, outputDir string, record app.VerificationRecord) (string, error) {
+func (EvidenceWriter) WriteVerificationEvidence(
+	ctx context.Context,
+	outputDir string,
+	record app.VerificationRecord,
+) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}
 	if outputDir == "" {
-		return "", fmt.Errorf("output directory must be set")
+		return "", errors.New("output directory must be set")
 	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, privateDirMode); err != nil {
 		return "", fmt.Errorf("create output directory: %w", err)
 	}
 
+	//nolint:musttag // verification.json intentionally preserves nested evidence field names.
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return "", fmt.Errorf("encode verification evidence: %w", err)

@@ -3,6 +3,7 @@ package catalog
 import (
 	"fmt"
 	"path"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -73,7 +74,11 @@ func NewIndex() Index {
 }
 
 // NewRepositoryRecord creates a catalog record from a verified manifest.
-func NewRepositoryRecord(repository verification.Repository, cfg manifest.Config, refreshedAt time.Time) (RepositoryRecord, error) {
+func NewRepositoryRecord(
+	repository verification.Repository,
+	cfg manifest.Config,
+	refreshedAt time.Time,
+) (RepositoryRecord, error) {
 	if err := validateRepository(repository); err != nil {
 		return RepositoryRecord{}, err
 	}
@@ -101,7 +106,11 @@ func (i Index) Normalize() Index {
 		i.SchemaVersion = schemaVersion
 	}
 	sort.Slice(i.Repositories, func(a, b int) bool {
-		return strings.ToLower(i.Repositories[a].Repository.String()) < strings.ToLower(i.Repositories[b].Repository.String())
+		return strings.ToLower(
+			i.Repositories[a].Repository.String(),
+		) < strings.ToLower(
+			i.Repositories[b].Repository.String(),
+		)
 	})
 	for idx := range i.Repositories {
 		sort.Slice(i.Repositories[idx].Packages, func(a, b int) bool {
@@ -220,7 +229,10 @@ func (i Index) ResolvePackage(packageName manifest.PackageName) (ResolvedPackage
 	return resolvePackageCandidates(packageName, binaryMatches)
 }
 
-func resolvePackageCandidates(packageName manifest.PackageName, candidates map[string]ResolvedPackage) (ResolvedPackage, error) {
+func resolvePackageCandidates(
+	packageName manifest.PackageName,
+	candidates map[string]ResolvedPackage,
+) (ResolvedPackage, error) {
 	matches := make([]ResolvedPackage, 0, len(candidates))
 	for _, candidate := range candidates {
 		matches = append(matches, candidate)
@@ -241,12 +253,7 @@ func resolvePackageCandidates(packageName manifest.PackageName, candidates map[s
 }
 
 func (p PackageSummary) exposesBinary(name string) bool {
-	for _, binary := range p.Binaries {
-		if binary == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(p.Binaries, name)
 }
 
 func validateRepository(repository verification.Repository) error {

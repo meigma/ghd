@@ -3,6 +3,7 @@ package sigstore
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,12 +33,20 @@ func TestVerifierVerifyConvertsSigstoreResult(t *testing.T) {
 	assert.Equal(t, verification.SLSAPredicateV1, verified.Statement.PredicateType)
 	require.Len(t, verified.Statement.Subjects, 1)
 	assert.Equal(t, expectedSubject, verified.Statement.Subjects[0].Digest)
-	assert.Equal(t, "https://github.com/owner/repo/.github/workflows/release.yml@refs/heads/main", verified.Certificate.SubjectAlternativeName)
+	assert.Equal(
+		t,
+		"https://github.com/owner/repo/.github/workflows/release.yml@refs/heads/main",
+		verified.Certificate.SubjectAlternativeName,
+	)
 	assert.Equal(t, verification.GitHubActionsOIDCIssuer, verified.Certificate.Issuer)
 	assert.Equal(t, verification.Repository{Owner: "owner", Name: "repo"}, verified.Certificate.SourceRepository)
 	assert.Equal(t, verification.SourceRef("refs/tags/v1.2.3"), verified.Certificate.SourceRef)
 	assert.Equal(t, mustDigest(t, "sha1", repeatHex("bb", 20)), verified.Certificate.SourceDigest)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml@refs/heads/main"), verified.Certificate.SignerWorkflow)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml@refs/heads/main"),
+		verified.Certificate.SignerWorkflow,
+	)
 	assert.Equal(t, mustDigest(t, "sha1", repeatHex("cc", 20)), verified.Certificate.SignerDigest)
 	assert.Equal(t, verification.RunnerEnvironmentGitHubHosted, verified.Certificate.RunnerEnvironment)
 	require.Len(t, verified.VerifiedTimestamps, 1)
@@ -144,7 +153,6 @@ func TestVerifierVerifyFailsClosed(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			adapter := newVerifierWithCore(&fakeSignedEntityVerifier{result: tt.result, err: tt.err})
 
@@ -169,7 +177,10 @@ type fakeSignedEntityVerifier struct {
 	calls  int
 }
 
-func (f *fakeSignedEntityVerifier) Verify(_ sigverify.SignedEntity, policy sigverify.PolicyBuilder) (*sigverify.VerificationResult, error) {
+func (f *fakeSignedEntityVerifier) Verify(
+	_ sigverify.SignedEntity,
+	policy sigverify.PolicyBuilder,
+) (*sigverify.VerificationResult, error) {
 	f.calls++
 	if f.err != nil {
 		return nil, f.err
@@ -243,8 +254,10 @@ func mustDigest(t *testing.T, algorithm string, value string) verification.Diges
 
 func repeatHex(value string, count int) string {
 	out := ""
+	var outSb246 strings.Builder
 	for range count {
-		out += value
+		outSb246.WriteString(value)
 	}
+	out += outSb246.String()
 	return out
 }

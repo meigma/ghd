@@ -3,12 +3,21 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/verification"
+)
+
+const (
+	packageInfoLabelWidth    = 11
+	checkSummaryLabelWidth   = 7
+	repositoryListLabelWidth = 9
+	verifySummaryLabelWidth  = 8
+	doctorSummaryLabelWidth  = 4
 )
 
 type readOnlyPresentationMode struct {
@@ -100,7 +109,15 @@ func renderPackageInfoTTY(result app.PackageInfoResult, color bool) string {
 	styles := newUIStyles(color)
 	var b strings.Builder
 
-	fmt.Fprintln(&b, styles.title.Render(fmt.Sprintf("package %s", terminalSafeText(packageTarget(result.Repository.String(), result.PackageName.String())))))
+	fmt.Fprintln(
+		&b,
+		styles.title.Render(
+			fmt.Sprintf(
+				"package %s",
+				terminalSafeText(packageTarget(result.Repository.String(), result.PackageName.String())),
+			),
+		),
+	)
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, formatRows([]uiRow{
 		{"Repository", result.Repository.String()},
@@ -108,7 +125,7 @@ func renderPackageInfoTTY(result app.PackageInfoResult, color bool) string {
 		{"Signer", string(result.SignerWorkflow)},
 		{"Tag pattern", result.TagPattern},
 		{"Binaries", strings.Join(result.Binaries, ", ")},
-	}, 11))
+	}, packageInfoLabelWidth))
 
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, styles.accent.Render("assets"))
@@ -181,10 +198,22 @@ func renderCheckResultsTTY(results []app.CheckResult, color bool) string {
 			target := terminalSafeText(packageTarget(result.Repository, result.Package))
 			switch result.Status {
 			case app.CheckStatusUpdateAvailable:
-				fmt.Fprintf(&b, "  %s  %s -> %s\n", target, terminalSafeText(result.Version), terminalSafeText(result.LatestVersion))
+				fmt.Fprintf(
+					&b,
+					"  %s  %s -> %s\n",
+					target,
+					terminalSafeText(result.Version),
+					terminalSafeText(result.LatestVersion),
+				)
 			case app.CheckStatusCannotDetermine:
-				fmt.Fprintf(&b, "  %s  %s  %s\n", target, terminalSafeText(result.Version), terminalSafeText(result.Reason))
-			default:
+				fmt.Fprintf(
+					&b,
+					"  %s  %s  %s\n",
+					target,
+					terminalSafeText(result.Version),
+					terminalSafeText(result.Reason),
+				)
+			case app.CheckStatusUpToDate:
 				fmt.Fprintf(&b, "  %s  %s\n", target, terminalSafeText(result.Version))
 			}
 		}
@@ -193,10 +222,10 @@ func renderCheckResultsTTY(results []app.CheckResult, color bool) string {
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, styles.accent.Render("summary"))
 	fmt.Fprint(&b, formatRows([]uiRow{
-		{"Updates", fmt.Sprint(len(sections[0].results))},
-		{"Current", fmt.Sprint(len(sections[1].results))},
-		{"Failed", fmt.Sprint(len(sections[2].results))},
-	}, 7))
+		{"Updates", strconv.Itoa(len(sections[0].results))},
+		{"Current", strconv.Itoa(len(sections[1].results))},
+		{"Failed", strconv.Itoa(len(sections[2].results))},
+	}, checkSummaryLabelWidth))
 	return b.String()
 }
 
@@ -221,8 +250,8 @@ func renderRepositoryListTTY(repositories []catalog.RepositoryRecord, color bool
 		fmt.Fprintln(&b, styles.accent.Render(terminalSafeText(record.Repository.String())))
 		fmt.Fprintln(&b, formatRows([]uiRow{
 			{"Refreshed", record.RefreshedAt.UTC().Format(time.RFC3339)},
-			{"Packages", fmt.Sprint(len(record.Packages))},
-		}, 9))
+			{"Packages", strconv.Itoa(len(record.Packages))},
+		}, repositoryListLabelWidth))
 		if len(record.Packages) == 0 {
 			fmt.Fprintln(&b)
 			fmt.Fprint(&b, styles.muted.Render("  No packages indexed."))
@@ -294,8 +323,14 @@ func renderVerifyResultsTTY(results []app.VerifyInstalledResult, color bool) str
 			switch result.Status {
 			case app.VerifyStatusVerified:
 				fmt.Fprintf(&b, "  %s  %s\n", target, terminalSafeText(result.Version))
-			default:
-				fmt.Fprintf(&b, "  %s  %s  %s\n", target, terminalSafeText(result.Version), terminalSafeText(result.Reason))
+			case app.VerifyStatusCannotVerify:
+				fmt.Fprintf(
+					&b,
+					"  %s  %s  %s\n",
+					target,
+					terminalSafeText(result.Version),
+					terminalSafeText(result.Reason),
+				)
 			}
 		}
 	}
@@ -303,9 +338,9 @@ func renderVerifyResultsTTY(results []app.VerifyInstalledResult, color bool) str
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, styles.accent.Render("summary"))
 	fmt.Fprint(&b, formatRows([]uiRow{
-		{"Verified", fmt.Sprint(len(sections[0].results))},
-		{"Failed", fmt.Sprint(len(sections[1].results))},
-	}, 8))
+		{"Verified", strconv.Itoa(len(sections[0].results))},
+		{"Failed", strconv.Itoa(len(sections[1].results))},
+	}, verifySummaryLabelWidth))
 	return b.String()
 }
 
@@ -340,7 +375,7 @@ func renderDoctorResultsTTY(results []app.DoctorResult, color bool) string {
 			sections[0].results = append(sections[0].results, result)
 		case app.DoctorStatusWarn:
 			sections[1].results = append(sections[1].results, result)
-		default:
+		case app.DoctorStatusPass:
 			sections[2].results = append(sections[2].results, result)
 		}
 	}
@@ -359,9 +394,9 @@ func renderDoctorResultsTTY(results []app.DoctorResult, color bool) string {
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, styles.accent.Render("summary"))
 	fmt.Fprint(&b, formatRows([]uiRow{
-		{"Fail", fmt.Sprint(len(sections[0].results))},
-		{"Warn", fmt.Sprint(len(sections[1].results))},
-		{"Pass", fmt.Sprint(len(sections[2].results))},
-	}, 4))
+		{"Fail", strconv.Itoa(len(sections[0].results))},
+		{"Warn", strconv.Itoa(len(sections[1].results))},
+		{"Pass", strconv.Itoa(len(sections[2].results))},
+	}, doctorSummaryLabelWidth))
 	return b.String()
 }

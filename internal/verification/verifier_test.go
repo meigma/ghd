@@ -3,6 +3,7 @@ package verification
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,14 +26,18 @@ func TestVerifierVerifyReleaseAssetSucceeds(t *testing.T) {
 	assert.Equal(t, "provenance-attestation", evidence.ProvenanceAttestation.AttestationID)
 	assert.Equal(t, GitHubActionsOIDCIssuer, evidence.ProvenanceAttestation.Issuer)
 	assert.Equal(t, tc.request.Repository, evidence.ProvenanceAttestation.SourceRepository)
-	assert.Equal(t, WorkflowIdentity("https://github.com/owner/repo/.github/workflows/release.yml@refs/heads/main"), evidence.ProvenanceAttestation.SignerWorkflow)
+	assert.Equal(
+		t,
+		WorkflowIdentity("https://github.com/owner/repo/.github/workflows/release.yml@refs/heads/main"),
+		evidence.ProvenanceAttestation.SignerWorkflow,
+	)
 	assert.Equal(t, tc.signerDigest, evidence.ProvenanceAttestation.SignerDigest)
 	assert.NotEmpty(t, evidence.ReleaseAttestation.VerifiedTimestamps)
 	assert.NotEmpty(t, evidence.ProvenanceAttestation.VerifiedTimestamps)
 
 	require.Len(t, tc.bundle.calls, 2)
-	assert.Equal(t, tc.releaseDigest, tc.bundle.calls[0].expectedSubject)
-	assert.Equal(t, tc.assetDigest, tc.bundle.calls[1].expectedSubject)
+	assert.Equal(t, tc.bundle.calls[0].expectedSubject, tc.releaseDigest)
+	assert.Equal(t, tc.bundle.calls[1].expectedSubject, tc.assetDigest)
 }
 
 func TestVerifierVerifyReleaseAssetHonorsPinnedSignerWorkflowRef(t *testing.T) {
@@ -179,7 +184,9 @@ func TestVerifierVerifyReleaseAssetFailsClosed(t *testing.T) {
 			name: "provenance subject digest mismatch",
 			mutate: func(tc *testContext) {
 				tc.updateResult("provenance-attestation", func(v *VerifiedAttestation) {
-					v.Statement.Subjects = []Subject{{Name: "other", Digest: mustDigest(t, "sha256", repeatHex("dd", 32))}}
+					v.Statement.Subjects = []Subject{
+						{Name: "other", Digest: mustDigest(t, "sha256", repeatHex("dd", 32))},
+					}
 				})
 			},
 			wantKind: KindProvenanceSubjectMismatch,
@@ -290,7 +297,6 @@ func TestVerifierVerifyReleaseAssetFailsClosed(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newTestContext(t)
 			tt.mutate(tc)
@@ -375,7 +381,6 @@ func TestVerifierVerifyReleaseAssetValidatesRequest(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newTestContext(t)
 			tt.mutate(tc)
@@ -438,7 +443,6 @@ func TestNewVerifierRequiresCorePorts(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewVerifier(tt.deps)
 			tt.assert(t, err)
@@ -575,7 +579,11 @@ func (f *fakeAttestationSource) FetchReleaseAttestations(context.Context, Reposi
 	return f.release, f.releaseErr
 }
 
-func (f *fakeAttestationSource) FetchProvenanceAttestations(context.Context, Repository, Digest) ([]Attestation, error) {
+func (f *fakeAttestationSource) FetchProvenanceAttestations(
+	context.Context,
+	Repository,
+	Digest,
+) ([]Attestation, error) {
 	return f.provenance, f.provenanceErr
 }
 
@@ -590,7 +598,11 @@ type fakeBundleVerifier struct {
 	calls   []verifyCall
 }
 
-func (f *fakeBundleVerifier) Verify(_ context.Context, attestation Attestation, expectedSubject Digest) (VerifiedAttestation, error) {
+func (f *fakeBundleVerifier) Verify(
+	_ context.Context,
+	attestation Attestation,
+	expectedSubject Digest,
+) (VerifiedAttestation, error) {
 	f.calls = append(f.calls, verifyCall{attestation: attestation, expectedSubject: expectedSubject})
 	if err := f.errors[attestation.ID]; err != nil {
 		return VerifiedAttestation{}, err
@@ -619,8 +631,10 @@ func mustDigest(t *testing.T, algorithm string, value string) Digest {
 
 func repeatHex(value string, count int) string {
 	var out string
+	var outSb622 strings.Builder
 	for range count {
-		out += value
+		outSb622.WriteString(value)
 	}
+	out += outSb622.String()
 	return out
 }

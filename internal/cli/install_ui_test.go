@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/meigma/ghd/internal/app"
 	"github.com/meigma/ghd/internal/verification"
@@ -47,7 +48,7 @@ func TestInstallApprovalSummaryDisclosesCustomTrustRoot(t *testing.T) {
 
 func TestInstallApprovalDetailsIncludeProvenanceFacts(t *testing.T) {
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
-	assert.NoError(t, err)
+	require.NoError(t, err)
 	approval := app.InstallApproval{
 		Repository:              verification.Repository{Owner: "owner", Name: "repo"},
 		PackageName:             "foo",

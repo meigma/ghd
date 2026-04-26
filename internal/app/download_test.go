@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +21,10 @@ func TestVerifiedDownloaderWritesEvidenceAfterSuccessfulVerification(t *testing.
 	releaseDigest := mustDigest(t, "sha1", repeatHex("bb", 20))
 	tc := newDownloadTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(tc.files.downloadDir, "foo_1.2.3_darwin_arm64.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		Repository:       repository,
@@ -56,8 +60,16 @@ func TestVerifiedDownloaderWritesEvidenceAfterSuccessfulVerification(t *testing.
 	assert.Equal(t, "foo-v1.2.3", tc.writer.record.Tag)
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.writer.record.Asset)
 	assert.Equal(t, assetDigest, tc.writer.record.Evidence.AssetDigest)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
-	assert.True(t, tc.verifier.request.Policy.ExpectedSourceRepository.IsZero(), "core verifier should apply the repository default")
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
+		tc.verifier.request.Policy.TrustedSignerWorkflow,
+	)
+	assert.True(
+		t,
+		tc.verifier.request.Policy.ExpectedSourceRepository.IsZero(),
+		"core verifier should apply the repository default",
+	)
 	assert.Equal(t, tc.files.downloadDir, tc.downloader.request.OutputDir)
 	assert.Equal(t, tc.downloader.path, tc.verifier.request.AssetPath)
 	assert.Equal(t, tc.downloader.path, tc.files.publishSourcePath)
@@ -72,7 +84,10 @@ func TestVerifiedDownloaderReportsProgressInOrder(t *testing.T) {
 	repository := verification.Repository{Owner: "owner", Name: "repo"}
 	tc := newDownloadTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.downloader.progress = []DownloadProgress{
 		{AssetName: "foo_1.2.3_darwin_arm64.tar.gz", BytesDownloaded: 128, TotalBytes: 512},
@@ -117,7 +132,10 @@ func TestVerifiedDownloaderReportsProgressInOrder(t *testing.T) {
 func TestVerifiedDownloaderDoesNotWriteEvidenceWhenVerificationFails(t *testing.T) {
 	tc := newDownloadTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(tc.files.downloadDir, "foo.tar.gz")
 	tc.verifier.err = errors.New("verification failed")
 
@@ -139,7 +157,10 @@ func TestVerifiedDownloaderDoesNotWriteEvidenceWhenVerificationFails(t *testing.
 func TestVerifiedDownloaderDoesNotWriteEvidenceWhenPublishFails(t *testing.T) {
 	tc := newDownloadTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(tc.files.downloadDir, "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		Repository:       verification.Repository{Owner: "owner", Name: "repo"},
@@ -171,7 +192,10 @@ func TestVerifiedDownloaderUsesReleaseManifestForTrustPolicy(t *testing.T) {
 	tc.manifests.refData = map[string][]byte{
 		"foo-v1.2.3": []byte(testManifest()),
 	}
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(tc.files.downloadDir, "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		Repository:       verification.Repository{Owner: "owner", Name: "repo"},
@@ -191,7 +215,11 @@ func TestVerifiedDownloaderUsesReleaseManifestForTrustPolicy(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, verification.ReleaseTag("foo-v1.2.3"), tc.assets.tag)
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.assets.assetName)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
+		tc.verifier.request.Policy.TrustedSignerWorkflow,
+	)
 }
 
 func TestVerifiedDownloaderReportsMissingPackageAndAsset(t *testing.T) {
@@ -225,7 +253,6 @@ func TestVerifiedDownloaderReportsMissingPackageAndAsset(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			tc := newDownloadTestContext(t)
 			tc.manifests.data = []byte(testManifest())
@@ -287,7 +314,11 @@ func (f *fakeManifestSource) FetchManifest(context.Context, verification.Reposit
 	return f.data, f.err
 }
 
-func (f *fakeManifestSource) FetchManifestAtRef(_ context.Context, _ verification.Repository, ref string) ([]byte, error) {
+func (f *fakeManifestSource) FetchManifestAtRef(
+	_ context.Context,
+	_ verification.Repository,
+	ref string,
+) ([]byte, error) {
 	if err, ok := f.refErr[ref]; ok {
 		return nil, err
 	}
@@ -304,7 +335,12 @@ type fakeReleaseAssetSource struct {
 	err       error
 }
 
-func (f *fakeReleaseAssetSource) ResolveReleaseAsset(_ context.Context, _ verification.Repository, tag verification.ReleaseTag, assetName string) (ReleaseAsset, error) {
+func (f *fakeReleaseAssetSource) ResolveReleaseAsset(
+	_ context.Context,
+	_ verification.Repository,
+	tag verification.ReleaseTag,
+	assetName string,
+) (ReleaseAsset, error) {
 	f.tag = tag
 	f.assetName = assetName
 	return f.asset, f.err
@@ -318,7 +354,10 @@ type fakeArtifactDownloader struct {
 	events   *[]string
 }
 
-func (f *fakeArtifactDownloader) DownloadReleaseAsset(_ context.Context, request DownloadReleaseAssetRequest) (string, error) {
+func (f *fakeArtifactDownloader) DownloadReleaseAsset(
+	_ context.Context,
+	request DownloadReleaseAssetRequest,
+) (string, error) {
 	f.request = request
 	if f.events != nil {
 		*f.events = append(*f.events, "download")
@@ -338,7 +377,10 @@ type fakeVerifier struct {
 	events   *[]string
 }
 
-func (f *fakeVerifier) VerifyReleaseAsset(_ context.Context, request verification.Request) (verification.Evidence, error) {
+func (f *fakeVerifier) VerifyReleaseAsset(
+	_ context.Context,
+	request verification.Request,
+) (verification.Evidence, error) {
 	f.request = request
 	if f.events != nil {
 		*f.events = append(*f.events, "verify")
@@ -347,7 +389,9 @@ func (f *fakeVerifier) VerifyReleaseAsset(_ context.Context, request verificatio
 		return verification.Evidence{}, f.err
 	}
 	if f.evidence.ReleaseAttestation.VerifiedTimestamps == nil {
-		f.evidence.ReleaseAttestation.VerifiedTimestamps = []verification.VerifiedTimestamp{{Kind: "test", Time: time.Unix(1700000000, 0)}}
+		f.evidence.ReleaseAttestation.VerifiedTimestamps = []verification.VerifiedTimestamp{
+			{Kind: "test", Time: time.Unix(1700000000, 0)},
+		}
 	}
 	return f.evidence, nil
 }
@@ -358,7 +402,11 @@ type fakeEvidenceWriter struct {
 	events *[]string
 }
 
-func (f *fakeEvidenceWriter) WriteVerificationEvidence(_ context.Context, outputDir string, record VerificationRecord) (string, error) {
+func (f *fakeEvidenceWriter) WriteVerificationEvidence(
+	_ context.Context,
+	outputDir string,
+	record VerificationRecord,
+) (string, error) {
 	if f.events != nil {
 		*f.events = append(*f.events, "evidence")
 	}
@@ -392,7 +440,12 @@ func (f *fakeDownloadFileSystem) CreateDownloadDir(context.Context) (string, fun
 	}, nil
 }
 
-func (f *fakeDownloadFileSystem) PublishVerifiedArtifact(_ context.Context, sourcePath string, outputDir string, assetName string) (string, error) {
+func (f *fakeDownloadFileSystem) PublishVerifiedArtifact(
+	_ context.Context,
+	sourcePath string,
+	outputDir string,
+	assetName string,
+) (string, error) {
 	if f.events != nil {
 		*f.events = append(*f.events, "publish")
 	}
@@ -456,8 +509,10 @@ func mustDigest(t *testing.T, algorithm string, value string) verification.Diges
 
 func repeatHex(value string, count int) string {
 	out := ""
+	var outSb459 strings.Builder
 	for range count {
-		out += value
+		outSb459.WriteString(value)
 	}
+	out += outSb459.String()
 	return out
 }

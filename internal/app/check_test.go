@@ -63,13 +63,17 @@ func TestInstalledPackageCheckerReportsUpToDateWhenNoNewerStableReleaseExists(t 
 func TestInstalledPackageCheckerRejectsAmbiguousTargets(t *testing.T) {
 	tc := newInstalledPackageCheckerTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/one", "foo"), []state.Binary{
-		{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/foo/extracted/one"},
-	}))
+	tc.state.index, err = tc.state.index.AddRecord(
+		withInstalledBinaries(installedRecord("owner/one", "foo"), []state.Binary{
+			{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/foo/extracted/one"},
+		}),
+	)
 	require.NoError(t, err)
-	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
-		{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
-	}))
+	tc.state.index, err = tc.state.index.AddRecord(
+		withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
+			{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
+		}),
+	)
 	require.NoError(t, err)
 
 	_, err = tc.subject.Check(context.Background(), CheckRequest{
@@ -120,12 +124,16 @@ func TestInstalledPackageCheckerAggregatesCannotDetermineResultsForAllTargets(t 
 	var err error
 	tc.state.index, err = tc.state.index.AddRecord(installedRecord("owner/one", "foo"))
 	require.NoError(t, err)
-	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
-		{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/bar/extracted/bar"},
-	}))
+	tc.state.index, err = tc.state.index.AddRecord(
+		withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
+			{Name: "bar", LinkPath: "/bin/bar", TargetPath: "/store/bar/extracted/bar"},
+		}),
+	)
 	require.NoError(t, err)
 	tc.manifests.data["owner/one"] = []byte(testManifest())
-	tc.releases.data["owner/one"] = []RepositoryRelease{{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}}}
+	tc.releases.data["owner/one"] = []RepositoryRelease{
+		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
+	}
 	tc.manifests.err["owner/two"] = errors.New("missing")
 
 	results, err := tc.subject.Check(context.Background(), CheckRequest{
@@ -161,11 +169,19 @@ func TestLatestStablePackageReleaseForPlatformChoosesHighestStableRelease(t *tes
 	manifests.refData[manifestRefKey(repository.String(), "foo-v1.10.0")] = []byte(testManifest())
 	manifests.refData[manifestRefKey(repository.String(), "foo-v1.2.4")] = []byte(testManifest())
 
-	latest, err := latestStablePackageReleaseForPlatform(context.Background(), manifests, repository, packageName, []RepositoryRelease{
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.10.0", AssetNames: []string{"foo_1.10.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.2.4", AssetNames: []string{"foo_1.2.4_darwin_arm64.tar.gz"}},
-	}, manifest.Platform{OS: "darwin", Arch: "arm64"}, minimumVersion)
+	latest, err := latestStablePackageReleaseForPlatform(
+		context.Background(),
+		manifests,
+		repository,
+		packageName,
+		[]RepositoryRelease{
+			{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
+			{TagName: "foo-v1.10.0", AssetNames: []string{"foo_1.10.0_darwin_arm64.tar.gz"}},
+			{TagName: "foo-v1.2.4", AssetNames: []string{"foo_1.2.4_darwin_arm64.tar.gz"}},
+		},
+		manifest.Platform{OS: "darwin", Arch: "arm64"},
+		minimumVersion,
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "1.10.0", latest.Version.String())
@@ -189,13 +205,21 @@ func TestLatestStablePackageReleaseForPlatformIgnoresDraftsPrereleasesAndInvalid
 	manifests.refData[manifestRefKey(repository.String(), "foo-v1.3.0")] = []byte(testManifest())
 	manifests.refData[manifestRefKey(repository.String(), "foo-v1.6.0-rc.1")] = []byte(testManifest())
 
-	latest, err := latestStablePackageReleaseForPlatform(context.Background(), manifests, repository, packageName, []RepositoryRelease{
-		{TagName: "foo-v1.4.0", Draft: true, AssetNames: []string{"foo_1.4.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.5.0", Prerelease: true, AssetNames: []string{"foo_1.5.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.6.0-rc.1", AssetNames: []string{"foo_1.6.0-rc.1_darwin_arm64.tar.gz"}},
-		{TagName: "other-v2.0.0", AssetNames: []string{"foo_2.0.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-	}, manifest.Platform{OS: "darwin", Arch: "arm64"}, minimumVersion)
+	latest, err := latestStablePackageReleaseForPlatform(
+		context.Background(),
+		manifests,
+		repository,
+		packageName,
+		[]RepositoryRelease{
+			{TagName: "foo-v1.4.0", Draft: true, AssetNames: []string{"foo_1.4.0_darwin_arm64.tar.gz"}},
+			{TagName: "foo-v1.5.0", Prerelease: true, AssetNames: []string{"foo_1.5.0_darwin_arm64.tar.gz"}},
+			{TagName: "foo-v1.6.0-rc.1", AssetNames: []string{"foo_1.6.0-rc.1_darwin_arm64.tar.gz"}},
+			{TagName: "other-v2.0.0", AssetNames: []string{"foo_2.0.0_darwin_arm64.tar.gz"}},
+			{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
+		},
+		manifest.Platform{OS: "darwin", Arch: "arm64"},
+		minimumVersion,
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "1.3.0", latest.Version.String())
@@ -217,11 +241,19 @@ func TestLatestStablePackageReleaseForPlatformSkipsMissingManifestAndAssetMismat
 	manifests.refErr[manifestRefKey(repository.String(), "foo-v1.4.0")] = errors.New("missing")
 	manifests.refData[manifestRefKey(repository.String(), "foo-v1.3.0")] = []byte(testManifest())
 
-	latest, err := latestStablePackageReleaseForPlatform(context.Background(), manifests, repository, packageName, []RepositoryRelease{
-		{TagName: "foo-v1.4.0", AssetNames: []string{"foo_1.4.0_darwin_arm64.tar.gz"}},
-		{TagName: "foo-v1.3.1", AssetNames: []string{"foo_1.3.1_linux_amd64.tar.gz"}},
-		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
-	}, manifest.Platform{OS: "darwin", Arch: "arm64"}, minimumVersion)
+	latest, err := latestStablePackageReleaseForPlatform(
+		context.Background(),
+		manifests,
+		repository,
+		packageName,
+		[]RepositoryRelease{
+			{TagName: "foo-v1.4.0", AssetNames: []string{"foo_1.4.0_darwin_arm64.tar.gz"}},
+			{TagName: "foo-v1.3.1", AssetNames: []string{"foo_1.3.1_linux_amd64.tar.gz"}},
+			{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
+		},
+		manifest.Platform{OS: "darwin", Arch: "arm64"},
+		minimumVersion,
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "1.3.0", latest.Version.String())
@@ -300,7 +332,11 @@ func (f *fakeManifestRouter) FetchManifest(_ context.Context, repository verific
 	return nil, errors.New("manifest not found")
 }
 
-func (f *fakeManifestRouter) FetchManifestAtRef(_ context.Context, repository verification.Repository, ref string) ([]byte, error) {
+func (f *fakeManifestRouter) FetchManifestAtRef(
+	_ context.Context,
+	repository verification.Repository,
+	ref string,
+) ([]byte, error) {
 	key := manifestRefKey(repository.String(), ref)
 	if err, ok := f.refErr[key]; ok {
 		return nil, err
@@ -321,7 +357,10 @@ type fakeRepositoryReleaseSource struct {
 	requests []verification.Repository
 }
 
-func (f *fakeRepositoryReleaseSource) ListRepositoryReleases(_ context.Context, repository verification.Repository) ([]RepositoryRelease, error) {
+func (f *fakeRepositoryReleaseSource) ListRepositoryReleases(
+	_ context.Context,
+	repository verification.Repository,
+) ([]RepositoryRelease, error) {
 	f.requests = append(f.requests, repository)
 	if err, ok := f.err[repository.String()]; ok {
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -29,6 +30,10 @@ const (
 	DefaultAPIVersion = "2026-03-10"
 	defaultPerPage    = 100
 	defaultMaxResults = 1000
+	manifestMaxBytes  = 1024 * 1024
+	statusBodyLimit   = 1024
+	minLinkSegments   = 2
+	downloadDirMode   = 0o750
 
 	defaultMaxReleaseAssetBytes                  int64 = 512 * 1024 * 1024
 	defaultMaxAttestationBundleCompressedBytes   int64 = 16 * 1024 * 1024
@@ -144,7 +149,7 @@ func NewClient(options ...Option) (*Client, error) {
 		return nil, fmt.Errorf("parse GitHub base URL: %w", err)
 	}
 	if baseURL.Scheme == "" || baseURL.Host == "" {
-		return nil, fmt.Errorf("GitHub base URL must be absolute")
+		return nil, errors.New("GitHub base URL must be absolute")
 	}
 
 	apiVersion := opts.apiVersion
@@ -157,28 +162,28 @@ func NewClient(options ...Option) (*Client, error) {
 		maxAttestations = defaultMaxResults
 	}
 	if maxAttestations < 0 {
-		return nil, fmt.Errorf("max attestations must be non-negative")
+		return nil, errors.New("max attestations must be non-negative")
 	}
 	maxReleaseAssetBytes := opts.maxReleaseAssetBytes
 	if maxReleaseAssetBytes == 0 {
 		maxReleaseAssetBytes = defaultMaxReleaseAssetBytes
 	}
 	if maxReleaseAssetBytes < 0 {
-		return nil, fmt.Errorf("max release asset bytes must be non-negative")
+		return nil, errors.New("max release asset bytes must be non-negative")
 	}
 	maxAttestationBundleCompressedBytes := opts.maxAttestationBundleCompressedBytes
 	if maxAttestationBundleCompressedBytes == 0 {
 		maxAttestationBundleCompressedBytes = defaultMaxAttestationBundleCompressedBytes
 	}
 	if maxAttestationBundleCompressedBytes < 0 {
-		return nil, fmt.Errorf("max attestation bundle compressed bytes must be non-negative")
+		return nil, errors.New("max attestation bundle compressed bytes must be non-negative")
 	}
 	maxAttestationBundleDecompressedBytes := opts.maxAttestationBundleDecompressedBytes
 	if maxAttestationBundleDecompressedBytes == 0 {
 		maxAttestationBundleDecompressedBytes = defaultMaxAttestationBundleDecompressedBytes
 	}
 	if maxAttestationBundleDecompressedBytes < 0 {
-		return nil, fmt.Errorf("max attestation bundle decompressed bytes must be non-negative")
+		return nil, errors.New("max attestation bundle decompressed bytes must be non-negative")
 	}
 
 	return &Client{
@@ -195,18 +200,22 @@ func NewClient(options ...Option) (*Client, error) {
 }
 
 // ResolveReleaseTag resolves a GitHub release tag to release and source digests.
-func (c *Client) ResolveReleaseTag(ctx context.Context, repository verification.Repository, tag verification.ReleaseTag) (verification.ReleaseResolution, error) {
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, releaseTagPath(repository, tag), nil)
+func (c *Client) ResolveReleaseTag(
+	ctx context.Context,
+	repository verification.Repository,
+	tag verification.ReleaseTag,
+) (verification.ReleaseResolution, error) {
+	req, err := c.newGitHubRequest(ctx, releaseTagPath(repository, tag), nil)
 	if err != nil {
 		return verification.ReleaseResolution{}, err
 	}
 
 	var ref gitRefResponse
-	if err := c.doJSON(req, &ref); err != nil {
-		return verification.ReleaseResolution{}, err
+	if decodeErr := c.doJSON(req, &ref); decodeErr != nil {
+		return verification.ReleaseResolution{}, decodeErr
 	}
 	if ref.Object.SHA == "" {
-		return verification.ReleaseResolution{}, fmt.Errorf("GitHub ref response did not include object SHA")
+		return verification.ReleaseResolution{}, errors.New("GitHub ref response did not include object SHA")
 	}
 	releaseDigest, err := verification.NewDigest("sha1", ref.Object.SHA)
 	if err != nil {
@@ -222,21 +231,32 @@ func (c *Client) ResolveReleaseTag(ctx context.Context, repository verification.
 	}, nil
 }
 
-func (c *Client) resolveSourceDigest(ctx context.Context, repository verification.Repository, object gitObjectResponse) (verification.Digest, error) {
+func (c *Client) resolveSourceDigest(
+	ctx context.Context,
+	repository verification.Repository,
+	object gitObjectResponse,
+) (verification.Digest, error) {
 	switch object.Type {
 	case "commit":
 		return verification.NewDigest("sha1", object.SHA)
 	case "tag":
 		return c.resolveAnnotatedTagSourceDigest(ctx, repository, object.SHA)
 	case "":
-		return verification.Digest{}, fmt.Errorf("GitHub ref response did not include object type")
+		return verification.Digest{}, errors.New("GitHub ref response did not include object type")
 	default:
-		return verification.Digest{}, fmt.Errorf("GitHub ref object type %q cannot be used as a release source", object.Type)
+		return verification.Digest{}, fmt.Errorf(
+			"GitHub ref object type %q cannot be used as a release source",
+			object.Type,
+		)
 	}
 }
 
-func (c *Client) resolveAnnotatedTagSourceDigest(ctx context.Context, repository verification.Repository, tagObjectSHA string) (verification.Digest, error) {
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, tagObjectPath(repository, tagObjectSHA), nil)
+func (c *Client) resolveAnnotatedTagSourceDigest(
+	ctx context.Context,
+	repository verification.Repository,
+	tagObjectSHA string,
+) (verification.Digest, error) {
+	req, err := c.newGitHubRequest(ctx, tagObjectPath(repository, tagObjectSHA), nil)
 	if err != nil {
 		return verification.Digest{}, err
 	}
@@ -246,10 +266,13 @@ func (c *Client) resolveAnnotatedTagSourceDigest(ctx context.Context, repository
 		return verification.Digest{}, err
 	}
 	if tag.Object.SHA == "" {
-		return verification.Digest{}, fmt.Errorf("GitHub tag response did not include object SHA")
+		return verification.Digest{}, errors.New("GitHub tag response did not include object SHA")
 	}
 	if tag.Object.Type != "commit" {
-		return verification.Digest{}, fmt.Errorf("GitHub tag object type %q cannot be used as a release source", tag.Object.Type)
+		return verification.Digest{}, fmt.Errorf(
+			"GitHub tag object type %q cannot be used as a release source",
+			tag.Object.Type,
+		)
 	}
 	return verification.NewDigest("sha1", tag.Object.SHA)
 }
@@ -260,10 +283,14 @@ func (c *Client) FetchManifest(ctx context.Context, repository verification.Repo
 }
 
 // FetchManifestAtRef returns the root ghd.toml for repository at ref.
-func (c *Client) FetchManifestAtRef(ctx context.Context, repository verification.Repository, ref string) ([]byte, error) {
+func (c *Client) FetchManifestAtRef(
+	ctx context.Context,
+	repository verification.Repository,
+	ref string,
+) ([]byte, error) {
 	ref = strings.TrimSpace(ref)
 	if ref == "" {
-		return nil, fmt.Errorf("manifest ref must be set")
+		return nil, errors.New("manifest ref must be set")
 	}
 	return c.fetchManifest(ctx, repository, ref)
 }
@@ -273,7 +300,11 @@ func (c *Client) fetchManifest(ctx context.Context, repository verification.Repo
 	if ref != "" {
 		query.Set("ref", ref)
 	}
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, rawPath(fmt.Sprintf("repos/%s/%s/contents/ghd.toml", repository.Owner, repository.Name)), query)
+	req, err := c.newGitHubRequest(
+		ctx,
+		rawPath(fmt.Sprintf("repos/%s/%s/contents/ghd.toml", repository.Owner, repository.Name)),
+		query,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -283,18 +314,25 @@ func (c *Client) fetchManifest(ctx context.Context, repository verification.Repo
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 1024*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, manifestMaxBytes))
 	if err != nil {
-		return nil, fmt.Errorf("read ghd.toml response: %w", err)
+		closeErr := closeResponseBody(resp, "ghd.toml")
+		return nil, errors.Join(fmt.Errorf("read ghd.toml response: %w", err), closeErr)
+	}
+	if err := closeResponseBody(resp, "ghd.toml"); err != nil {
+		return nil, err
 	}
 	return decodeManifestBody(body)
 }
 
 // ResolveReleaseAsset returns the exact matching asset for tag.
-func (c *Client) ResolveReleaseAsset(ctx context.Context, repository verification.Repository, tag verification.ReleaseTag, assetName string) (app.ReleaseAsset, error) {
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, releaseByTagPath(repository, tag), nil)
+func (c *Client) ResolveReleaseAsset(
+	ctx context.Context,
+	repository verification.Repository,
+	tag verification.ReleaseTag,
+	assetName string,
+) (app.ReleaseAsset, error) {
+	req, err := c.newGitHubRequest(ctx, releaseByTagPath(repository, tag), nil)
 	if err != nil {
 		return app.ReleaseAsset{}, err
 	}
@@ -324,11 +362,14 @@ func (c *Client) ResolveReleaseAsset(ctx context.Context, repository verificatio
 }
 
 // ListRepositoryReleases returns the repository's GitHub releases.
-func (c *Client) ListRepositoryReleases(ctx context.Context, repository verification.Repository) ([]app.RepositoryRelease, error) {
+func (c *Client) ListRepositoryReleases(
+	ctx context.Context,
+	repository verification.Repository,
+) ([]app.RepositoryRelease, error) {
 	query := url.Values{}
 	query.Set("per_page", strconv.Itoa(defaultPerPage))
 
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, releasesPath(repository), query)
+	req, err := c.newGitHubRequest(ctx, releasesPath(repository), query)
 	if err != nil {
 		return nil, err
 	}
@@ -353,9 +394,12 @@ func (c *Client) ListRepositoryReleases(ctx context.Context, repository verifica
 			})
 		}
 		next, err := c.nextRequest(ctx, resp)
-		resp.Body.Close()
+		closeErr := closeResponseBody(resp, "GitHub releases")
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, closeErr)
+		}
+		if closeErr != nil {
+			return nil, closeErr
 		}
 		req = next
 	}
@@ -364,7 +408,7 @@ func (c *Client) ListRepositoryReleases(ctx context.Context, repository verifica
 
 // CheckRateLimit returns the current GitHub core API rate-limit status.
 func (c *Client) CheckRateLimit(ctx context.Context) (app.GitHubRateLimitStatus, error) {
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, rateLimitPath(), nil)
+	req, err := c.newGitHubRequest(ctx, rateLimitPath(), nil)
 	if err != nil {
 		return app.GitHubRateLimitStatus{}, err
 	}
@@ -374,7 +418,9 @@ func (c *Client) CheckRateLimit(ctx context.Context) (app.GitHubRateLimitStatus,
 		return app.GitHubRateLimitStatus{}, err
 	}
 	if response.Resources.Core.Limit <= 0 {
-		return app.GitHubRateLimitStatus{}, fmt.Errorf("GitHub rate limit response did not include resources.core.limit")
+		return app.GitHubRateLimitStatus{}, errors.New(
+			"GitHub rate limit response did not include resources.core.limit",
+		)
 	}
 	return app.GitHubRateLimitStatus{
 		CoreLimit:     response.Resources.Core.Limit,
@@ -384,22 +430,24 @@ func (c *Client) CheckRateLimit(ctx context.Context) (app.GitHubRateLimitStatus,
 }
 
 // DownloadReleaseAsset downloads asset into outputDir without setting executable bits.
+//
+//nolint:funlen // Download flow is linear resource management with rollback and progress reporting.
 func (c *Client) DownloadReleaseAsset(ctx context.Context, request app.DownloadReleaseAssetRequest) (string, error) {
 	asset := request.Asset
 	outputDir := request.OutputDir
 	if asset.Name == "" {
-		return "", fmt.Errorf("release asset name must be set")
+		return "", errors.New("release asset name must be set")
 	}
 	if asset.DownloadURL == "" {
-		return "", fmt.Errorf("release asset download URL must be set")
+		return "", errors.New("release asset download URL must be set")
 	}
 	if outputDir == "" {
-		return "", fmt.Errorf("output directory must be set")
+		return "", errors.New("output directory must be set")
 	}
 	if err := validateAssetFilename(asset.Name); err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+	if err := os.MkdirAll(outputDir, downloadDirMode); err != nil {
 		return "", fmt.Errorf("create output directory: %w", err)
 	}
 
@@ -419,12 +467,14 @@ func (c *Client) DownloadReleaseAsset(ctx context.Context, request app.DownloadR
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return "", httpStatusError(resp)
 	}
-	totalBytes := resp.ContentLength
-	if totalBytes < 0 {
-		totalBytes = 0
-	}
+	totalBytes := max(resp.ContentLength, 0)
 	if totalBytes > c.maxReleaseAssetBytes {
-		return "", fmt.Errorf("release asset %q is %d bytes, exceeding limit %d", asset.Name, totalBytes, c.maxReleaseAssetBytes)
+		return "", fmt.Errorf(
+			"release asset %q is %d bytes, exceeding limit %d",
+			asset.Name,
+			totalBytes,
+			c.maxReleaseAssetBytes,
+		)
 	}
 	if request.Progress != nil {
 		request.Progress(app.DownloadProgress{
@@ -501,22 +551,35 @@ func (w *downloadProgressWriter) Write(p []byte) (int, error) {
 }
 
 // FetchReleaseAttestations returns GitHub release attestations for a tag ref digest.
-func (c *Client) FetchReleaseAttestations(ctx context.Context, repository verification.Repository, tagDigest verification.Digest) ([]verification.Attestation, error) {
+func (c *Client) FetchReleaseAttestations(
+	ctx context.Context,
+	repository verification.Repository,
+	tagDigest verification.Digest,
+) ([]verification.Attestation, error) {
 	return c.fetchAttestations(ctx, repository, tagDigest, "release")
 }
 
 // FetchProvenanceAttestations returns GitHub provenance attestations for an artifact digest.
-func (c *Client) FetchProvenanceAttestations(ctx context.Context, repository verification.Repository, artifactDigest verification.Digest) ([]verification.Attestation, error) {
+func (c *Client) FetchProvenanceAttestations(
+	ctx context.Context,
+	repository verification.Repository,
+	artifactDigest verification.Digest,
+) ([]verification.Attestation, error) {
 	return c.fetchAttestations(ctx, repository, artifactDigest, "provenance")
 }
 
-func (c *Client) fetchAttestations(ctx context.Context, repository verification.Repository, digest verification.Digest, predicateType string) ([]verification.Attestation, error) {
+func (c *Client) fetchAttestations(
+	ctx context.Context,
+	repository verification.Repository,
+	digest verification.Digest,
+	predicateType string,
+) ([]verification.Attestation, error) {
 	path := rawPath(fmt.Sprintf("repos/%s/%s/attestations/%s", repository.Owner, repository.Name, digest.String()))
 	query := url.Values{}
 	query.Set("per_page", strconv.Itoa(defaultPerPage))
 	query.Set("predicate_type", predicateType)
 
-	req, err := c.newGitHubRequest(ctx, http.MethodGet, path, query)
+	req, err := c.newGitHubRequest(ctx, path, query)
 	if err != nil {
 		return nil, err
 	}
@@ -531,28 +594,34 @@ func (c *Client) fetchAttestations(ctx context.Context, repository verification.
 
 		for i, attestation := range response.Attestations {
 			if attestation.BundleURL == "" {
-				resp.Body.Close()
-				return nil, fmt.Errorf("attestation response entry %d has no bundle_url", i)
+				return nil, errors.Join(
+					fmt.Errorf("attestation response entry %d has no bundle_url", i),
+					closeResponseBody(resp, "GitHub attestations"),
+				)
 			}
-			bundle, err := c.fetchBundle(ctx, attestation.BundleURL)
-			if err != nil {
-				resp.Body.Close()
-				return nil, err
+			bundle, bundleErr := c.fetchBundle(ctx, attestation.BundleURL)
+			if bundleErr != nil {
+				return nil, errors.Join(bundleErr, closeResponseBody(resp, "GitHub attestations"))
 			}
 			out = append(out, verification.Attestation{
 				ID:     attestation.id(),
 				Bundle: bundle,
 			})
 			if c.maxAttestations > 0 && len(out) > c.maxAttestations {
-				resp.Body.Close()
-				return nil, fmt.Errorf("GitHub returned more than %d attestations for %s", c.maxAttestations, digest)
+				return nil, errors.Join(
+					fmt.Errorf("GitHub returned more than %d attestations for %s", c.maxAttestations, digest),
+					closeResponseBody(resp, "GitHub attestations"),
+				)
 			}
 		}
 
 		next, err := c.nextRequest(ctx, resp)
-		resp.Body.Close()
+		closeErr := closeResponseBody(resp, "GitHub attestations")
 		if err != nil {
-			return nil, err
+			return nil, errors.Join(err, closeErr)
+		}
+		if closeErr != nil {
+			return nil, closeErr
 		}
 		req = next
 	}
@@ -566,7 +635,7 @@ func (c *Client) fetchBundle(ctx context.Context, bundleURL string) (*sigbundle.
 		return nil, fmt.Errorf("parse bundle_url: %w", err)
 	}
 	if parsed.Scheme == "" || parsed.Host == "" {
-		return nil, fmt.Errorf("bundle_url must be absolute")
+		return nil, errors.New("bundle_url must be absolute")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, bundleURL, nil)
@@ -595,7 +664,11 @@ func (c *Client) fetchBundle(ctx context.Context, bundleURL string) (*sigbundle.
 		return nil, fmt.Errorf("decompress attestation bundle: %w", err)
 	}
 	if int64(decodedLen) > c.maxAttestationBundleDecompressedBytes {
-		return nil, fmt.Errorf("attestation bundle expands to %d bytes, exceeding limit %d", decodedLen, c.maxAttestationBundleDecompressedBytes)
+		return nil, fmt.Errorf(
+			"attestation bundle expands to %d bytes, exceeding limit %d",
+			decodedLen,
+			c.maxAttestationBundleDecompressedBytes,
+		)
 	}
 
 	decompressed, err := snappy.Decode(nil, body)
@@ -604,8 +677,8 @@ func (c *Client) fetchBundle(ctx context.Context, bundleURL string) (*sigbundle.
 	}
 
 	var pbBundle protobundle.Bundle
-	if err := protojson.Unmarshal(decompressed, &pbBundle); err != nil {
-		return nil, fmt.Errorf("parse attestation bundle: %w", err)
+	if unmarshalErr := protojson.Unmarshal(decompressed, &pbBundle); unmarshalErr != nil {
+		return nil, fmt.Errorf("parse attestation bundle: %w", unmarshalErr)
 	}
 
 	bundle, err := sigbundle.NewBundle(&pbBundle)
@@ -615,10 +688,10 @@ func (c *Client) fetchBundle(ctx context.Context, bundleURL string) (*sigbundle.
 	return bundle, nil
 }
 
-func (c *Client) newGitHubRequest(ctx context.Context, method string, path rawPath, query url.Values) (*http.Request, error) {
+func (c *Client) newGitHubRequest(ctx context.Context, path rawPath, query url.Values) (*http.Request, error) {
 	u := c.resolvePath(path)
 	u.RawQuery = query.Encode()
-	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -644,7 +717,7 @@ func (c *Client) newGitHubRequestFromURL(ctx context.Context, next string) (*htt
 
 func (c *Client) setGitHubHeaders(req *http.Request) {
 	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("X-GitHub-Api-Version", c.apiVersion)
+	req.Header.Set("X-Github-Api-Version", c.apiVersion)
 	if c.token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.token)
 	}
@@ -672,34 +745,35 @@ func (c *Client) doJSON(req *http.Request, target any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-	return nil
+	return closeResponseBody(resp, "GitHub")
 }
 
 func (c *Client) doRawResponse(req *http.Request) (*http.Response, error) {
+	//nolint:gosec // Requests are constructed from the configured GitHub API base URL.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		defer resp.Body.Close()
-		return nil, httpStatusError(resp)
+		statusErr := httpStatusError(resp)
+		return nil, errors.Join(statusErr, closeResponseBody(resp, "GitHub error"))
 	}
 	return resp, nil
 }
 
 func (c *Client) doJSONResponse(req *http.Request, target any) (*http.Response, error) {
+	//nolint:gosec // Requests are constructed from the configured GitHub API base URL.
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		defer resp.Body.Close()
-		return nil, httpStatusError(resp)
+		statusErr := httpStatusError(resp)
+		return nil, errors.Join(statusErr, closeResponseBody(resp, "GitHub error"))
 	}
 	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
-		resp.Body.Close()
-		return nil, fmt.Errorf("decode GitHub response: %w", err)
+		decodeErr := fmt.Errorf("decode GitHub response: %w", err)
+		return nil, errors.Join(decodeErr, closeResponseBody(resp, "GitHub"))
 	}
 	return resp, nil
 }
@@ -707,6 +781,7 @@ func (c *Client) doJSONResponse(req *http.Request, target any) (*http.Response, 
 func (c *Client) nextRequest(ctx context.Context, resp *http.Response) (*http.Request, error) {
 	next := parseNextLink(resp.Header.Get("Link"))
 	if next == "" {
+		//nolint:nilnil // A nil request with nil error means pagination is complete.
 		return nil, nil
 	}
 	return c.newGitHubRequestFromURL(ctx, next)
@@ -740,7 +815,7 @@ func readBoundedResponse(resp *http.Response, limit int64, label string) ([]byte
 }
 
 func httpStatusError(resp *http.Response) error {
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, statusBodyLimit))
 	message := strings.TrimSpace(string(body))
 	if message == "" {
 		return fmt.Errorf("%s %s returned HTTP %d", resp.Request.Method, resp.Request.URL, resp.StatusCode)
@@ -749,9 +824,9 @@ func httpStatusError(resp *http.Response) error {
 }
 
 func parseNextLink(header string) string {
-	for _, part := range strings.Split(header, ",") {
+	for part := range strings.SplitSeq(header, ",") {
 		segments := strings.Split(part, ";")
-		if len(segments) < 2 {
+		if len(segments) < minLinkSegments {
 			continue
 		}
 		target := strings.TrimSpace(segments[0])
@@ -765,6 +840,13 @@ func parseNextLink(header string) string {
 		}
 	}
 	return ""
+}
+
+func closeResponseBody(resp *http.Response, label string) error {
+	if err := resp.Body.Close(); err != nil {
+		return fmt.Errorf("close %s response: %w", label, err)
+	}
+	return nil
 }
 
 func releaseTagPath(repository verification.Repository, tag verification.ReleaseTag) rawPath {
@@ -835,6 +917,7 @@ type contentResponse struct {
 
 func decodeManifestBody(body []byte) ([]byte, error) {
 	var content contentResponse
+	//nolint:nilerr // A decode miss means the response is already raw ghd.toml, not a content API envelope.
 	if err := json.Unmarshal(body, &content); err != nil {
 		return body, nil
 	}

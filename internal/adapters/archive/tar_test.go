@@ -138,7 +138,6 @@ func TestTarGzipExtractorVerifiesGzipStream(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewTarGzipExtractor().MaterializeBinaries(context.Background(), app.ArtifactMaterializationRequest{
 				ArtifactPath:   tt.prepare(t),
@@ -161,7 +160,7 @@ func TestTarGzipExtractorRejectsUnsafeEntries(t *testing.T) {
 		{
 			name:      "parent traversal",
 			entry:     tarTestEntry{name: "../evil", body: "x", typeflag: tar.TypeReg, mode: 0o755},
-			wantError: "must not contain ..",
+			wantError: "must not contain parent directory segments",
 		},
 		{
 			name:      "absolute path",
@@ -191,7 +190,6 @@ func TestTarGzipExtractorRejectsUnsafeEntries(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			archivePath := writeTarGzip(t, []tarTestEntry{tt.entry})
 
@@ -240,7 +238,6 @@ func TestTarGzipExtractorRejectsMissingOrNonExecutableBinary(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			archivePath := writeTarGzip(t, []tarTestEntry{tt.entry})
 
@@ -286,7 +283,11 @@ func TestTarGzipExtractorRejectsTarBombLimits(t *testing.T) {
 	t.Run("entry count", func(t *testing.T) {
 		entries := make([]tarTestEntry, MaxEntries+1)
 		for i := range entries {
-			entries[i] = tarTestEntry{name: filepath.ToSlash(filepath.Join("dirs", fmt.Sprintf("d%d", i+1))), typeflag: tar.TypeDir, mode: 0o755}
+			entries[i] = tarTestEntry{
+				name:     filepath.ToSlash(filepath.Join("dirs", fmt.Sprintf("d%d", i+1))),
+				typeflag: tar.TypeDir,
+				mode:     0o755,
+			}
 		}
 		archivePath := writeTarGzip(t, entries)
 
@@ -319,7 +320,7 @@ func writeTarGzip(t *testing.T, entries []tarTestEntry) string {
 	tarWriter := tar.NewWriter(gzipWriter)
 	for _, entry := range entries {
 		size := int64(len(entry.body))
-		if entry.typeflag != tar.TypeReg && entry.typeflag != tar.TypeRegA {
+		if entry.typeflag != tar.TypeReg {
 			size = 0
 		}
 		require.NoError(t, tarWriter.WriteHeader(&tar.Header{

@@ -15,6 +15,7 @@ type installOptions struct {
 	binDir   string
 }
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newInstallCommand(options Options) *cobra.Command {
 	var install installOptions
 	cmd := &cobra.Command{
@@ -52,21 +53,21 @@ ghd install owner/repo/foo@1.2.3 --store-dir ./store --bin-dir ./bin
 				if status != nil {
 					status.Update("Refreshing repository index")
 				}
-				if _, err := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
+				if _, refreshErr := runtime.RefreshRepositories(cmd.Context(), app.RepositoryRefreshRequest{
 					All:      true,
 					IndexDir: cfg.IndexDir,
-				}); err != nil {
-					return err
+				}); refreshErr != nil {
+					return refreshErr
 				}
 				if status != nil {
 					status.Update("Resolving package")
 				}
-				resolved, err := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
+				resolved, resolveErr := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
 					PackageName: target.packageName,
 					IndexDir:    cfg.IndexDir,
 				})
-				if err != nil {
-					return err
+				if resolveErr != nil {
+					return resolveErr
 				}
 				target.repository = resolved.Repository
 				target.packageName = resolved.PackageName

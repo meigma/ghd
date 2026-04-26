@@ -32,7 +32,9 @@ func TestIndexUpsertsAndRemovesRepositories(t *testing.T) {
 func TestIndexResolvesUnqualifiedPackages(t *testing.T) {
 	index := NewIndex()
 	var err error
-	index, err = index.UpsertRepository(newRecord(t, verification.Repository{Owner: "owner", Name: "repo"}, "foo", "Foo CLI"))
+	index, err = index.UpsertRepository(
+		newRecord(t, verification.Repository{Owner: "owner", Name: "repo"}, "foo", "Foo CLI"),
+	)
 	require.NoError(t, err)
 
 	resolved, err := index.ResolvePackage("foo")
@@ -45,7 +47,15 @@ func TestIndexResolvesUnqualifiedPackages(t *testing.T) {
 func TestIndexResolvesUnqualifiedBinaryNames(t *testing.T) {
 	index := NewIndex()
 	var err error
-	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "repo"}, "bar", "Bar CLI", []manifest.Binary{{Path: "bin/foo"}}))
+	index, err = index.UpsertRepository(
+		newRecordWithBinaries(
+			t,
+			verification.Repository{Owner: "owner", Name: "repo"},
+			"bar",
+			"Bar CLI",
+			[]manifest.Binary{{Path: "bin/foo"}},
+		),
+	)
 	require.NoError(t, err)
 
 	resolved, err := index.ResolvePackage("foo")
@@ -58,9 +68,13 @@ func TestIndexResolvesUnqualifiedBinaryNames(t *testing.T) {
 func TestIndexReportsAmbiguousPackages(t *testing.T) {
 	index := NewIndex()
 	var err error
-	index, err = index.UpsertRepository(newRecord(t, verification.Repository{Owner: "owner", Name: "one"}, "foo", "Foo CLI"))
+	index, err = index.UpsertRepository(
+		newRecord(t, verification.Repository{Owner: "owner", Name: "one"}, "foo", "Foo CLI"),
+	)
 	require.NoError(t, err)
-	index, err = index.UpsertRepository(newRecord(t, verification.Repository{Owner: "owner", Name: "two"}, "foo", "Other Foo CLI"))
+	index, err = index.UpsertRepository(
+		newRecord(t, verification.Repository{Owner: "owner", Name: "two"}, "foo", "Other Foo CLI"),
+	)
 	require.NoError(t, err)
 
 	_, err = index.ResolvePackage("foo")
@@ -79,9 +93,19 @@ func TestIndexReportsAmbiguousPackages(t *testing.T) {
 func TestIndexPrefersExactPackageNameOverBinaryNames(t *testing.T) {
 	index := NewIndex()
 	var err error
-	index, err = index.UpsertRepository(newRecord(t, verification.Repository{Owner: "owner", Name: "one"}, "foo", "Foo CLI"))
+	index, err = index.UpsertRepository(
+		newRecord(t, verification.Repository{Owner: "owner", Name: "one"}, "foo", "Foo CLI"),
+	)
 	require.NoError(t, err)
-	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "two"}, "bar", "Bar CLI", []manifest.Binary{{Path: "bin/foo"}}))
+	index, err = index.UpsertRepository(
+		newRecordWithBinaries(
+			t,
+			verification.Repository{Owner: "owner", Name: "two"},
+			"bar",
+			"Bar CLI",
+			[]manifest.Binary{{Path: "bin/foo"}},
+		),
+	)
 	require.NoError(t, err)
 
 	resolved, err := index.ResolvePackage("foo")
@@ -94,9 +118,25 @@ func TestIndexPrefersExactPackageNameOverBinaryNames(t *testing.T) {
 func TestIndexReportsAmbiguousBinaryNamesWithoutExactPackageMatch(t *testing.T) {
 	index := NewIndex()
 	var err error
-	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "one"}, "bar", "Bar CLI", []manifest.Binary{{Path: "bin/foo"}}))
+	index, err = index.UpsertRepository(
+		newRecordWithBinaries(
+			t,
+			verification.Repository{Owner: "owner", Name: "one"},
+			"bar",
+			"Bar CLI",
+			[]manifest.Binary{{Path: "bin/foo"}},
+		),
+	)
 	require.NoError(t, err)
-	index, err = index.UpsertRepository(newRecordWithBinaries(t, verification.Repository{Owner: "owner", Name: "two"}, "baz", "Baz CLI", []manifest.Binary{{Path: "bin/foo"}}))
+	index, err = index.UpsertRepository(
+		newRecordWithBinaries(
+			t,
+			verification.Repository{Owner: "owner", Name: "two"},
+			"baz",
+			"Baz CLI",
+			[]manifest.Binary{{Path: "bin/foo"}},
+		),
+	)
 	require.NoError(t, err)
 
 	_, err = index.ResolvePackage("foo")
@@ -138,7 +178,13 @@ func newRecord(t *testing.T, repository verification.Repository, name string, de
 	return newRecordWithBinaries(t, repository, name, description, []manifest.Binary{{Path: "bin/" + name}})
 }
 
-func newRecordWithBinaries(t *testing.T, repository verification.Repository, name string, description string, binaries []manifest.Binary) RepositoryRecord {
+func newRecordWithBinaries(
+	t *testing.T,
+	repository verification.Repository,
+	name string,
+	description string,
+	binaries []manifest.Binary,
+) RepositoryRecord {
 	t.Helper()
 	record, err := NewRepositoryRecord(repository, manifest.Config{
 		Version: manifest.SchemaVersion,

@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/meigma/ghd/internal/app"
@@ -22,6 +23,11 @@ const (
 	MaxUncompressedBytes int64 = 100 * 1024 * 1024
 	// MaxEntries is the maximum number of entries accepted from one archive.
 	MaxEntries = 10_000
+
+	defaultFileMode    os.FileMode = 0o644
+	defaultDirMode     os.FileMode = 0o750
+	executableFileMode os.FileMode = 0o755
+	archiveModeMask    os.FileMode = 0o022
 )
 
 // TarGzipExtractor extracts .tar.gz archives.
@@ -33,7 +39,10 @@ func NewTarGzipExtractor() TarGzipExtractor {
 }
 
 // MaterializeBinaries extracts a verified tar.gz archive.
-func (TarGzipExtractor) MaterializeBinaries(ctx context.Context, request app.ArtifactMaterializationRequest) ([]app.MaterializedBinary, error) {
+func (TarGzipExtractor) MaterializeBinaries(
+	ctx context.Context,
+	request app.ArtifactMaterializationRequest,
+) ([]app.MaterializedBinary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -45,17 +54,17 @@ func (TarGzipExtractor) MaterializeBinaries(ctx context.Context, request app.Art
 		return nil, fmt.Errorf("unsupported archive type for %s", archiveName)
 	}
 	if strings.TrimSpace(request.DestinationDir) == "" {
-		return nil, fmt.Errorf("extraction destination must be set")
+		return nil, errors.New("extraction destination must be set")
 	}
 	if len(request.Binaries) == 0 {
-		return nil, fmt.Errorf("at least one binary must be configured")
+		return nil, errors.New("at least one binary must be configured")
 	}
 	plan, err := newExtractionPlan(request.Binaries)
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
-		return nil, fmt.Errorf("create extraction destination: %w", err)
+	if mkdirErr := os.MkdirAll(request.DestinationDir, defaultDirMode); mkdirErr != nil {
+		return nil, fmt.Errorf("create extraction destination: %w", mkdirErr)
 	}
 
 	file, err := os.Open(request.ArtifactPath)
@@ -77,12 +86,12 @@ func (TarGzipExtractor) MaterializeBinaries(ctx context.Context, request app.Art
 	}
 	defer root.Close()
 
-	if err := extractTar(ctx, root, tar.NewReader(gzipReader), plan); err != nil {
+	if extractErr := extractTar(ctx, root, tar.NewReader(gzipReader), plan); extractErr != nil {
 		_ = gzipReader.Close()
-		return nil, err
+		return nil, extractErr
 	}
-	if err := verifyGzipStream(gzipReader, buffered); err != nil {
-		return nil, err
+	if verifyErr := verifyGzipStream(gzipReader, buffered); verifyErr != nil {
+		return nil, verifyErr
 	}
 	binaries, err := validateBinaries(root, request.DestinationDir, request.Binaries)
 	if err != nil {
@@ -147,12 +156,13 @@ func isArchiveAncestor(parent string, child string) bool {
 	return strings.HasPrefix(child, parent+string(filepath.Separator))
 }
 
+//nolint:gocognit // Archive extraction keeps validation and extraction in one pass to avoid TOCTOU drift.
 func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader, plan extractionPlan) error {
 	var totalBytes int64
 	var entries int
 	for {
 		header, err := reader.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		if errors.Is(err, tar.ErrInsecurePath) {
@@ -166,8 +176,8 @@ func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader, plan ext
 		if err != nil {
 			return fmt.Errorf("read tar entry: %w", err)
 		}
-		if err := ctx.Err(); err != nil {
-			return err
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
 		}
 
 		entries++
@@ -182,15 +192,19 @@ func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader, plan ext
 		switch header.Typeflag {
 		case tar.TypeDir:
 			if target, ok := plan.conflictingTarget(name); ok && !plan.wantsDir(name) {
-				return fmt.Errorf("archive entry %q conflicts with configured binary path %q", header.Name, filepath.ToSlash(target))
+				return fmt.Errorf(
+					"archive entry %q conflicts with configured binary path %q",
+					header.Name,
+					filepath.ToSlash(target),
+				)
 			}
 			if !plan.wantsDir(name) {
 				continue
 			}
-			if err := root.MkdirAll(name, safeDirMode(header)); err != nil {
-				return fmt.Errorf("create archive directory %q: %w", header.Name, err)
+			if mkdirErr := root.MkdirAll(name, safeDirMode(header)); mkdirErr != nil {
+				return fmt.Errorf("create archive directory %q: %w", header.Name, mkdirErr)
 			}
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if header.Size < 0 {
 				return fmt.Errorf("archive file %q has negative size", header.Name)
 			}
@@ -199,13 +213,17 @@ func extractTar(ctx context.Context, root *os.Root, reader *tar.Reader, plan ext
 			}
 			totalBytes += header.Size
 			if target, ok := plan.conflictingTarget(name); ok && !plan.wantsFile(name) {
-				return fmt.Errorf("archive entry %q conflicts with configured binary path %q", header.Name, filepath.ToSlash(target))
+				return fmt.Errorf(
+					"archive entry %q conflicts with configured binary path %q",
+					header.Name,
+					filepath.ToSlash(target),
+				)
 			}
 			if !plan.wantsFile(name) {
 				continue
 			}
-			if err := writeRegularFile(root, reader, header, name); err != nil {
-				return err
+			if writeErr := writeRegularFile(root, reader, header, name); writeErr != nil {
+				return writeErr
 			}
 		default:
 			return fmt.Errorf("archive entry %q has unsupported type %q", header.Name, header.Typeflag)
@@ -222,7 +240,7 @@ func verifyGzipStream(reader *gzip.Reader, source *bufio.Reader) error {
 		return fmt.Errorf("close gzip stream: %w", err)
 	}
 	if _, err := source.Peek(1); err == nil {
-		return fmt.Errorf("gzip stream has trailing data")
+		return errors.New("gzip stream has trailing data")
 	} else if !errors.Is(err, io.EOF) {
 		return fmt.Errorf("inspect trailing gzip data: %w", err)
 	}
@@ -232,7 +250,7 @@ func verifyGzipStream(reader *gzip.Reader, source *bufio.Reader) error {
 func writeRegularFile(root *os.Root, reader *tar.Reader, header *tar.Header, name string) error {
 	parent := filepath.Dir(name)
 	if parent != "." {
-		if err := root.MkdirAll(parent, 0o755); err != nil {
+		if err := root.MkdirAll(parent, defaultDirMode); err != nil {
 			return fmt.Errorf("create archive parent for %q: %w", header.Name, err)
 		}
 	}
@@ -291,15 +309,13 @@ func validateBinaries(root *os.Root, destination string, binaries []manifest.Bin
 func cleanArchiveName(name string) (string, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return "", fmt.Errorf("archive contains an empty path")
+		return "", errors.New("archive contains an empty path")
 	}
 	if strings.Contains(name, "\\") {
 		return "", fmt.Errorf("archive path %q contains backslashes", name)
 	}
-	for _, part := range strings.Split(name, "/") {
-		if part == ".." {
-			return "", fmt.Errorf("archive path %q must not contain ..", name)
-		}
+	if slices.Contains(strings.Split(name, "/"), "..") {
+		return "", fmt.Errorf("archive path %q must not contain parent directory segments", name)
 	}
 	clean := filepath.Clean(filepath.FromSlash(name))
 	if clean == "." {
@@ -316,17 +332,24 @@ func cleanManifestPath(value string) string {
 }
 
 func safeFileMode(header *tar.Header) os.FileMode {
-	mode := os.FileMode(header.Mode).Perm()
+	mode := safeHeaderPermissions(header)
 	if mode == 0 {
-		return 0o644
+		return defaultFileMode
 	}
-	return mode &^ 0o022
+	return mode &^ archiveModeMask
 }
 
 func safeDirMode(header *tar.Header) os.FileMode {
-	mode := os.FileMode(header.Mode).Perm()
+	mode := safeHeaderPermissions(header)
 	if mode == 0 {
-		return 0o755
+		return executableFileMode
 	}
-	return mode &^ 0o022
+	return mode &^ archiveModeMask
+}
+
+func safeHeaderPermissions(header *tar.Header) os.FileMode {
+	if header.Mode < 0 || header.Mode > int64(os.ModePerm) {
+		return 0
+	}
+	return os.FileMode(header.Mode).Perm()
 }

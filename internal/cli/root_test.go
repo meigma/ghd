@@ -28,9 +28,11 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	os.Exit(testscript.RunMain(m, map[string]func() int{
-		"ghd": runTestCommand,
-	}))
+	testscript.Main(m, map[string]func(){
+		"ghd": func() {
+			os.Exit(runTestCommand())
+		},
+	})
 }
 
 func TestCLI(t *testing.T) {
@@ -52,7 +54,7 @@ func TestVerifyWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
 		Viper: viper.New(),
 		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
 			called = true
-			return nil, fmt.Errorf("runtime should not be constructed")
+			return nil, errors.New("runtime should not be constructed")
 		},
 	})
 	root.SetArgs([]string{"verify"})
@@ -82,7 +84,7 @@ func TestUpdateWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
 		Viper: viper.New(),
 		RuntimeFactory: func(context.Context, config.Config) (Runtime, error) {
 			called = true
-			return nil, fmt.Errorf("runtime should not be constructed")
+			return nil, errors.New("runtime should not be constructed")
 		},
 	})
 	root.SetArgs([]string{"update", "--store-dir", "/tmp/ghd-store", "--bin-dir", "/tmp/ghd-bin"})
@@ -119,7 +121,15 @@ func TestDownloadNonInteractiveKeepsPlainOutput(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "verified owner/repo/foo@1.2.3\n", stderr.String())
-	assert.Equal(t, fmt.Sprintf("artifact %s\nverification %s\n", filepath.Join(outputDir, "artifact.tar.gz"), filepath.Join(outputDir, "verification.json")), stdout.String())
+	assert.Equal(
+		t,
+		fmt.Sprintf(
+			"artifact %s\nverification %s\n",
+			filepath.Join(outputDir, "artifact.tar.gz"),
+			filepath.Join(outputDir, "verification.json"),
+		),
+		stdout.String(),
+	)
 }
 
 func TestDownloadInteractiveWritesSummaryToStderrOnly(t *testing.T) {
@@ -284,7 +294,11 @@ func TestInstallNonInteractiveWithoutYesFailsAfterVerification(t *testing.T) {
 	err := root.ExecuteContext(context.Background())
 
 	require.Error(t, err)
-	assert.Equal(t, "install requires approval after verification; rerun with --yes to approve non-interactively", err.Error())
+	assert.Equal(
+		t,
+		"install requires approval after verification; rerun with --yes to approve non-interactively",
+		err.Error(),
+	)
 	assert.Empty(t, stdout.String())
 	assert.Empty(t, stderr.String())
 	assert.NoFileExists(t, filepath.Join(binDir, "foo"))
@@ -395,9 +409,13 @@ func TestUpdateSignerChangeNonInteractiveWithoutApproveSignerChangeReturnsResult
 
 	require.Error(t, err)
 	assert.Equal(t, "could not update 1 installed package", err.Error())
-	assert.Equal(t, "owner/rotate/foo 1.2.3 1.2.3 cannot-update update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive\n", stdout.String())
+	assert.Equal(
+		t,
+		"owner/rotate/foo 1.2.3 1.2.3 cannot-update update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive\n",
+		stdout.String(),
+	)
 	assert.Empty(t, stderr.String())
-	record := requireInstalledRecord(t, stateDir, "owner/rotate", "foo")
+	record := requireInstalledRecord(t, stateDir, "owner/rotate")
 	assert.Equal(t, "1.2.3", record.Version)
 }
 
@@ -463,8 +481,16 @@ func TestUpdateSignerChangeInteractiveApprovalCanApprove(t *testing.T) {
 	assert.Equal(t, "owner/rotate/foo 1.2.3 1.3.0 updated\n", stdout.String())
 	assert.Empty(t, stderr.String())
 	assert.True(t, approval.SignerChanged)
-	assert.Equal(t, verification.WorkflowIdentity("owner/rotate/.github/workflows/release.yml"), approval.TrustedSignerWorkflow)
-	assert.Equal(t, verification.WorkflowIdentity("owner/rotate/.github/workflows/release-v2.yml"), approval.CandidateSignerWorkflow)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/rotate/.github/workflows/release.yml"),
+		approval.TrustedSignerWorkflow,
+	)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/rotate/.github/workflows/release-v2.yml"),
+		approval.CandidateSignerWorkflow,
+	)
 }
 
 func TestUpdateSignerChangeDeclineReturnsSignerChangeReason(t *testing.T) {
@@ -496,9 +522,13 @@ func TestUpdateSignerChangeDeclineReturnsSignerChangeReason(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, "could not update 1 installed package", err.Error())
-	assert.Equal(t, "owner/rotate/foo 1.2.3 1.2.3 cannot-update update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive\n", stdout.String())
+	assert.Equal(
+		t,
+		"owner/rotate/foo 1.2.3 1.2.3 cannot-update update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive\n",
+		stdout.String(),
+	)
 	assert.Empty(t, stderr.String())
-	record := requireInstalledRecord(t, stateDir, "owner/rotate", "foo")
+	record := requireInstalledRecord(t, stateDir, "owner/rotate")
 	assert.Equal(t, "1.2.3", record.Version)
 }
 
@@ -596,9 +626,13 @@ func TestUpdateNonInteractiveWithoutYesReturnsResultRow(t *testing.T) {
 
 	require.Error(t, err)
 	assert.Equal(t, "could not update 1 installed package", err.Error())
-	assert.Equal(t, "owner/repo/foo 1.2.3 1.2.3 cannot-update update requires approval after verification; rerun with --yes to approve non-interactively\n", stdout.String())
+	assert.Equal(
+		t,
+		"owner/repo/foo 1.2.3 1.2.3 cannot-update update requires approval after verification; rerun with --yes to approve non-interactively\n",
+		stdout.String(),
+	)
 	assert.Empty(t, stderr.String())
-	record := requireInstalledRecord(t, stateDir, "owner/repo", "foo")
+	record := requireInstalledRecord(t, stateDir, "owner/repo")
 	assert.Equal(t, "1.2.3", record.Version)
 }
 
@@ -633,7 +667,11 @@ func TestUpdateJSONWithoutYesReturnsStructuredCannotUpdate(t *testing.T) {
 	assert.Contains(t, stdout.String(), `"previous_version":"1.2.3"`)
 	assert.Contains(t, stdout.String(), `"current_version":"1.2.3"`)
 	assert.Contains(t, stdout.String(), `"status":"cannot-update"`)
-	assert.Contains(t, stdout.String(), `"reason":"update requires approval after verification; rerun with --yes to approve non-interactively"`)
+	assert.Contains(
+		t,
+		stdout.String(),
+		`"reason":"update requires approval after verification; rerun with --yes to approve non-interactively"`,
+	)
 	assert.Empty(t, stderr.String())
 }
 
@@ -678,8 +716,16 @@ func TestUpdateInteractiveApprovalCanApprove(t *testing.T) {
 	assert.Equal(t, "sha256:"+strings.Repeat("a", 64), approval.AssetDigest.String())
 	assert.Equal(t, verification.ReleasePredicateV02, approval.ReleasePredicateType)
 	assert.Equal(t, verification.SLSAPredicateV1, approval.ProvenancePredicateType)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.TrustedSignerWorkflow)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), approval.CandidateSignerWorkflow)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
+		approval.TrustedSignerWorkflow,
+	)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
+		approval.CandidateSignerWorkflow,
+	)
 	assert.False(t, approval.SignerChanged)
 	assert.Equal(t, binDir, approval.BinDir)
 	assert.Equal(t, []string{"foo"}, approval.Binaries)
@@ -716,7 +762,7 @@ func TestUpdateApprovalDeclineDoesNotMutateState(t *testing.T) {
 	assert.Equal(t, "could not update 1 installed package", err.Error())
 	assert.Equal(t, "owner/repo/foo 1.2.3 1.2.3 cannot-update update was not approved\n", stdout.String())
 	assert.Empty(t, stderr.String())
-	record := requireInstalledRecord(t, stateDir, "owner/repo", "foo")
+	record := requireInstalledRecord(t, stateDir, "owner/repo")
 	assert.Equal(t, "1.2.3", record.Version)
 }
 
@@ -864,7 +910,11 @@ func TestInfoTTYRendersPackageViewAndStaticStatuses(t *testing.T) {
 	assert.Contains(t, stdout.String(), "Signer:")
 	assert.Contains(t, stdout.String(), "assets")
 	assert.Contains(t, stdout.String(), "darwin/arm64")
-	assert.Equal(t, "\r\033[KResolving foo from the local index\r\033[KFetching package details from owner/repo\r\033[K", stderr.String())
+	assert.Equal(
+		t,
+		"\r\033[KResolving foo from the local index\r\033[KFetching package details from owner/repo\r\033[K",
+		stderr.String(),
+	)
 }
 
 func TestInfoJSONKeepsStructuredOutputOnTTY(t *testing.T) {
@@ -941,7 +991,14 @@ func TestVerifyTTYRendersGroupedResultsAndStaticStatus(t *testing.T) {
 		Err:            io.Discard,
 		RuntimeFactory: testRuntimeFactory,
 	}, "--state-dir", stateDir, "--yes", "--non-interactive", "install", "owner/alpha/bar@1.0.0", "--store-dir", storeDir, "--bin-dir", binDir))
-	require.NoError(t, os.WriteFile(filepath.Join(storeDir, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123", "extracted", "foo"), []byte("tampered"), 0o755))
+	require.NoError(
+		t,
+		os.WriteFile(
+			filepath.Join(storeDir, "github.com", "owner", "repo", "foo", "1.2.3", "sha256-abc123", "extracted", "foo"),
+			[]byte("tampered"),
+			0o755,
+		),
+	)
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1305,20 +1362,23 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-func requireInstalledRecord(t *testing.T, stateDir string, repository string, packageName string) state.Record {
+func requireInstalledRecord(t *testing.T, stateDir string, repository string) state.Record {
 	t.Helper()
 
 	store := filesystem.NewInstalledStore()
 	index, err := store.LoadInstalledState(context.Background(), stateDir)
 	require.NoError(t, err)
-	record, ok := index.Record(repository, packageName)
+	record, ok := index.Record(repository, "foo")
 	require.True(t, ok)
 	return record
 }
 
 type testRuntime struct{}
 
-func (testRuntime) AddRepository(ctx context.Context, request app.RepositoryAddRequest) (catalog.RepositoryRecord, error) {
+func (testRuntime) AddRepository(
+	ctx context.Context,
+	request app.RepositoryAddRequest,
+) (catalog.RepositoryRecord, error) {
 	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return catalog.RepositoryRecord{}, err
@@ -1342,7 +1402,10 @@ func (testRuntime) RemoveRepository(ctx context.Context, request app.RepositoryR
 	return subject.RemoveRepository(ctx, request)
 }
 
-func (testRuntime) RefreshRepositories(ctx context.Context, request app.RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error) {
+func (testRuntime) RefreshRepositories(
+	ctx context.Context,
+	request app.RepositoryRefreshRequest,
+) ([]catalog.RepositoryRecord, error) {
 	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return nil, err
@@ -1350,7 +1413,10 @@ func (testRuntime) RefreshRepositories(ctx context.Context, request app.Reposito
 	return subject.RefreshRepositories(ctx, request)
 }
 
-func (testRuntime) ResolvePackage(ctx context.Context, request app.ResolvePackageRequest) (app.ResolvePackageResult, error) {
+func (testRuntime) ResolvePackage(
+	ctx context.Context,
+	request app.ResolvePackageRequest,
+) (app.ResolvePackageResult, error) {
 	subject, err := newTestRepositoryCatalog()
 	if err != nil {
 		return app.ResolvePackageResult{}, err
@@ -1421,19 +1487,19 @@ func (testRuntime) CheckInstalled(ctx context.Context, request app.CheckRequest)
 
 func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) ([]app.UpdateInstalledResult, error) {
 	if request.All && strings.TrimSpace(request.Target) != "" {
-		return nil, fmt.Errorf("update accepts a target or --all, not both")
+		return nil, errors.New("update accepts a target or --all, not both")
 	}
 	if !request.All && strings.TrimSpace(request.Target) == "" {
-		return nil, fmt.Errorf("update target must be set")
+		return nil, errors.New("update target must be set")
 	}
 	if strings.TrimSpace(request.StoreDir) == "" {
-		return nil, fmt.Errorf("store directory must be set")
+		return nil, errors.New("store directory must be set")
 	}
 	if strings.TrimSpace(request.BinDir) == "" {
-		return nil, fmt.Errorf("bin directory must be set")
+		return nil, errors.New("bin directory must be set")
 	}
 	if strings.TrimSpace(request.StateDir) == "" {
-		return nil, fmt.Errorf("state directory must be set")
+		return nil, errors.New("state directory must be set")
 	}
 
 	store := filesystem.NewInstalledStore()
@@ -1463,6 +1529,7 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) ([]app
 			failed++
 		case app.UpdateStatusUpdatedWithWarning:
 			warned++
+		case app.UpdateStatusUpdated, app.UpdateStatusAlreadyUpToDate:
 		}
 		if err != nil {
 			continue
@@ -1474,7 +1541,13 @@ func (testRuntime) Update(ctx context.Context, request app.UpdateRequest) ([]app
 	return results, nil
 }
 
-func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, request app.UpdateRequest, previous state.Record) (app.UpdateInstalledResult, error) {
+//nolint:gocognit // The test fake mirrors update behavior closely enough to exercise CLI flows.
+func updateTestRecord(
+	ctx context.Context,
+	store filesystem.InstalledStore,
+	request app.UpdateRequest,
+	previous state.Record,
+) (app.UpdateInstalledResult, error) {
 	if previous.Repository == "owner/broken" {
 		return app.UpdateInstalledResult{
 			Repository:      previous.Repository,
@@ -1499,15 +1572,15 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 		return app.UpdateInstalledResult{}, err
 	}
 	owner := state.PackageRef{Repository: previous.Repository, Package: previous.Package}
-	if err := index.CheckBinaryOwnership(owner, []string{previous.Package}, owner); err != nil {
+	if ownershipErr := index.CheckBinaryOwnership(owner, []string{previous.Package}, owner); ownershipErr != nil {
 		return app.UpdateInstalledResult{
 			Repository:      previous.Repository,
 			Package:         previous.Package,
 			PreviousVersion: previous.Version,
 			CurrentVersion:  previous.Version,
 			Status:          app.UpdateStatusCannotUpdate,
-			Reason:          err.Error(),
-		}, err
+			Reason:          ownershipErr.Error(),
+		}, ownershipErr
 	}
 	previousBinaries := make([]app.InstalledBinary, 0, len(previous.Binaries))
 	for _, binary := range previous.Binaries {
@@ -1530,7 +1603,7 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 	trustedSigner := testSignerWorkflowForVersion(repository, previous.Version)
 	candidateSigner := testSignerWorkflowForVersion(repository, newVersion)
 	if request.Approve != nil {
-		if err := request.Approve(ctx, app.UpdateApproval{
+		if approvalErr := request.Approve(ctx, app.UpdateApproval{
 			Repository:              repository,
 			PackageName:             manifest.PackageName(previous.Package),
 			PreviousVersion:         manifest.PackageVersion(previous.Version),
@@ -1545,15 +1618,15 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 			SignerChanged:           trustedSigner != candidateSigner,
 			BinDir:                  request.BinDir,
 			Binaries:                []string{previous.Package},
-		}); err != nil {
+		}); approvalErr != nil {
 			return app.UpdateInstalledResult{
 				Repository:      previous.Repository,
 				Package:         previous.Package,
 				PreviousVersion: previous.Version,
 				CurrentVersion:  previous.Version,
 				Status:          app.UpdateStatusCannotUpdate,
-				Reason:          err.Error(),
-			}, err
+				Reason:          approvalErr.Error(),
+			}, approvalErr
 		}
 	}
 
@@ -1606,12 +1679,12 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 		}
 	}
 	if canSwapManagedLinks {
-		if err := installer.ReplaceManagedBinaries(ctx, app.ReplaceManagedBinariesRequest{
+		if replaceErr := installer.ReplaceManagedBinaries(ctx, app.ReplaceManagedBinariesRequest{
 			BinDir:   binRoot,
 			Previous: previousBinaries,
 			Next:     nextBinaries,
-		}); err != nil {
-			return app.UpdateInstalledResult{}, err
+		}); replaceErr != nil {
+			return app.UpdateInstalledResult{}, replaceErr
 		}
 	}
 	current := previous
@@ -1637,7 +1710,13 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 		Status:          app.UpdateStatusUpdated,
 	}
 	if previous.Repository == "owner/warn" {
-		reason := fmt.Sprintf("updated %s/%s@%s -> %s but failed to remove previous store: permission denied", previous.Repository, previous.Package, previous.Version, current.Version)
+		reason := fmt.Sprintf(
+			"updated %s/%s@%s -> %s but failed to remove previous store: permission denied",
+			previous.Repository,
+			previous.Package,
+			previous.Version,
+			current.Version,
+		)
 		row.Status = app.UpdateStatusUpdatedWithWarning
 		row.Reason = reason
 		return row, errors.New(reason)
@@ -1653,7 +1732,7 @@ func updateTestRecord(ctx context.Context, store filesystem.InstalledStore, requ
 func testRepositoryFromString(value string) (verification.Repository, error) {
 	owner, name, ok := strings.Cut(value, "/")
 	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
-		return verification.Repository{}, fmt.Errorf("repository must be owner/repo")
+		return verification.Repository{}, errors.New("repository must be owner/repo")
 	}
 	return verification.Repository{Owner: owner, Name: name}, nil
 }
@@ -1667,7 +1746,10 @@ func (testRuntime) ListInstalled(ctx context.Context, stateDir string) ([]state.
 	return index.Normalize().Records, nil
 }
 
-func (testRuntime) VerifyInstalled(ctx context.Context, request app.VerifyInstalledRequest) ([]app.VerifyInstalledResult, error) {
+func (testRuntime) VerifyInstalled(
+	ctx context.Context,
+	request app.VerifyInstalledRequest,
+) ([]app.VerifyInstalledResult, error) {
 	subject, err := app.NewInstalledPackageVerifier(app.InstalledPackageVerifierDependencies{
 		StateStore:    filesystem.NewInstalledStore(),
 		Verifier:      testReleaseVerifier{},
@@ -1692,7 +1774,10 @@ func (testRuntime) Uninstall(ctx context.Context, request app.UninstallRequest) 
 	return subject.Uninstall(ctx, request)
 }
 
-func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadRequest) (app.VerifiedDownloadResult, error) {
+func (testRuntime) Download(
+	_ context.Context,
+	request app.VerifiedDownloadRequest,
+) (app.VerifiedDownloadResult, error) {
 	artifactPath := filepath.Join(request.OutputDir, "artifact.tar.gz")
 	evidencePath := filepath.Join(request.OutputDir, "verification.json")
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
@@ -1700,12 +1785,38 @@ func (testRuntime) Download(_ context.Context, request app.VerifiedDownloadReque
 		return app.VerifiedDownloadResult{}, err
 	}
 	if request.Progress != nil {
-		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressResolvingManifest, Message: "Resolving package manifest"})
-		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressResolvingAsset, Message: "Resolving release asset"})
+		request.Progress(
+			app.VerifiedDownloadProgress{
+				Stage:   app.VerifiedDownloadProgressResolvingManifest,
+				Message: "Resolving package manifest",
+			},
+		)
+		request.Progress(
+			app.VerifiedDownloadProgress{
+				Stage:   app.VerifiedDownloadProgressResolvingAsset,
+				Message: "Resolving release asset",
+			},
+		)
 		progress := app.DownloadProgress{AssetName: "artifact.tar.gz", BytesDownloaded: 512, TotalBytes: 1024}
-		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressDownloading, Message: "Downloading release asset", Download: &progress})
-		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressVerifying, Message: "Verifying release artifact"})
-		request.Progress(app.VerifiedDownloadProgress{Stage: app.VerifiedDownloadProgressWritingEvidence, Message: "Writing verification evidence"})
+		request.Progress(
+			app.VerifiedDownloadProgress{
+				Stage:    app.VerifiedDownloadProgressDownloading,
+				Message:  "Downloading release asset",
+				Download: &progress,
+			},
+		)
+		request.Progress(
+			app.VerifiedDownloadProgress{
+				Stage:   app.VerifiedDownloadProgressVerifying,
+				Message: "Verifying release artifact",
+			},
+		)
+		request.Progress(
+			app.VerifiedDownloadProgress{
+				Stage:   app.VerifiedDownloadProgressWritingEvidence,
+				Message: "Writing verification evidence",
+			},
+		)
 	}
 	if err := os.MkdirAll(request.OutputDir, 0o755); err != nil {
 		return app.VerifiedDownloadResult{}, err
@@ -1737,18 +1848,20 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		request.Version = "1.3.0"
 	}
 	if request.Progress != nil {
-		request.Progress(app.InstallProgress{Stage: app.InstallProgressCheckingState, Message: "Checking installed packages"})
+		request.Progress(
+			app.InstallProgress{Stage: app.InstallProgressCheckingState, Message: "Checking installed packages"},
+		)
 	}
 	store := filesystem.NewInstalledStore()
 	index, err := store.LoadInstalledState(ctx, request.StateDir)
 	if err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	if err := index.CheckBinaryOwnership(state.PackageRef{
+	if ownershipErr := index.CheckBinaryOwnership(state.PackageRef{
 		Repository: request.Repository.String(),
 		Package:    request.PackageName.String(),
-	}, []string{request.PackageName.String()}, state.PackageRef{}); err != nil {
-		return app.VerifiedInstallResult{}, err
+	}, []string{request.PackageName.String()}, state.PackageRef{}); ownershipErr != nil {
+		return app.VerifiedInstallResult{}, ownershipErr
 	}
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
 	if err != nil {
@@ -1767,16 +1880,20 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 			PredicateType: verification.ReleasePredicateV02,
 		},
 		ProvenanceAttestation: verification.AttestationEvidence{
-			AttestationID:  "provenance",
-			PredicateType:  verification.SLSAPredicateV1,
-			SignerWorkflow: verification.WorkflowIdentity(request.Repository.String() + "/.github/workflows/release.yml"),
+			AttestationID: "provenance",
+			PredicateType: verification.SLSAPredicateV1,
+			SignerWorkflow: verification.WorkflowIdentity(
+				request.Repository.String() + "/.github/workflows/release.yml",
+			),
 		},
 	}
 	if request.Progress != nil {
-		request.Progress(app.InstallProgress{Stage: app.InstallProgressVerifying, Message: "Verifying release and provenance"})
+		request.Progress(
+			app.InstallProgress{Stage: app.InstallProgressVerifying, Message: "Verifying release and provenance"},
+		)
 	}
 	if request.Approve != nil {
-		if err := request.Approve(ctx, app.InstallApproval{
+		if approvalErr := request.Approve(ctx, app.InstallApproval{
 			Repository:              request.Repository,
 			PackageName:             request.PackageName,
 			Version:                 request.Version,
@@ -1788,19 +1905,21 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 			SignerWorkflow:          evidence.ProvenanceAttestation.SignerWorkflow,
 			BinDir:                  request.BinDir,
 			Binaries:                []string{request.PackageName.String()},
-		}); err != nil {
-			return app.VerifiedInstallResult{}, err
+		}); approvalErr != nil {
+			return app.VerifiedInstallResult{}, approvalErr
 		}
 	}
 	if request.Progress != nil {
-		request.Progress(app.InstallProgress{Stage: app.InstallProgressPreparingStore, Message: "Preparing managed store"})
+		request.Progress(
+			app.InstallProgress{Stage: app.InstallProgressPreparingStore, Message: "Preparing managed store"},
+		)
 	}
 	binDir, err := filepath.Abs(filepath.Clean(request.BinDir))
 	if err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return app.VerifiedInstallResult{}, err
+	if mkdirErr := os.MkdirAll(binDir, 0o755); mkdirErr != nil {
+		return app.VerifiedInstallResult{}, mkdirErr
 	}
 	storeRoot, err := filepath.Abs(filepath.Clean(request.StoreDir))
 	if err != nil {
@@ -1830,7 +1949,12 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 	if err := os.WriteFile(artifactPath, []byte("artifact"), 0o600); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
-	if err := writeTestVerificationRecord(verificationPath, request.Repository, request.PackageName.String(), request.Version.String()); err != nil {
+	if err := writeTestVerificationRecord(
+		verificationPath,
+		request.Repository,
+		request.PackageName.String(),
+		request.Version.String(),
+	); err != nil {
 		return app.VerifiedInstallResult{}, err
 	}
 	if err := os.Symlink(linkTarget, linkPath); err != nil {
@@ -1847,8 +1971,10 @@ func (testRuntime) Install(ctx context.Context, request app.VerifiedInstallReque
 		ArtifactPath:     artifactPath,
 		ExtractedPath:    extractedPath,
 		VerificationPath: verificationPath,
-		Binaries:         []state.Binary{{Name: request.PackageName.String(), LinkPath: linkPath, TargetPath: linkTarget}},
-		InstalledAt:      time.Unix(1700000000, 0).UTC(),
+		Binaries: []state.Binary{
+			{Name: request.PackageName.String(), LinkPath: linkPath, TargetPath: linkTarget},
+		},
+		InstalledAt: time.Unix(1700000000, 0).UTC(),
 	}
 	if _, err := store.AddInstalledRecord(ctx, request.StateDir, record); err != nil {
 		return app.VerifiedInstallResult{}, err
@@ -1888,25 +2014,23 @@ func newTestRepositoryCatalog() (*app.RepositoryCatalog, error) {
 type testRuntimeManifestSource struct{}
 
 func (testRuntimeManifestSource) FetchManifest(_ context.Context, repository verification.Repository) ([]byte, error) {
-	cfg, err := testManifestConfig(repository)
-	if err != nil {
-		return nil, err
-	}
+	cfg := testManifestConfig(repository)
 	return toml.Marshal(cfg)
 }
 
-func (testRuntimeManifestSource) FetchManifestAtRef(_ context.Context, repository verification.Repository, ref string) ([]byte, error) {
-	cfg, err := testManifestConfig(repository)
-	if err != nil {
-		return nil, err
-	}
+func (testRuntimeManifestSource) FetchManifestAtRef(
+	_ context.Context,
+	repository verification.Repository,
+	ref string,
+) ([]byte, error) {
+	cfg := testManifestConfig(repository)
 	if version := testVersionFromRef(ref); version != "" {
 		cfg.Provenance.SignerWorkflow = string(testSignerWorkflowForVersion(repository, version))
 	}
 	return toml.Marshal(cfg)
 }
 
-func testManifestConfig(repository verification.Repository) (manifest.Config, error) {
+func testManifestConfig(repository verification.Repository) manifest.Config {
 	switch repository.Name {
 	case "binary":
 		return manifest.Config{
@@ -1925,7 +2049,7 @@ func testManifestConfig(repository verification.Repository) (manifest.Config, er
 					Binaries: []manifest.Binary{{Path: "bin/foo"}},
 				},
 			},
-		}, nil
+		}
 	case "multi":
 		return manifest.Config{
 			Version: manifest.SchemaVersion,
@@ -1953,7 +2077,7 @@ func testManifestConfig(repository verification.Repository) (manifest.Config, er
 					Binaries: []manifest.Binary{{Path: "bin/bar"}},
 				},
 			},
-		}, nil
+		}
 	default:
 		return manifest.Config{
 			Version: manifest.SchemaVersion,
@@ -1971,13 +2095,16 @@ func testManifestConfig(repository verification.Repository) (manifest.Config, er
 					Binaries: []manifest.Binary{{Path: "bin/foo"}},
 				},
 			},
-		}, nil
+		}
 	}
 }
 
 type testReleaseVerifier struct{}
 
-func (testReleaseVerifier) VerifyReleaseAsset(_ context.Context, request verification.Request) (verification.Evidence, error) {
+func (testReleaseVerifier) VerifyReleaseAsset(
+	_ context.Context,
+	request verification.Request,
+) (verification.Evidence, error) {
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))
 	if err != nil {
 		return verification.Evidence{}, err
@@ -2013,7 +2140,10 @@ func testVersionFromRef(ref string) string {
 
 type testArchiveExtractor struct{}
 
-func (testArchiveExtractor) MaterializeBinaries(_ context.Context, request app.ArtifactMaterializationRequest) ([]app.MaterializedBinary, error) {
+func (testArchiveExtractor) MaterializeBinaries(
+	_ context.Context,
+	request app.ArtifactMaterializationRequest,
+) ([]app.MaterializedBinary, error) {
 	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -2042,7 +2172,7 @@ type testGitHubDoctorChecker struct {
 func (c testGitHubDoctorChecker) CheckRateLimit(context.Context) (app.GitHubRateLimitStatus, error) {
 	switch strings.TrimSpace(c.token) {
 	case "fail":
-		return app.GitHubRateLimitStatus{}, fmt.Errorf("boom")
+		return app.GitHubRateLimitStatus{}, errors.New("boom")
 	case "exhausted":
 		return app.GitHubRateLimitStatus{CoreLimit: 60, CoreRemaining: 0}, nil
 	case "":
@@ -2056,12 +2186,17 @@ type testTrustedRootChecker struct{}
 
 func (testTrustedRootChecker) ValidateTrustedRoot(_ context.Context, path string) error {
 	if strings.Contains(path, "invalid") {
-		return fmt.Errorf("parse trusted root: bad root")
+		return errors.New("parse trusted root: bad root")
 	}
 	return nil
 }
 
-func writeTestVerificationRecord(path string, repository verification.Repository, packageName string, version string) error {
+func writeTestVerificationRecord(
+	path string,
+	repository verification.Repository,
+	packageName string,
+	version string,
+) error {
 	outputDir := filepath.Dir(path)
 	writer := filesystem.NewEvidenceWriter()
 	digest, err := verification.NewDigest("sha256", strings.Repeat("a", 64))

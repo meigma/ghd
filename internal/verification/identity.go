@@ -1,10 +1,16 @@
 package verification
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"strings"
 	"unicode"
+)
+
+const (
+	repositoryIdentityParts = 2
+	workflowIdentityParts   = 5
 )
 
 // Repository identifies a GitHub repository.
@@ -31,8 +37,8 @@ func NewRepository(owner, name string) (Repository, error) {
 func ParseRepository(value string) (Repository, error) {
 	value = strings.TrimSpace(value)
 	parts := strings.Split(value, "/")
-	if len(parts) != 2 {
-		return Repository{}, fmt.Errorf("repository must be owner/repo")
+	if len(parts) != repositoryIdentityParts {
+		return Repository{}, errors.New("repository must be owner/repo")
 	}
 	return NewRepository(parts[0], parts[1])
 }
@@ -53,16 +59,16 @@ func (r Repository) IsZero() bool {
 // Validate checks that r is a complete owner/repo identity.
 func (r Repository) Validate() error {
 	if strings.TrimSpace(r.Owner) == "" || strings.TrimSpace(r.Name) == "" {
-		return fmt.Errorf("repository must be owner/repo")
+		return errors.New("repository must be owner/repo")
 	}
 	if r.Owner != strings.TrimSpace(r.Owner) || r.Name != strings.TrimSpace(r.Name) {
-		return fmt.Errorf("repository must be owner/repo")
+		return errors.New("repository must be owner/repo")
 	}
 	if strings.ContainsAny(r.Owner, `/\`) || strings.ContainsAny(r.Name, `/\`) {
-		return fmt.Errorf("repository must be owner/repo")
+		return errors.New("repository must be owner/repo")
 	}
 	if hasControlCharacter(r.Owner) || hasControlCharacter(r.Name) {
-		return fmt.Errorf("repository must not contain control characters")
+		return errors.New("repository must not contain control characters")
 	}
 	return nil
 }
@@ -125,7 +131,7 @@ func (r SourceRef) IsZero() bool {
 func (r SourceRef) Validate() error {
 	ref := string(r)
 	if !strings.HasPrefix(ref, "refs/") {
-		return fmt.Errorf("source ref must start with refs/")
+		return errors.New("source ref must start with refs/")
 	}
 	return validateGitRefName("source ref", ref, true)
 }
@@ -202,35 +208,36 @@ func (w workflowIdentity) pathMatches(observed workflowIdentity) bool {
 	return w.repository.Equal(observed.repository) && w.path == observed.path
 }
 
+//nolint:gocognit // Workflow identity parsing is kept local to preserve exact validation order.
 func parseWorkflowIdentity(value string) (workflowIdentity, error) {
 	if value == "" || strings.TrimSpace(value) == "" {
-		return workflowIdentity{}, fmt.Errorf("workflow identity must be set")
+		return workflowIdentity{}, errors.New("workflow identity must be set")
 	}
 	if value != strings.TrimSpace(value) {
-		return workflowIdentity{}, fmt.Errorf("workflow identity must not contain leading or trailing whitespace")
+		return workflowIdentity{}, errors.New("workflow identity must not contain leading or trailing whitespace")
 	}
 	if hasControlCharacter(value) {
-		return workflowIdentity{}, fmt.Errorf("workflow identity must not contain control characters")
+		return workflowIdentity{}, errors.New("workflow identity must not contain control characters")
 	}
-	if strings.HasPrefix(value, "https://github.com/") {
-		value = strings.TrimPrefix(value, "https://github.com/")
+	if after, ok := strings.CutPrefix(value, "https://github.com/"); ok {
+		value = after
 	} else if strings.Contains(value, "://") {
-		return workflowIdentity{}, fmt.Errorf("workflow identity must be a GitHub workflow path")
+		return workflowIdentity{}, errors.New("workflow identity must be a GitHub workflow path")
 	} else {
 		value = strings.TrimPrefix(value, "github.com/")
 	}
 
 	beforeRef, refValue, hasRef := strings.Cut(value, "@")
 	if beforeRef == "" || strings.HasPrefix(beforeRef, "/") || strings.HasSuffix(beforeRef, "/") {
-		return workflowIdentity{}, fmt.Errorf("workflow identity must be owner/repo/.github/workflows/file.yml")
+		return workflowIdentity{}, errors.New("workflow identity must be owner/repo/.github/workflows/file.yml")
 	}
 	if strings.Contains(beforeRef, `\`) || strings.Contains(beforeRef, "//") {
-		return workflowIdentity{}, fmt.Errorf("workflow identity path must be a relative GitHub path")
+		return workflowIdentity{}, errors.New("workflow identity path must be a relative GitHub path")
 	}
 
 	parts := strings.Split(beforeRef, "/")
-	if len(parts) < 5 {
-		return workflowIdentity{}, fmt.Errorf("workflow identity must be owner/repo/.github/workflows/file.yml")
+	if len(parts) < workflowIdentityParts {
+		return workflowIdentity{}, errors.New("workflow identity must be owner/repo/.github/workflows/file.yml")
 	}
 	repository, err := NewRepository(parts[0], parts[1])
 	if err != nil {
@@ -238,26 +245,28 @@ func parseWorkflowIdentity(value string) (workflowIdentity, error) {
 	}
 	pathParts := parts[2:]
 	if pathParts[0] != ".github" || pathParts[1] != "workflows" {
-		return workflowIdentity{}, fmt.Errorf("workflow identity path must start with .github/workflows/")
+		return workflowIdentity{}, errors.New("workflow identity path must start with .github/workflows/")
 	}
 	for _, part := range pathParts {
 		if part == "" || part == "." || part == ".." {
-			return workflowIdentity{}, fmt.Errorf("workflow identity path must not contain empty or traversal components")
+			return workflowIdentity{}, errors.New(
+				"workflow identity path must not contain empty or traversal components",
+			)
 		}
 		if strings.Contains(part, `\`) || hasControlCharacter(part) {
-			return workflowIdentity{}, fmt.Errorf("workflow identity path contains unsupported characters")
+			return workflowIdentity{}, errors.New("workflow identity path contains unsupported characters")
 		}
 	}
 	fileName := pathParts[len(pathParts)-1]
 	ext := strings.ToLower(path.Ext(fileName))
 	if ext != ".yml" && ext != ".yaml" {
-		return workflowIdentity{}, fmt.Errorf("workflow identity file must be a YAML workflow")
+		return workflowIdentity{}, errors.New("workflow identity file must be a YAML workflow")
 	}
 
 	var ref SourceRef
 	if hasRef {
 		if strings.TrimSpace(refValue) == "" {
-			return workflowIdentity{}, fmt.Errorf("workflow identity ref must be set")
+			return workflowIdentity{}, errors.New("workflow identity ref must be set")
 		}
 		ref, err = NewSourceRef(refValue)
 		if err != nil {
@@ -296,11 +305,12 @@ func validateGitRefName(label, value string, requireSlash bool) error {
 	if strings.ContainsAny(value, " ~^:?*[\\") {
 		return fmt.Errorf("%s contains unsupported Git ref characters", label)
 	}
-	for _, component := range strings.Split(value, "/") {
+	for component := range strings.SplitSeq(value, "/") {
 		if component == "" || component == "." || component == ".." {
 			return fmt.Errorf("%s must not contain empty or traversal components", label)
 		}
-		if strings.HasPrefix(component, ".") || strings.HasSuffix(component, ".") || strings.HasSuffix(component, ".lock") {
+		if strings.HasPrefix(component, ".") || strings.HasSuffix(component, ".") ||
+			strings.HasSuffix(component, ".lock") {
 			return fmt.Errorf("%s contains unsupported Git ref component %q", label, component)
 		}
 	}

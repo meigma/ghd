@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/meigma/ghd/internal/config"
 )
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newVerifyCommand(options Options) *cobra.Command {
 	var all bool
 	var jsonOutput bool
@@ -30,10 +32,10 @@ ghd verify package --state-dir ./state --json
 				defer status.Clear()
 			}
 			if all && len(args) > 0 {
-				return fmt.Errorf("verify accepts a target or --all, not both")
+				return errors.New("verify accepts a target or --all, not both")
 			}
 			if !all && len(args) == 0 {
-				return fmt.Errorf("verify target must be set")
+				return errors.New("verify target must be set")
 			}
 			target := ""
 			if len(args) == 1 {
@@ -89,7 +91,14 @@ func writeVerifyResults(options Options, results []app.VerifyInstalledResult) {
 	for _, result := range results {
 		target := terminalSafeText(result.Repository + "/" + result.Package)
 		if result.Reason != "" {
-			fmt.Fprintf(options.Out, "%s %s %s %s\n", target, terminalSafeText(result.Version), result.Status, terminalSafeText(result.Reason))
+			fmt.Fprintf(
+				options.Out,
+				"%s %s %s %s\n",
+				target,
+				terminalSafeText(result.Version),
+				result.Status,
+				terminalSafeText(result.Reason),
+			)
 			continue
 		}
 		fmt.Fprintf(options.Out, "%s %s %s\n", target, terminalSafeText(result.Version), result.Status)

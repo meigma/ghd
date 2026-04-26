@@ -2,6 +2,7 @@ package archive
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -22,7 +23,10 @@ func NewMaterializer() Materializer {
 }
 
 // MaterializeBinaries prepares configured binaries from one verified artifact.
-func (m Materializer) MaterializeBinaries(ctx context.Context, request app.ArtifactMaterializationRequest) ([]app.MaterializedBinary, error) {
+func (m Materializer) MaterializeBinaries(
+	ctx context.Context,
+	request app.ArtifactMaterializationRequest,
+) ([]app.MaterializedBinary, error) {
 	assetName := strings.TrimSpace(request.AssetName)
 	if assetName == "" {
 		assetName = request.ArtifactPath
@@ -33,24 +37,32 @@ func (m Materializer) MaterializeBinaries(ctx context.Context, request app.Artif
 	return materializeDirectBinary(ctx, request, assetName)
 }
 
-func materializeDirectBinary(ctx context.Context, request app.ArtifactMaterializationRequest, assetName string) ([]app.MaterializedBinary, error) {
+func materializeDirectBinary(
+	ctx context.Context,
+	request app.ArtifactMaterializationRequest,
+	assetName string,
+) ([]app.MaterializedBinary, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(request.ArtifactPath) == "" {
-		return nil, fmt.Errorf("artifact path must be set")
+		return nil, errors.New("artifact path must be set")
 	}
 	if strings.TrimSpace(request.DestinationDir) == "" {
-		return nil, fmt.Errorf("extraction destination must be set")
+		return nil, errors.New("extraction destination must be set")
 	}
 	if len(request.Binaries) != 1 {
-		return nil, fmt.Errorf("non-archive asset %q cannot satisfy %d configured binaries", assetName, len(request.Binaries))
+		return nil, fmt.Errorf(
+			"non-archive asset %q cannot satisfy %d configured binaries",
+			assetName,
+			len(request.Binaries),
+		)
 	}
 	binary := request.Binaries[0]
 	if err := binary.Validate(); err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
+	if err := os.MkdirAll(request.DestinationDir, defaultDirMode); err != nil {
 		return nil, fmt.Errorf("create extraction destination: %w", err)
 	}
 	root, err := os.OpenRoot(request.DestinationDir)
@@ -62,8 +74,8 @@ func materializeDirectBinary(ctx context.Context, request app.ArtifactMaterializ
 	relativePath := cleanManifestPath(binary.Path)
 	parent := filepath.Dir(relativePath)
 	if parent != "." {
-		if err := root.MkdirAll(parent, 0o755); err != nil {
-			return nil, fmt.Errorf("create binary parent for %q: %w", binary.Path, err)
+		if mkdirErr := root.MkdirAll(parent, defaultDirMode); mkdirErr != nil {
+			return nil, fmt.Errorf("create binary parent for %q: %w", binary.Path, mkdirErr)
 		}
 	}
 
@@ -80,7 +92,7 @@ func materializeDirectBinary(ctx context.Context, request app.ArtifactMaterializ
 		return nil, fmt.Errorf("artifact %s is not a regular file", request.ArtifactPath)
 	}
 
-	target, err := root.OpenFile(relativePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o755)
+	target, err := root.OpenFile(relativePath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, executableFileMode)
 	if err != nil {
 		return nil, fmt.Errorf("create binary %q: %w", binary.Path, err)
 	}
@@ -90,12 +102,12 @@ func materializeDirectBinary(ctx context.Context, request app.ArtifactMaterializ
 			_ = root.Remove(relativePath)
 		}
 	}()
-	if _, err := io.Copy(target, source); err != nil {
+	if _, copyErr := io.Copy(target, source); copyErr != nil {
 		_ = target.Close()
-		return nil, fmt.Errorf("write binary %q: %w", binary.Path, err)
+		return nil, fmt.Errorf("write binary %q: %w", binary.Path, copyErr)
 	}
-	if err := target.Close(); err != nil {
-		return nil, fmt.Errorf("close binary %q: %w", binary.Path, err)
+	if closeErr := target.Close(); closeErr != nil {
+		return nil, fmt.Errorf("close binary %q: %w", binary.Path, closeErr)
 	}
 	removeTarget = false
 

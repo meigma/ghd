@@ -21,7 +21,11 @@ type AttestationSource interface {
 	// FetchReleaseAttestations returns release attestations for a tag ref object digest.
 	FetchReleaseAttestations(ctx context.Context, repository Repository, tagDigest Digest) ([]Attestation, error)
 	// FetchProvenanceAttestations returns provenance attestations for an artifact digest.
-	FetchProvenanceAttestations(ctx context.Context, repository Repository, artifactDigest Digest) ([]Attestation, error)
+	FetchProvenanceAttestations(
+		ctx context.Context,
+		repository Repository,
+		artifactDigest Digest,
+	) ([]Attestation, error)
 }
 
 // BundleVerifier verifies an attestation bundle and extracts trusted evidence.

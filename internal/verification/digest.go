@@ -3,16 +3,15 @@ package verification
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"strings"
 )
 
-var supportedDigestLengths = map[string]int{
-	"sha1":   40,
-	"sha256": 64,
-}
+const (
+	sha1HexLength   = 40
+	sha256HexLength = 64
+)
 
 // Digest identifies an artifact or release ref digest.
 type Digest struct {
@@ -37,14 +36,31 @@ func NewDigest(algorithm string, value string) (Digest, error) {
 	if _, err := hex.DecodeString(digest.Hex); err != nil {
 		return Digest{}, wrapError(KindDigest, err, "digest value must be hex encoded")
 	}
-	wantLen, ok := supportedDigestLengths[digest.Algorithm]
+	wantLen, ok := supportedDigestLength(digest.Algorithm)
 	if !ok {
 		return Digest{}, newError(KindDigest, "unsupported digest algorithm %q", digest.Algorithm)
 	}
 	if len(digest.Hex) != wantLen {
-		return Digest{}, newError(KindDigest, "%s digest must be %d hex characters, got %d", digest.Algorithm, wantLen, len(digest.Hex))
+		return Digest{}, newError(
+			KindDigest,
+			"%s digest must be %d hex characters, got %d",
+			digest.Algorithm,
+			wantLen,
+			len(digest.Hex),
+		)
 	}
 	return digest, nil
+}
+
+func supportedDigestLength(algorithm string) (int, bool) {
+	switch algorithm {
+	case "sha1":
+		return sha1HexLength, true
+	case "sha256":
+		return sha256HexLength, true
+	default:
+		return 0, false
+	}
 }
 
 // String returns algorithm:hex.
@@ -90,11 +106,11 @@ func (SHA256FileDigester) DigestFile(path string) (Digest, error) {
 	defer file.Close()
 
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return Digest{}, wrapError(KindDigest, err, "read artifact")
+	if _, copyErr := io.Copy(hash, file); copyErr != nil {
+		return Digest{}, wrapError(KindDigest, copyErr, "read artifact")
 	}
 
-	digest, err := NewDigest("sha256", fmt.Sprintf("%x", hash.Sum(nil)))
+	digest, err := NewDigest("sha256", hex.EncodeToString(hash.Sum(nil)))
 	if err != nil {
 		return Digest{}, err
 	}

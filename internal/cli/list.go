@@ -11,6 +11,7 @@ import (
 	"github.com/meigma/ghd/internal/verification"
 )
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newListCommand(options Options) *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{

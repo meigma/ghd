@@ -11,6 +11,7 @@ import (
 	"github.com/meigma/ghd/internal/manifest"
 )
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newInfoCommand(options Options) *cobra.Command {
 	var jsonOutput bool
 	cmd := &cobra.Command{
@@ -43,24 +44,28 @@ ghd info owner/repo/foo
 			var result app.PackageInfoResult
 			if target.unqualifiedName != "" {
 				if status != nil {
-					status.Show(fmt.Sprintf("Resolving %s from the local index", terminalSafeText(target.unqualifiedName)))
+					status.Show(
+						fmt.Sprintf("Resolving %s from the local index", terminalSafeText(target.unqualifiedName)),
+					)
 				}
-				packageName, err := manifest.NewPackageName(target.unqualifiedName)
-				if err != nil {
-					return err
+				packageName, packageErr := manifest.NewPackageName(target.unqualifiedName)
+				if packageErr != nil {
+					return packageErr
 				}
-				resolved, err := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
+				resolved, resolveErr := runtime.ResolvePackage(cmd.Context(), app.ResolvePackageRequest{
 					PackageName: packageName,
 					IndexDir:    cfg.IndexDir,
 				})
-				if err != nil {
-					return err
+				if resolveErr != nil {
+					return resolveErr
 				}
 				target.repository = resolved.Repository
 				target.packageName = resolved.PackageName
 			}
 			if status != nil {
-				status.Show(fmt.Sprintf("Fetching package details from %s", terminalSafeText(target.repository.String())))
+				status.Show(
+					fmt.Sprintf("Fetching package details from %s", terminalSafeText(target.repository.String())),
+				)
 			}
 			result, err = runtime.InfoPackage(cmd.Context(), app.PackageInfoRequest{
 				Repository:  target.repository,
@@ -95,6 +100,12 @@ func writePackageInfo(options Options, result app.PackageInfoResult) {
 	fmt.Fprintf(options.Out, "tag-pattern %s\n", terminalSafeText(result.TagPattern))
 	fmt.Fprintf(options.Out, "binaries %s\n", strings.Join(terminalSafeStrings(result.Binaries), ","))
 	for _, asset := range result.Assets {
-		fmt.Fprintf(options.Out, "asset %s/%s %s\n", terminalSafeText(asset.OS), terminalSafeText(asset.Arch), terminalSafeText(asset.Pattern))
+		fmt.Fprintf(
+			options.Out,
+			"asset %s/%s %s\n",
+			terminalSafeText(asset.OS),
+			terminalSafeText(asset.Arch),
+			terminalSafeText(asset.Pattern),
+		)
 	}
 }

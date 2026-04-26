@@ -323,31 +323,31 @@ type InstallRecord struct {
 // NewVerifiedInstaller creates a verified install use case.
 func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller, error) {
 	if deps.Manifests == nil {
-		return nil, fmt.Errorf("manifest source must be set")
+		return nil, errors.New("manifest source must be set")
 	}
 	if deps.Releases == nil {
-		return nil, fmt.Errorf("release source must be set")
+		return nil, errors.New("release source must be set")
 	}
 	if deps.Assets == nil {
-		return nil, fmt.Errorf("release asset source must be set")
+		return nil, errors.New("release asset source must be set")
 	}
 	if deps.Downloader == nil {
-		return nil, fmt.Errorf("artifact downloader must be set")
+		return nil, errors.New("artifact downloader must be set")
 	}
 	if deps.Verifier == nil {
-		return nil, fmt.Errorf("verifier must be set")
+		return nil, errors.New("verifier must be set")
 	}
 	if deps.EvidenceWriter == nil {
-		return nil, fmt.Errorf("evidence writer must be set")
+		return nil, errors.New("evidence writer must be set")
 	}
 	if deps.Materializer == nil {
-		return nil, fmt.Errorf("artifact materializer must be set")
+		return nil, errors.New("artifact materializer must be set")
 	}
 	if deps.FileSystem == nil {
-		return nil, fmt.Errorf("install filesystem must be set")
+		return nil, errors.New("install filesystem must be set")
 	}
 	if deps.StateStore == nil {
-		return nil, fmt.Errorf("installed state store must be set")
+		return nil, errors.New("installed state store must be set")
 	}
 	now := deps.Now
 	if now == nil {
@@ -367,7 +367,11 @@ func NewVerifiedInstaller(deps VerifiedInstallDependencies) (*VerifiedInstaller,
 	}, nil
 }
 
-func (i *VerifiedInstaller) resolveRelease(ctx context.Context, request VerifiedInstallRequest, platform manifest.Platform) (latestStablePackageRelease, error) {
+func (i *VerifiedInstaller) resolveRelease(
+	ctx context.Context,
+	request VerifiedInstallRequest,
+	platform manifest.Platform,
+) (latestStablePackageRelease, error) {
 	manifestBytes, err := i.manifests.FetchManifest(ctx, request.Repository)
 	if err != nil {
 		return latestStablePackageRelease{}, fmt.Errorf("fetch ghd.toml: %w", err)
@@ -381,7 +385,15 @@ func (i *VerifiedInstaller) resolveRelease(ctx context.Context, request Verified
 		return latestStablePackageRelease{}, err
 	}
 	if !request.Version.IsZero() {
-		return resolveReleaseForVersion(ctx, i.manifests, request.Repository, request.PackageName, request.Version, discoveryPkg, platform)
+		return resolveReleaseForVersion(
+			ctx,
+			i.manifests,
+			request.Repository,
+			request.PackageName,
+			request.Version,
+			discoveryPkg,
+			platform,
+		)
 	}
 
 	repositoryReleases, err := i.releases.ListRepositoryReleases(ctx, request.Repository)
@@ -444,7 +456,12 @@ func resolveReleaseForVersion(
 }
 
 // Install fetches, verifies, extracts, links, and records one package install.
-func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstallRequest) (VerifiedInstallResult, error) {
+//
+//nolint:funlen // The install workflow is intentionally linear so rollback and progress order remain visible.
+func (i *VerifiedInstaller) Install(
+	ctx context.Context,
+	request VerifiedInstallRequest,
+) (VerifiedInstallResult, error) {
 	if err := request.validate(); err != nil {
 		return VerifiedInstallResult{}, err
 	}
@@ -455,7 +472,10 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		return VerifiedInstallResult{}, err
 	}
 	if _, ok := installedState.Record(request.Repository.String(), request.PackageName.String()); ok {
-		return VerifiedInstallResult{}, state.DuplicateInstallError{Repository: request.Repository.String(), Package: request.PackageName.String()}
+		return VerifiedInstallResult{}, state.DuplicateInstallError{
+			Repository: request.Repository.String(),
+			Package:    request.PackageName.String(),
+		}
 	}
 
 	request.report(InstallProgressFetchingManifest, "Fetching ghd.toml")
@@ -464,11 +484,11 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	if err != nil {
 		return VerifiedInstallResult{}, err
 	}
-	if err := installedState.CheckBinaryOwnership(state.PackageRef{
+	if ownershipErr := installedState.CheckBinaryOwnership(state.PackageRef{
 		Repository: request.Repository.String(),
 		Package:    request.PackageName.String(),
-	}, manifestBinaryNames(resolved.Package.Binaries), state.PackageRef{}); err != nil {
-		return VerifiedInstallResult{}, err
+	}, manifestBinaryNames(resolved.Package.Binaries), state.PackageRef{}); ownershipErr != nil {
+		return VerifiedInstallResult{}, ownershipErr
 	}
 	request.report(InstallProgressResolvingAsset, "Resolving GitHub release asset")
 	releaseAsset, err := i.assets.ResolveReleaseAsset(ctx, request.Repository, resolved.Tag, resolved.AssetName)
@@ -511,7 +531,7 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}
 
 	request.report(InstallProgressAwaitingApproval, "Reviewing verified install")
-	if err := request.approve(ctx, InstallApproval{
+	if approvalErr := request.approve(ctx, InstallApproval{
 		Repository:              request.Repository,
 		PackageName:             request.PackageName,
 		Version:                 resolved.Version,
@@ -524,8 +544,8 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 		TrustRootPath:           request.TrustRootPath,
 		BinDir:                  request.BinDir,
 		Binaries:                manifestBinaryNames(resolved.Package.Binaries),
-	}); err != nil {
-		return VerifiedInstallResult{}, err
+	}); approvalErr != nil {
+		return VerifiedInstallResult{}, approvalErr
 	}
 
 	request.report(InstallProgressPreparingStore, "Preparing managed store")
@@ -653,7 +673,11 @@ func (i *VerifiedInstaller) Install(ctx context.Context, request VerifiedInstall
 	}, nil
 }
 
-func (i *VerifiedInstaller) cleanupManagedInstall(ctx context.Context, request RemoveManagedInstallRequest, err error) error {
+func (i *VerifiedInstaller) cleanupManagedInstall(
+	ctx context.Context,
+	request RemoveManagedInstallRequest,
+	err error,
+) error {
 	if cleanupErr := i.files.RemoveManagedInstall(context.WithoutCancel(ctx), request); cleanupErr != nil {
 		return errors.Join(err, fmt.Errorf("cleanup managed install: %w", cleanupErr))
 	}
@@ -706,13 +730,13 @@ func (r VerifiedInstallRequest) validate() error {
 		}
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
-		return fmt.Errorf("store directory must be set")
+		return errors.New("store directory must be set")
 	}
 	if strings.TrimSpace(r.BinDir) == "" {
-		return fmt.Errorf("bin directory must be set")
+		return errors.New("bin directory must be set")
 	}
 	if strings.TrimSpace(r.StateDir) == "" {
-		return fmt.Errorf("state directory must be set")
+		return errors.New("state directory must be set")
 	}
 	return nil
 }

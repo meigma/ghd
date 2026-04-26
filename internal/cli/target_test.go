@@ -37,7 +37,6 @@ func TestParsePackageVersionTargetRejectsUnsafePackageNamesAndVersions(t *testin
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := parsePackageVersionTarget("download", tt.value)
 
@@ -85,7 +84,6 @@ func TestParseInstallTargetAcceptsQualifiedAndVersionlessTargets(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			target, err := parseInstallTarget(tt.value)
 
@@ -115,7 +113,6 @@ func TestParseInstallTargetRejectsUnsafePackageNamesAndVersions(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := parseInstallTarget(tt.value)
 

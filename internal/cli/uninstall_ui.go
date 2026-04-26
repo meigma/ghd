@@ -8,6 +8,8 @@ import (
 	"github.com/meigma/ghd/internal/state"
 )
 
+const uninstallSummaryLabelWidth = 9
+
 type uninstallPresentationMode struct {
 	presentationMode
 }
@@ -45,7 +47,7 @@ func writeUninstallSummary(w io.Writer, record state.Record, enhanced bool, colo
 		{"Asset", record.Asset},
 		{"Store", record.StorePath},
 		{"Evidence", record.VerificationPath},
-	}, 9))
+	}, uninstallSummaryLabelWidth))
 	if len(record.Binaries) == 0 {
 		return
 	}

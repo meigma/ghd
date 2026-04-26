@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"charm.land/huh/v2"
@@ -17,10 +18,16 @@ const (
 	updateApprovalActionUpdate  = "update"
 	updateApprovalActionDetails = "details"
 	updateApprovalActionSkip    = "skip"
+
+	updateApprovalSummaryLabelWidth      = 9
+	updateApprovalSignerChangeLabelWidth = 14
+	updateApprovalDescriptionLabelWidth  = 14
+	updateSummaryLabelWidth              = 9
 )
 
 type updatePresentationMode struct {
 	presentationMode
+
 	yes                 bool
 	canPrompt           bool
 	approveSignerChange bool
@@ -69,20 +76,11 @@ func updateApprovalCallback(options Options, mode updatePresentationMode, status
 		if status != nil {
 			status.Clear()
 		}
-		if approval.SignerChanged {
-			if mode.yes && mode.approveSignerChange {
-				return nil
-			}
-			if !mode.canPrompt {
-				return app.ErrUpdateSignerChangeNotApproved
-			}
-		} else {
-			if mode.yes {
-				return nil
-			}
-			if !mode.canPrompt {
-				return fmt.Errorf("update requires approval after verification; rerun with --yes to approve non-interactively")
-			}
+		if updateApprovalPreapproved(approval, mode) {
+			return nil
+		}
+		if !mode.canPrompt {
+			return updateApprovalRequiredError(approval)
 		}
 		confirm := options.UpdateConfirmation
 		if confirm == nil {
@@ -94,7 +92,26 @@ func updateApprovalCallback(options Options, mode updatePresentationMode, status
 	}
 }
 
-func promptUpdateApproval(ctx context.Context, options Options, mode updatePresentationMode, approval app.UpdateApproval) error {
+func updateApprovalPreapproved(approval app.UpdateApproval, mode updatePresentationMode) bool {
+	if !mode.yes {
+		return false
+	}
+	return !approval.SignerChanged || mode.approveSignerChange
+}
+
+func updateApprovalRequiredError(approval app.UpdateApproval) error {
+	if approval.SignerChanged {
+		return app.ErrUpdateSignerChangeNotApproved
+	}
+	return errors.New("update requires approval after verification; rerun with --yes to approve non-interactively")
+}
+
+func promptUpdateApproval(
+	ctx context.Context,
+	options Options,
+	mode updatePresentationMode,
+	approval app.UpdateApproval,
+) error {
 	for {
 		action := updateApprovalActionUpdate
 		selectAction := huh.NewSelect[string]().
@@ -128,7 +145,12 @@ func promptUpdateApproval(ctx context.Context, options Options, mode updatePrese
 	}
 }
 
-func showUpdateApprovalDetails(ctx context.Context, options Options, mode updatePresentationMode, approval app.UpdateApproval) error {
+func showUpdateApprovalDetails(
+	ctx context.Context,
+	options Options,
+	mode updatePresentationMode,
+	approval app.UpdateApproval,
+) error {
 	note := huh.NewNote().
 		Title(updateApprovalDetailsTitle(approval)).
 		Description(escapeNoteDescription(updateApprovalDescription(approval))).
@@ -200,7 +222,7 @@ func updateApprovalSummary(approval app.UpdateApproval) string {
 		{"Trust root", approval.TrustRootPath},
 	}
 	if !approval.SignerChanged {
-		return formatRows(rows, 9)
+		return formatRows(rows, updateApprovalSummaryLabelWidth)
 	}
 	rows = []uiRow{
 		{"From", approval.Repository.String()},
@@ -215,7 +237,7 @@ func updateApprovalSummary(approval app.UpdateApproval) string {
 		"This update was signed by a different release signer than the one trusted by your current install.",
 		"Approving this update will also change the signer trusted for future updates and verify runs for this package.",
 		"",
-		formatRows(rows, 14),
+		formatRows(rows, updateApprovalSignerChangeLabelWidth),
 	}, "\n")
 }
 
@@ -258,10 +280,16 @@ func updateApprovalDescription(approval app.UpdateApproval) string {
 			{"Signer", string(approval.CandidateSignerWorkflow)},
 		}, rows[9:]...)...)
 	}
-	return formatRows(rows, 14)
+	return formatRows(rows, updateApprovalDescriptionLabelWidth)
 }
 
-func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanced bool, color bool, trustRootPath string) {
+func writeUpdateSummary(
+	w io.Writer,
+	results []app.UpdateInstalledResult,
+	enhanced bool,
+	color bool,
+	trustRootPath string,
+) {
 	if !enhanced && strings.TrimSpace(trustRootPath) != "" {
 		fmt.Fprintf(w, "trust-root %s\n", terminalSafeText(trustRootPath))
 		return
@@ -275,10 +303,20 @@ func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanc
 		target := terminalSafeText(packageTarget(result.Repository, result.Package))
 		switch result.Status {
 		case app.UpdateStatusUpdated, app.UpdateStatusUpdatedWithWarning:
-			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("updated %s %s -> %s", target, terminalSafeText(result.PreviousVersion), terminalSafeText(result.CurrentVersion))))
+			fmt.Fprintln(
+				w,
+				styles.title.Render(
+					fmt.Sprintf(
+						"updated %s %s -> %s",
+						target,
+						terminalSafeText(result.PreviousVersion),
+						terminalSafeText(result.CurrentVersion),
+					),
+				),
+			)
 		case app.UpdateStatusAlreadyUpToDate:
 			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("%s already up to date", target)))
-		default:
+		case app.UpdateStatusCannotUpdate:
 			fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("could not update %s", target)))
 		}
 		if result.Reason != "" {
@@ -308,11 +346,11 @@ func writeUpdateSummary(w io.Writer, results []app.UpdateInstalledResult, enhanc
 	}
 	fmt.Fprintln(w, styles.title.Render("update results"))
 	fmt.Fprint(w, formatRows([]uiRow{
-		{"Updated", fmt.Sprint(updated)},
-		{"Current", fmt.Sprint(current)},
-		{"Warnings", fmt.Sprint(warned)},
-		{"Failed", fmt.Sprint(failed)},
+		{"Updated", strconv.Itoa(updated)},
+		{"Current", strconv.Itoa(current)},
+		{"Warnings", strconv.Itoa(warned)},
+		{"Failed", strconv.Itoa(failed)},
 		{"Trust root", trustRootPath},
-	}, 9))
+	}, updateSummaryLabelWidth))
 	fmt.Fprintln(w)
 }

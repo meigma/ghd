@@ -33,7 +33,11 @@ func TestPackageUninstallerRemovesLinksStateAndStore(t *testing.T) {
 	require.NotNil(t, tc.files.removedManaged)
 	assert.Equal(t, storeDir, tc.files.removedManaged.StoreRoot)
 	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
-	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/foo/extracted/foo"}}, tc.files.removedManaged.Binaries)
+	assert.Equal(
+		t,
+		[]InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/foo/extracted/foo"}},
+		tc.files.removedManaged.Binaries,
+	)
 	assert.Equal(t, "owner/repo", tc.state.removedRepository)
 	assert.Equal(t, "foo", tc.state.removedPackage)
 	assert.Equal(t, result.StorePath, tc.files.removedManaged.StorePath)
@@ -68,13 +72,17 @@ func TestPackageUninstallerReportsProgressInOrder(t *testing.T) {
 func TestPackageUninstallerRejectsAmbiguousTargetsBeforeRemovingLinks(t *testing.T) {
 	tc := newUninstallTestContext(t)
 	var err error
-	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/one", "foo"), []state.Binary{
-		{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/foo/extracted/one"},
-	}))
+	tc.state.index, err = tc.state.index.AddRecord(
+		withInstalledBinaries(installedRecord("owner/one", "foo"), []state.Binary{
+			{Name: "one", LinkPath: "/bin/one", TargetPath: "/store/foo/extracted/one"},
+		}),
+	)
 	require.NoError(t, err)
-	tc.state.index, err = tc.state.index.AddRecord(withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
-		{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
-	}))
+	tc.state.index, err = tc.state.index.AddRecord(
+		withInstalledBinaries(installedRecord("owner/two", "bar"), []state.Binary{
+			{Name: "foo", LinkPath: "/bin/foo-two", TargetPath: "/store/bar/extracted/foo"},
+		}),
+	)
 	require.NoError(t, err)
 
 	_, err = tc.subject.Uninstall(context.Background(), UninstallRequest{
@@ -215,7 +223,12 @@ func (f *fakeUninstallStateStore) LoadInstalledState(context.Context, string) (s
 	return f.index.Normalize(), nil
 }
 
-func (f *fakeUninstallStateStore) RemoveInstalledRecord(_ context.Context, _ string, repository string, packageName string) (state.Index, error) {
+func (f *fakeUninstallStateStore) RemoveInstalledRecord(
+	_ context.Context,
+	_ string,
+	repository string,
+	packageName string,
+) (state.Index, error) {
 	*f.events = append(*f.events, "state-remove")
 	f.removedRepository = repository
 	f.removedPackage = packageName

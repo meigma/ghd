@@ -88,7 +88,11 @@ func releaseAssetForPlatform(
 	return asset, assetName, true
 }
 
-func resolvedAssetForPlatform(pkg manifest.Package, version manifest.PackageVersion, platform manifest.Platform) (manifest.Asset, string, error) {
+func resolvedAssetForPlatform(
+	pkg manifest.Package,
+	version manifest.PackageVersion,
+	platform manifest.Platform,
+) (manifest.Asset, string, error) {
 	asset, err := assetForPlatform(pkg, platform)
 	if err != nil {
 		return manifest.Asset{}, "", err

@@ -39,7 +39,6 @@ func TestRepositoryValidateRejectsInvalidValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			require.Error(t, tt.repository.Validate())
 		})
@@ -48,7 +47,6 @@ func TestRepositoryValidateRejectsInvalidValues(t *testing.T) {
 
 func TestParseRepositoryRejectsInvalidValues(t *testing.T) {
 	for _, value := range []string{"", "owner", "owner/repo/extra", "owner/", "/repo"} {
-		value := value
 		t.Run(value, func(t *testing.T) {
 			_, err := ParseRepository(value)
 
@@ -63,6 +61,7 @@ func TestRepositoryEqualIsCaseInsensitive(t *testing.T) {
 }
 
 func TestRepositoryJSONShapeRemainsObject(t *testing.T) {
+	//nolint:musttag // Repository JSON intentionally preserves exported field names.
 	raw, err := json.Marshal(Repository{Owner: "owner", Name: "repo"})
 
 	require.NoError(t, err)
@@ -82,7 +81,6 @@ func TestNewReleaseTagAcceptsGitTagRefNames(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			tag, err := NewReleaseTag(tt.tag)
 
@@ -122,7 +120,6 @@ func TestNewReleaseTagRejectsUnsafeGitRefNames(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewReleaseTag(tt.tag)
 
@@ -173,7 +170,6 @@ func TestNewWorkflowIdentityRejectsInvalidValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewWorkflowIdentity(tt.value)
 

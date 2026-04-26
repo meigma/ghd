@@ -34,6 +34,7 @@ func TestEvidenceWriterWritesVerificationJSON(t *testing.T) {
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
 	var record app.VerificationRecord
+	//nolint:musttag // verification.json intentionally preserves nested evidence field names.
 	require.NoError(t, json.Unmarshal(data, &record))
 	assert.Equal(t, "owner/repo", record.Repository)
 	assert.Equal(t, "foo.tar.gz", record.Asset)
