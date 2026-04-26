@@ -81,8 +81,18 @@ Run the Go tests:
 go test ./...
 ```
 
-Cloudflare Pages should use the `docs` directory as the app root, `npm run
-build` as the build command, and `build` as the output directory.
+Cloudflare Pages should use:
+
+- project name `ghd`
+- custom domain `ghd.meigma.dev`
+- production branch `master`
+- `docs` as the root directory
+- `npm run build` as the build command
+- `build` as the build output directory
+
+The checked-in [docs/wrangler.jsonc](docs/wrangler.jsonc) records the
+Pages-side build output directory for Wrangler-based local development or
+deployments.
 
 ## Support
 
