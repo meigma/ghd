@@ -74,34 +74,12 @@ jobs:
       - name: Build release artifacts
         uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
         with:
-          distribution: goreleaser
+          distribution: goreleaser-pro
           version: v2.15.4
-          args: release --snapshot --clean
+          args: release --clean
         env:
-          GHD_EXAMPLE_VERSION: ${{ steps.version.outputs.version }}
-
-      - name: Materialize direct binary assets
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          jq -r '
-            .[]
-            | select(.type == "Binary")
-            | select(.name | startswith("ghd-example_"))
-            | [.path, .name]
-            | @tsv
-          ' dist/artifacts.json | while IFS=$'\t' read -r artifact_path name; do
-            cp "${artifact_path}" "dist/${name}"
-            chmod +x "dist/${name}"
-          done
-
-          asset_count="$(find dist -maxdepth 1 -type f -name 'ghd-example_*' ! -name '*.sbom.json' | wc -l | tr -d ' ')"
-          if [[ "${asset_count}" != "4" ]]; then
-            echo "expected 4 direct binary assets, found ${asset_count}" >&2
-            find dist -maxdepth 2 -type f | sort >&2
-            exit 1
-          fi
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 
       - name: Smoke test released binary version metadata
         shell: bash
@@ -111,7 +89,7 @@ jobs:
           host_os="$(go env GOHOSTOS)"
           host_arch="$(go env GOHOSTARCH)"
           expected_version="${{ steps.version.outputs.version }}"
-          bin="dist/ghd-example_${expected_version}_${host_os}_${host_arch}"
+          bin="$(find dist -type f -name ghd-example | grep "/ghd-example_${host_os}_${host_arch}_" | head -n 1 || true)"
 
           if [[ -z "${bin}" || ! -f "${bin}" ]]; then
             echo "failed to locate host binary in dist/" >&2
@@ -133,24 +111,6 @@ jobs:
             [[ "${output}" != *"(none)"* ]]
             [[ "${output}" != *"built unknown"* ]]
           done
-
-      - name: Upload assets to draft release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          mapfile -t assets < <(find dist -maxdepth 1 -type f \( -name 'ghd-example_*' -o -name 'checksums.txt' \) | sort)
-          if [[ "${#assets[@]}" -eq 0 ]]; then
-            echo "no release assets found in dist/" >&2
-            find dist -maxdepth 2 -type f | sort >&2
-            exit 1
-          fi
-
-          gh release upload "${GITHUB_REF_NAME}" "${assets[@]}" \
-            --repo "${GITHUB_REPOSITORY}" \
-            --clobber
 
       - name: Attest released files listed in checksums.txt
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0

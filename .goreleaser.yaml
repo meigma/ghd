@@ -1,13 +1,11 @@
-# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+# yaml-language-server: $schema=https://goreleaser.com/static/schema-pro.json
 version: 2
+pro: true
 
 project_name: ghd-example
 
-gomod:
-  proxy: true
-  env:
-    - GOPROXY=https://proxy.golang.org,direct
-    - GOSUMDB=sum.golang.org
+monorepo:
+  tag_prefix: example-
 
 before:
   hooks:
@@ -47,8 +45,12 @@ checksum:
 sboms:
   - artifacts: binary
 
-snapshot:
-  version_template: "{{ .Env.GHD_EXAMPLE_VERSION }}"
+release:
+  draft: true
+  use_existing_draft: true
+  replace_existing_artifacts: true
+  make_latest: false
+  mode: keep-existing
 
 changelog:
   disable: true
