@@ -6,6 +6,7 @@ const sidebars: SidebarsConfig = {
     'getting-started',
     'manage-packages',
     'security-model',
+    'publisher-guide',
     'reference',
   ],
 };
