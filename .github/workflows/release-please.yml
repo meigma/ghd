@@ -59,11 +59,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
-          tag_name="$(jq -r --arg sha "${RELEASE_SHA}" '[.[] | select(.draft == true and .target_commitish == $sha)][0].tag_name // empty' <<<"${releases}")"
+          tag_name=""
+          for attempt in {1..12}; do
+            releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
+            tag_name="$(jq -r --arg sha "${RELEASE_SHA}" '[.[] | select(.draft == true and .target_commitish == $sha)][0].tag_name // empty' <<<"${releases}")"
+
+            if [[ -n "${tag_name}" ]]; then
+              break
+            fi
+
+            echo "Draft release for ${RELEASE_SHA} not visible yet; retrying (${attempt}/12)"
+            sleep 5
+          done
 
           if [[ -z "${tag_name}" ]]; then
-            echo "No draft release found for ${RELEASE_SHA}" >&2
+            echo "No draft release found for ${RELEASE_SHA} after retrying" >&2
             exit 1
           fi
 
@@ -72,12 +82,16 @@ jobs:
             exit 0
           fi
 
-          gh api \
+          if ! output="$(gh api \
             --method POST \
             "repos/${GITHUB_REPOSITORY}/git/refs" \
             -f "ref=refs/tags/${tag_name}" \
             -f "sha=${RELEASE_SHA}" \
-            >/dev/null
+            2>&1)"; then
+            echo "${output}" >&2
+            echo "Failed to create ${tag_name}. Confirm the meigma-release-please app bypasses the tag ruleset." >&2
+            exit 1
+          fi
 
       - name: Open or update Release Please PR
         if: steps.release-merge.outputs.value != 'true'

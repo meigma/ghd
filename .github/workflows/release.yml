@@ -76,10 +76,27 @@ jobs:
         with:
           distribution: goreleaser-pro
           version: v2.15.4
-          args: release --clean
+          args: release --clean --skip=publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+
+      - name: Materialize named release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          jq -r '
+            .[]
+            | select(.type == "Binary")
+            | select(.name | startswith("ghd-example_"))
+            | [.path, .name]
+            | @tsv
+          ' dist/artifacts.json | while IFS=$'\t' read -r source name; do
+            cp "${source}" "dist/${name}"
+            chmod 0755 "dist/${name}"
+          done
+
+          (cd dist && shasum -a 256 -c checksums.txt)
 
       - name: Smoke test released binary version metadata
         shell: bash
@@ -111,6 +128,36 @@ jobs:
             [[ "${output}" != *"(none)"* ]]
             [[ "${output}" != *"built unknown"* ]]
           done
+
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t assets < <(
+            jq -r '
+              .[]
+              | select(
+                  (.type == "Binary" and (.name | startswith("ghd-example_"))) or
+                  (.type == "SBOM") or
+                  (.type == "Checksum" and .name == "checksums.txt")
+                )
+              | "dist/" + .name
+            ' dist/artifacts.json | sort
+          )
+
+          if [[ "${#assets[@]}" -ne 9 ]]; then
+            echo "expected 9 release assets, found ${#assets[@]}" >&2
+            printf '%s\n' "${assets[@]}" >&2
+            exit 1
+          fi
+
+          gh release upload "${GITHUB_REF_NAME}" \
+            "${assets[@]}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --clobber
 
       - name: Attest released files listed in checksums.txt
         uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
