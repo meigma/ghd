@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/meigma/ghd/compare/example-v1.1.0...example-v1.1.1) (2026-04-26)
+
+
+### Bug Fixes
+
+* **release:** upload assets to release please draft ([#40](https://github.com/meigma/ghd/issues/40)) ([a0b730f](https://github.com/meigma/ghd/commit/a0b730f55686bcfc2933b430cc595245e27c7eef))
+
 ## [1.1.0](https://github.com/meigma/ghd/compare/example-v1.0.0...example-v1.1.0) (2026-04-26)
 
 
