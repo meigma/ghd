@@ -6,6 +6,9 @@ import (
 	"os"
 )
 
+const usageErrorExitCode = 2
+
+//nolint:gochecknoglobals // Release builds inject these values with -ldflags.
 var (
 	version = "dev"
 	commit  = "none"
@@ -29,14 +32,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "--version", "version":
 		if len(args) != 1 {
 			fmt.Fprintf(stderr, "%s accepts no arguments\n", args[0])
-			return 2
+			return usageErrorExitCode
 		}
 		fmt.Fprintf(stdout, "ghd-example %s (%s) built %s\n", version, commit, date)
 		return 0
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n", args[0])
 		printUsage(stderr)
-		return 2
+		return usageErrorExitCode
 	}
 }
 

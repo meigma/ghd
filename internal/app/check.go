@@ -2,7 +2,9 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"golang.org/x/mod/semver"
@@ -108,13 +110,13 @@ type InstalledPackageChecker struct {
 // NewInstalledPackageChecker creates an installed package checker use case.
 func NewInstalledPackageChecker(deps InstalledPackageCheckerDependencies) (*InstalledPackageChecker, error) {
 	if deps.Manifests == nil {
-		return nil, fmt.Errorf("manifest source must be set")
+		return nil, errors.New("manifest source must be set")
 	}
 	if deps.Releases == nil {
-		return nil, fmt.Errorf("release source must be set")
+		return nil, errors.New("release source must be set")
 	}
 	if deps.StateStore == nil {
-		return nil, fmt.Errorf("installed state store must be set")
+		return nil, errors.New("installed state store must be set")
 	}
 	return &InstalledPackageChecker{
 		manifests: deps.Manifests,
@@ -180,13 +182,13 @@ func (c *InstalledPackageChecker) checkRecord(ctx context.Context, record state.
 
 func (r CheckRequest) validate() error {
 	if strings.TrimSpace(r.StateDir) == "" {
-		return fmt.Errorf("state directory must be set")
+		return errors.New("state directory must be set")
 	}
 	if r.All && strings.TrimSpace(r.Target) != "" {
-		return fmt.Errorf("check accepts a target or --all, not both")
+		return errors.New("check accepts a target or --all, not both")
 	}
 	if !r.All && strings.TrimSpace(r.Target) == "" {
-		return fmt.Errorf("check target must be set")
+		return errors.New("check target must be set")
 	}
 	return nil
 }
@@ -216,7 +218,13 @@ func parseRecordRepository(value string) (verification.Repository, error) {
 	return verification.ParseRepository(value)
 }
 
-func fetchPackageManifestForReleaseTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName manifest.PackageName, tag verification.ReleaseTag) (manifest.Config, manifest.Package, manifest.PackageVersion, error) {
+func fetchPackageManifestForReleaseTag(
+	ctx context.Context,
+	manifests ManifestSource,
+	repository verification.Repository,
+	packageName manifest.PackageName,
+	tag verification.ReleaseTag,
+) (manifest.Config, manifest.Package, manifest.PackageVersion, error) {
 	manifestBytes, err := manifests.FetchManifestAtRef(ctx, repository, string(tag))
 	if err != nil {
 		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("fetch ghd.toml at %s: %w", tag, err)
@@ -234,14 +242,24 @@ func fetchPackageManifestForReleaseTag(ctx context.Context, manifests ManifestSo
 		return manifest.Config{}, manifest.Package{}, "", err
 	}
 	if !matched {
-		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("ghd.toml at %s does not declare %s for that release tag", tag, packageName)
+		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf(
+			"ghd.toml at %s does not declare %s for that release tag",
+			tag,
+			packageName,
+		)
 	}
 	resolvedTag, err := pkg.ReleaseTag(version)
 	if err != nil {
 		return manifest.Config{}, manifest.Package{}, "", err
 	}
 	if resolvedTag != tag {
-		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf("ghd.toml at %s maps %s@%s to %s", tag, packageName, version, resolvedTag)
+		return manifest.Config{}, manifest.Package{}, "", fmt.Errorf(
+			"ghd.toml at %s maps %s@%s to %s",
+			tag,
+			packageName,
+			version,
+			resolvedTag,
+		)
 	}
 	return cfg, pkg, version, nil
 }
@@ -260,7 +278,12 @@ func assetForPlatform(pkg manifest.Package, platform manifest.Platform) (manifes
 	case 1:
 		return matches[0], nil
 	default:
-		return manifest.Asset{}, fmt.Errorf("package %q has multiple assets for %s/%s", pkg.Name, platform.OS, platform.Arch)
+		return manifest.Asset{}, fmt.Errorf(
+			"package %q has multiple assets for %s/%s",
+			pkg.Name,
+			platform.OS,
+			platform.Arch,
+		)
 	}
 }
 
@@ -281,27 +304,34 @@ func installedAssetDeclaration(pkg manifest.Package, record state.Record) (manif
 	}
 	switch len(matches) {
 	case 0:
-		return manifest.Asset{}, fmt.Errorf("installed asset %q is not declared for %s/%s@%s", record.Asset, record.Repository, record.Package, record.Version)
+		return manifest.Asset{}, fmt.Errorf(
+			"installed asset %q is not declared for %s/%s@%s",
+			record.Asset,
+			record.Repository,
+			record.Package,
+			record.Version,
+		)
 	case 1:
 		return matches[0], nil
 	default:
-		return manifest.Asset{}, fmt.Errorf("installed asset %q is declared more than once for %s/%s@%s", record.Asset, record.Repository, record.Package, record.Version)
+		return manifest.Asset{}, fmt.Errorf(
+			"installed asset %q is declared more than once for %s/%s@%s",
+			record.Asset,
+			record.Repository,
+			record.Package,
+			record.Version,
+		)
 	}
 }
 
 func (r RepositoryRelease) hasAsset(name string) bool {
-	for _, asset := range r.AssetNames {
-		if asset == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(r.AssetNames, name)
 }
 
 func normalizeSemver(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return "", fmt.Errorf("version must be set")
+		return "", errors.New("version must be set")
 	}
 	if !strings.HasPrefix(value, "v") {
 		value = "v" + value

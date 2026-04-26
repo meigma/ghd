@@ -19,14 +19,22 @@ type resolvedInstalledPackageUpdate struct {
 	Tag            verification.ReleaseTag
 }
 
-func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource, releases RepositoryReleaseSource, record state.Record) (resolvedInstalledPackageUpdate, error) {
+func resolveInstalledPackageUpdate(
+	ctx context.Context,
+	manifests ManifestSource,
+	releases RepositoryReleaseSource,
+	record state.Record,
+) (resolvedInstalledPackageUpdate, error) {
 	repository, err := parseRecordRepository(record.Repository)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}
 	installedVersion, err := normalizeSemver(record.Version)
 	if err != nil {
-		return resolvedInstalledPackageUpdate{}, fmt.Errorf("installed version %q is not a supported semantic version", record.Version)
+		return resolvedInstalledPackageUpdate{}, fmt.Errorf(
+			"installed version %q is not a supported semantic version",
+			record.Version,
+		)
 	}
 	packageName, err := manifest.NewPackageName(record.Package)
 	if err != nil {
@@ -38,10 +46,24 @@ func resolveInstalledPackageUpdate(ctx context.Context, manifests ManifestSource
 	}
 	installedTag, err := verification.NewReleaseTag(record.Tag)
 	if err != nil {
-		return resolvedInstalledPackageUpdate{}, fmt.Errorf("installed record for %s/%s@%s has invalid release tag %q: %w", record.Repository, record.Package, record.Version, record.Tag, err)
+		return resolvedInstalledPackageUpdate{}, fmt.Errorf(
+			"installed record for %s/%s@%s has invalid release tag %q: %w",
+			record.Repository,
+			record.Package,
+			record.Version,
+			record.Tag,
+			err,
+		)
 	}
 
-	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(ctx, manifests, repository, packageName, version, installedTag)
+	installedCfg, installedPkg, err := fetchPackageManifestForVersionAtTag(
+		ctx,
+		manifests,
+		repository,
+		packageName,
+		version,
+		installedTag,
+	)
 	if err != nil {
 		return resolvedInstalledPackageUpdate{}, err
 	}

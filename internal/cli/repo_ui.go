@@ -3,10 +3,18 @@ package cli
 import (
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"github.com/meigma/ghd/internal/catalog"
 	"github.com/meigma/ghd/internal/verification"
+)
+
+const (
+	repositoryAddLabelWidth            = 10
+	repositoryRefreshSingleLabelWidth  = 10
+	repositoryRefreshPackageLabelWidth = 8
+	repositoryRemoveLabelWidth         = 10
 )
 
 type repoMutationPresentationMode struct {
@@ -37,15 +45,21 @@ func writeRepositoryAddSummary(w io.Writer, record catalog.RepositoryRecord, enh
 	fmt.Fprintln(&b)
 	fmt.Fprintln(&b, formatRows([]uiRow{
 		{"Repository", record.Repository.String()},
-		{"Packages", fmt.Sprint(len(record.Packages))},
+		{"Packages", strconv.Itoa(len(record.Packages))},
 		{"Commands", strings.Join(repositoryPackageBinaryNames(record), ", ")},
-	}, 10))
+	}, repositoryAddLabelWidth))
 	fmt.Fprintln(&b)
 	fmt.Fprint(&b, styles.muted.Render("The local index was updated."))
 	fmt.Fprintln(w, strings.TrimRight(b.String(), "\n"))
 }
 
-func writeRepositoryRefreshSummary(w io.Writer, repositories []catalog.RepositoryRecord, target verification.Repository, enhanced bool, color bool) {
+func writeRepositoryRefreshSummary(
+	w io.Writer,
+	repositories []catalog.RepositoryRecord,
+	target verification.Repository,
+	enhanced bool,
+	color bool,
+) {
 	if !enhanced {
 		if !target.IsZero() {
 			fmt.Fprintf(w, "refreshed %s\n", target)
@@ -63,9 +77,9 @@ func writeRepositoryRefreshSummary(w io.Writer, repositories []catalog.Repositor
 		fmt.Fprintln(&b)
 		fmt.Fprintln(&b, formatRows([]uiRow{
 			{"Repository", record.Repository.String()},
-			{"Packages", fmt.Sprint(len(record.Packages))},
+			{"Packages", strconv.Itoa(len(record.Packages))},
 			{"Commands", strings.Join(repositoryPackageBinaryNames(record), ", ")},
-		}, 10))
+		}, repositoryRefreshSingleLabelWidth))
 		fmt.Fprintln(w, strings.TrimRight(b.String(), "\n"))
 		return
 	}
@@ -80,9 +94,9 @@ func writeRepositoryRefreshSummary(w io.Writer, repositories []catalog.Repositor
 		for _, record := range repositories {
 			fmt.Fprintln(&b, styles.accent.Render(terminalSafeText(record.Repository.String())))
 			fmt.Fprintln(&b, formatRows([]uiRow{
-				{"Packages", fmt.Sprint(len(record.Packages))},
+				{"Packages", strconv.Itoa(len(record.Packages))},
 				{"Commands", strings.Join(repositoryPackageBinaryNames(record), ", ")},
-			}, 8))
+			}, repositoryRefreshPackageLabelWidth))
 			fmt.Fprintln(&b)
 		}
 	}
@@ -103,7 +117,7 @@ func writeRepositoryRemoveSummary(w io.Writer, repository verification.Repositor
 	fmt.Fprintln(&b, formatRows([]uiRow{
 		{"Repository", repository.String()},
 		{"Scope", "Local index only"},
-	}, 10))
+	}, repositoryRemoveLabelWidth))
 	fmt.Fprintln(&b)
 	fmt.Fprint(&b, styles.muted.Render("Installed packages from this repository, if any, were not changed."))
 	fmt.Fprintln(w, strings.TrimRight(b.String(), "\n"))

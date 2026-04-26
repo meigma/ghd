@@ -1,6 +1,7 @@
 package state
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -246,7 +247,9 @@ func (i Index) ReplaceRecord(record Record) (Index, error) {
 		}
 	}
 	if found == -1 {
-		return Index{}, NotInstalledError{Target: strings.TrimSpace(record.Repository) + "/" + strings.TrimSpace(record.Package)}
+		return Index{}, NotInstalledError{
+			Target: strings.TrimSpace(record.Repository) + "/" + strings.TrimSpace(record.Package),
+		}
 	}
 	if err := i.CheckBinaryOwnership(candidate, record.binaryNames(), candidate); err != nil {
 		return Index{}, err
@@ -285,7 +288,7 @@ func (i Index) CheckBinaryOwnership(candidate PackageRef, binaryNames []string, 
 		return err
 	}
 	if len(names) == 0 {
-		return fmt.Errorf("at least one binary must be checked")
+		return errors.New("at least one binary must be checked")
 	}
 	ignoredKey := ignored.key()
 	for _, record := range i.Normalize().Records {
@@ -310,7 +313,7 @@ func (i Index) CheckBinaryOwnership(candidate PackageRef, binaryNames []string, 
 func (i Index) ResolveTarget(target string) (Record, error) {
 	target = strings.TrimSpace(target)
 	if target == "" {
-		return Record{}, fmt.Errorf("uninstall target must be set")
+		return Record{}, errors.New("uninstall target must be set")
 	}
 	if strings.Contains(target, "/") {
 		repository, packageName, err := splitQualifiedTarget(target)
@@ -355,7 +358,7 @@ func (r Record) Validate() error {
 		return err
 	}
 	if strings.TrimSpace(r.Package) == "" {
-		return fmt.Errorf("installed package name must be set")
+		return errors.New("installed package name must be set")
 	}
 	if strings.Contains(r.Package, "/") {
 		return fmt.Errorf("installed package name %q must not contain path separators", r.Package)
@@ -379,10 +382,10 @@ func (r Record) Validate() error {
 		}
 	}
 	if r.InstalledAt.IsZero() {
-		return fmt.Errorf("installed timestamp must be set")
+		return errors.New("installed timestamp must be set")
 	}
 	if len(r.Binaries) == 0 {
-		return fmt.Errorf("installed package must expose at least one binary")
+		return errors.New("installed package must expose at least one binary")
 	}
 	for _, binary := range r.Binaries {
 		if err := binary.Validate(); err != nil {
@@ -395,16 +398,16 @@ func (r Record) Validate() error {
 // Validate checks one installed binary record.
 func (b Binary) Validate() error {
 	if strings.TrimSpace(b.Name) == "" {
-		return fmt.Errorf("installed binary name must be set")
+		return errors.New("installed binary name must be set")
 	}
 	if strings.ContainsAny(b.Name, `/\`) {
 		return fmt.Errorf("installed binary name %q must not contain path separators", b.Name)
 	}
 	if strings.TrimSpace(b.LinkPath) == "" {
-		return fmt.Errorf("installed binary link path must be set")
+		return errors.New("installed binary link path must be set")
 	}
 	if strings.TrimSpace(b.TargetPath) == "" {
-		return fmt.Errorf("installed binary target path must be set")
+		return errors.New("installed binary target path must be set")
 	}
 	return nil
 }
@@ -415,7 +418,7 @@ func (r PackageRef) Validate() error {
 		return err
 	}
 	if strings.TrimSpace(r.Package) == "" {
-		return fmt.Errorf("package name must be set")
+		return errors.New("package name must be set")
 	}
 	if strings.Contains(r.Package, "/") {
 		return fmt.Errorf("package name %q must not contain path separators", r.Package)
@@ -452,19 +455,20 @@ func (r Record) binaryNames() []string {
 func validateRepository(repository string) error {
 	repository = strings.TrimSpace(repository)
 	if repository == "" {
-		return fmt.Errorf("installed repository must be set")
+		return errors.New("installed repository must be set")
 	}
 	owner, name, ok := strings.Cut(repository, "/")
 	if !ok || strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" || strings.Contains(name, "/") {
-		return fmt.Errorf("installed repository must be owner/repo")
+		return errors.New("installed repository must be owner/repo")
 	}
 	return nil
 }
 
 func splitQualifiedTarget(target string) (string, string, error) {
 	parts := strings.Split(target, "/")
-	if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
-		return "", "", fmt.Errorf("uninstall target must be name or owner/repo/package")
+	if len(parts) != 3 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" ||
+		strings.TrimSpace(parts[2]) == "" {
+		return "", "", errors.New("uninstall target must be name or owner/repo/package")
 	}
 	return strings.TrimSpace(parts[0]) + "/" + strings.TrimSpace(parts[1]), strings.TrimSpace(parts[2]), nil
 }
@@ -481,7 +485,13 @@ func (r PackageRef) key() string {
 }
 
 func binarySortKey(binary Binary) string {
-	return strings.ToLower(binary.Name) + "\x00" + strings.ToLower(binary.LinkPath) + "\x00" + strings.ToLower(binary.TargetPath)
+	return strings.ToLower(
+		binary.Name,
+	) + "\x00" + strings.ToLower(
+		binary.LinkPath,
+	) + "\x00" + strings.ToLower(
+		binary.TargetPath,
+	)
 }
 
 func cleanBinaryNames(binaryNames []string) (map[string]struct{}, error) {
@@ -489,7 +499,7 @@ func cleanBinaryNames(binaryNames []string) (map[string]struct{}, error) {
 	for _, name := range binaryNames {
 		name = strings.TrimSpace(name)
 		if name == "" {
-			return nil, fmt.Errorf("binary name must be set")
+			return nil, errors.New("binary name must be set")
 		}
 		if strings.ContainsAny(name, `/\`) {
 			return nil, fmt.Errorf("binary name %q must not contain path separators", name)

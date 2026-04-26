@@ -21,7 +21,10 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	releaseDigest := mustDigest(t, "sha1", repeatHex("bb", 20))
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		Repository:       repository,
@@ -73,9 +76,31 @@ func TestVerifiedInstallerInstallsAfterSuccessfulVerification(t *testing.T) {
 	assert.Equal(t, "foo", tc.state.saved.Records[0].Package)
 	assert.Equal(t, "1.2.3", tc.state.saved.Records[0].Version)
 	assert.Equal(t, assetDigest.String(), tc.state.saved.Records[0].AssetDigest)
-	assert.Equal(t, []state.Binary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, tc.state.saved.Records[0].Binaries)
-	assert.Equal(t, []InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}}, result.Binaries)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "cleanup"}, tc.events)
+	assert.Equal(
+		t,
+		[]state.Binary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}},
+		tc.state.saved.Records[0].Binaries,
+	)
+	assert.Equal(
+		t,
+		[]InstalledBinary{{Name: "foo", LinkPath: "/bin/foo", TargetPath: "/store/extracted/bin/foo"}},
+		result.Binaries,
+	)
+	assert.Equal(
+		t,
+		[]string{
+			"state-load",
+			"download-dir",
+			"store-layout",
+			"extract",
+			"evidence",
+			"link",
+			"metadata",
+			"state-add",
+			"cleanup",
+		},
+		tc.events,
+	)
 }
 
 func TestVerifiedInstallerInstallsDirectBinaryAsset(t *testing.T) {
@@ -247,7 +272,11 @@ func TestVerifiedInstallerUsesReleaseManifestForAssetBinariesAndSigner(t *testin
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", result.AssetName)
 	assert.Equal(t, "foo_1.2.3_darwin_arm64.tar.gz", tc.assets.assetName)
 	assert.Equal(t, []manifest.Binary{{Path: "bin/foo"}}, tc.archives.request.Binaries)
-	assert.Equal(t, verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"), tc.verifier.request.Policy.TrustedSignerWorkflow)
+	assert.Equal(
+		t,
+		verification.WorkflowIdentity("owner/repo/.github/workflows/release.yml"),
+		tc.verifier.request.Policy.TrustedSignerWorkflow,
+	)
 	assert.Equal(t, evidence.AssetDigest, result.Evidence.AssetDigest)
 }
 
@@ -266,7 +295,10 @@ func TestVerifiedInstallerResolvesLatestStableVersionWhenVersionIsOmitted(t *tes
 		{TagName: "foo-v1.4.0-rc.1", Prerelease: true, AssetNames: []string{"foo_1.4.0-rc.1_darwin_arm64.tar.gz"}},
 		{TagName: "foo-v1.3.0", AssetNames: []string{"foo_1.3.0_darwin_arm64.tar.gz"}},
 	}
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.3.0_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.3.0_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		Repository:       repository,
@@ -355,7 +387,10 @@ func TestVerifiedInstallerDoesNotMutateWhenApprovalDeclines(t *testing.T) {
 func TestVerifiedInstallerDoesNotExtractOrWriteWhenVerificationFails(t *testing.T) {
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.err = errors.New("verification failed")
 	tc.files.downloadDir = t.TempDir()
@@ -435,7 +470,10 @@ func TestVerifiedInstallerRejectsBinaryOwnershipCollisionBeforeDownloading(t *te
 func TestVerifiedInstallerDoesNotWriteMetadataWhenLinkingFails(t *testing.T) {
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
@@ -470,13 +508,29 @@ func TestVerifiedInstallerDoesNotWriteMetadataWhenLinkingFails(t *testing.T) {
 	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
 	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
 	assert.Empty(t, tc.files.removedManaged.Binaries)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "remove-managed", "cleanup"}, tc.events)
+	assert.Equal(
+		t,
+		[]string{
+			"state-load",
+			"download-dir",
+			"store-layout",
+			"extract",
+			"evidence",
+			"link",
+			"remove-managed",
+			"cleanup",
+		},
+		tc.events,
+	)
 }
 
 func TestVerifiedInstallerRollsBackLinksWhenMetadataFails(t *testing.T) {
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
@@ -511,13 +565,30 @@ func TestVerifiedInstallerRollsBackLinksWhenMetadataFails(t *testing.T) {
 	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
 	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
 	assert.Equal(t, tc.files.links, tc.files.removedManaged.Binaries)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "remove-managed", "cleanup"}, tc.events)
+	assert.Equal(
+		t,
+		[]string{
+			"state-load",
+			"download-dir",
+			"store-layout",
+			"extract",
+			"evidence",
+			"link",
+			"metadata",
+			"remove-managed",
+			"cleanup",
+		},
+		tc.events,
+	)
 }
 
 func TestVerifiedInstallerRollsBackLinksWhenInstalledStateFails(t *testing.T) {
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
@@ -551,13 +622,31 @@ func TestVerifiedInstallerRollsBackLinksWhenInstalledStateFails(t *testing.T) {
 	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
 	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
 	assert.Equal(t, tc.files.links, tc.files.removedManaged.Binaries)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "evidence", "link", "metadata", "state-add", "remove-managed", "cleanup"}, tc.events)
+	assert.Equal(
+		t,
+		[]string{
+			"state-load",
+			"download-dir",
+			"store-layout",
+			"extract",
+			"evidence",
+			"link",
+			"metadata",
+			"state-add",
+			"remove-managed",
+			"cleanup",
+		},
+		tc.events,
+	)
 }
 
 func TestVerifiedInstallerRemovesStoreWhenExtractionFails(t *testing.T) {
 	tc := newInstallTestContext(t)
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = verification.Evidence{
 		AssetDigest: mustDigest(t, "sha256", repeatHex("aa", 32)),
@@ -589,7 +678,11 @@ func TestVerifiedInstallerRemovesStoreWhenExtractionFails(t *testing.T) {
 	assert.Equal(t, binDir, tc.files.removedManaged.BinRoot)
 	assert.Equal(t, tc.files.layout.StorePath, tc.files.removedManaged.StorePath)
 	assert.Empty(t, tc.files.removedManaged.Binaries)
-	assert.Equal(t, []string{"state-load", "download-dir", "store-layout", "extract", "remove-managed", "cleanup"}, tc.events)
+	assert.Equal(
+		t,
+		[]string{"state-load", "download-dir", "store-layout", "extract", "remove-managed", "cleanup"},
+		tc.events,
+	)
 }
 
 type installTestContext struct {
@@ -657,7 +750,10 @@ func givenSuccessfulInstallFixture(t *testing.T, tc *installTestContext) verific
 		},
 	}
 	tc.manifests.data = []byte(testManifest())
-	tc.assets.asset = ReleaseAsset{Name: "foo_1.2.3_darwin_arm64.tar.gz", DownloadURL: "https://example.test/foo.tar.gz"}
+	tc.assets.asset = ReleaseAsset{
+		Name:        "foo_1.2.3_darwin_arm64.tar.gz",
+		DownloadURL: "https://example.test/foo.tar.gz",
+	}
 	tc.downloader.path = filepath.Join(t.TempDir(), "foo.tar.gz")
 	tc.verifier.evidence = evidence
 	tc.files.downloadDir = t.TempDir()
@@ -679,7 +775,11 @@ type eventEvidenceWriter struct {
 	err     error
 }
 
-func (f *eventEvidenceWriter) WriteVerificationEvidence(_ context.Context, _ string, record VerificationRecord) (string, error) {
+func (f *eventEvidenceWriter) WriteVerificationEvidence(
+	_ context.Context,
+	_ string,
+	record VerificationRecord,
+) (string, error) {
 	*f.events = append(*f.events, "evidence")
 	if f.err != nil {
 		return "", f.err
@@ -730,7 +830,10 @@ type fakeArchiveExtractor struct {
 	called  bool
 }
 
-func (f *fakeArchiveExtractor) MaterializeBinaries(_ context.Context, request ArtifactMaterializationRequest) ([]MaterializedBinary, error) {
+func (f *fakeArchiveExtractor) MaterializeBinaries(
+	_ context.Context,
+	request ArtifactMaterializationRequest,
+) ([]MaterializedBinary, error) {
 	*f.events = append(*f.events, "extract")
 	f.called = true
 	f.request = request
@@ -834,7 +937,11 @@ func (f *fakeInstallFileSystem) RemoveManagedStore(_ context.Context, storeRoot 
 	return f.removeStoreErr
 }
 
-func (f *fakeInstallFileSystem) WriteInstallMetadata(_ context.Context, _ string, record InstallRecord) (string, error) {
+func (f *fakeInstallFileSystem) WriteInstallMetadata(
+	_ context.Context,
+	_ string,
+	record InstallRecord,
+) (string, error) {
 	*f.events = append(*f.events, "metadata")
 	if f.metadataErr != nil {
 		return "", f.metadataErr
@@ -864,7 +971,11 @@ func (f *fakeInstalledStateStore) LoadInstalledState(context.Context, string) (s
 	return f.index.Normalize(), nil
 }
 
-func (f *fakeInstalledStateStore) AddInstalledRecord(_ context.Context, _ string, record state.Record) (state.Index, error) {
+func (f *fakeInstalledStateStore) AddInstalledRecord(
+	_ context.Context,
+	_ string,
+	record state.Record,
+) (state.Index, error) {
 	if f.events != nil {
 		*f.events = append(*f.events, "state-add")
 	}
@@ -880,7 +991,11 @@ func (f *fakeInstalledStateStore) AddInstalledRecord(_ context.Context, _ string
 	return f.saved, nil
 }
 
-func (f *fakeInstalledStateStore) ReplaceInstalledRecord(_ context.Context, _ string, record state.Record) (state.Index, error) {
+func (f *fakeInstalledStateStore) ReplaceInstalledRecord(
+	_ context.Context,
+	_ string,
+	record state.Record,
+) (state.Index, error) {
 	if f.events != nil {
 		*f.events = append(*f.events, "state-replace")
 	}

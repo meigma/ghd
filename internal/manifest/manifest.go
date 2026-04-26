@@ -1,10 +1,12 @@
 package manifest
 
 import (
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -46,7 +48,7 @@ func (n PackageName) IsZero() bool {
 func (n PackageName) Validate() error {
 	name := string(n)
 	if strings.TrimSpace(name) == "" {
-		return fmt.Errorf("package name must be set")
+		return errors.New("package name must be set")
 	}
 	if err := validateNoControlCharacters("package name", name); err != nil {
 		return err
@@ -91,10 +93,10 @@ func (v PackageVersion) IsZero() bool {
 func (v PackageVersion) Validate() error {
 	version := string(v)
 	if strings.TrimSpace(version) == "" {
-		return fmt.Errorf("version must be set")
+		return errors.New("version must be set")
 	}
 	if version != strings.TrimSpace(version) {
-		return fmt.Errorf("version must not contain leading or trailing whitespace")
+		return errors.New("version must not contain leading or trailing whitespace")
 	}
 	if err := validateNoControlCharacters("version", version); err != nil {
 		return err
@@ -103,7 +105,7 @@ func (v PackageVersion) Validate() error {
 		return fmt.Errorf("version %q must be a path segment", version)
 	}
 	if strings.ContainsAny(version, `/\`) {
-		return fmt.Errorf("version must not contain path separators")
+		return errors.New("version must not contain path separators")
 	}
 	return nil
 }
@@ -208,7 +210,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("unsupported ghd.toml version %d", c.Version)
 	}
 	if strings.TrimSpace(c.Provenance.SignerWorkflow) == "" {
-		return fmt.Errorf("provenance.signer_workflow must be set")
+		return errors.New("provenance.signer_workflow must be set")
 	}
 	if err := validateNoControlCharacters("provenance.signer_workflow", c.Provenance.SignerWorkflow); err != nil {
 		return err
@@ -217,7 +219,7 @@ func (c Config) Validate() error {
 		return fmt.Errorf("provenance.signer_workflow: %w", err)
 	}
 	if len(c.Packages) == 0 {
-		return fmt.Errorf("at least one package must be declared")
+		return errors.New("at least one package must be declared")
 	}
 
 	seen := map[string]struct{}{}
@@ -341,7 +343,7 @@ func (p Package) VersionForTag(tag verification.ReleaseTag) (PackageVersion, boo
 func (p Package) SelectAsset(platform Platform, version PackageVersion) (ResolvedAsset, error) {
 	platform = platform.WithDefaults()
 	if platform.OS == "" || platform.Arch == "" {
-		return ResolvedAsset{}, fmt.Errorf("platform OS and architecture must be set")
+		return ResolvedAsset{}, errors.New("platform OS and architecture must be set")
 	}
 
 	var matches []Asset
@@ -365,26 +367,31 @@ func (p Package) SelectAsset(platform Platform, version PackageVersion) (Resolve
 			Name:    name,
 		}, nil
 	default:
-		return ResolvedAsset{}, fmt.Errorf("package %q has multiple assets for %s/%s", p.Name, platform.OS, platform.Arch)
+		return ResolvedAsset{}, fmt.Errorf(
+			"package %q has multiple assets for %s/%s",
+			p.Name,
+			platform.OS,
+			platform.Arch,
+		)
 	}
 }
 
 // Validate checks one asset declaration.
 func (a Asset) Validate() error {
 	if strings.TrimSpace(a.OS) == "" {
-		return fmt.Errorf("os must be set")
+		return errors.New("os must be set")
 	}
 	if err := validateNoControlCharacters("os", a.OS); err != nil {
 		return err
 	}
 	if strings.TrimSpace(a.Arch) == "" {
-		return fmt.Errorf("arch must be set")
+		return errors.New("arch must be set")
 	}
 	if err := validateNoControlCharacters("arch", a.Arch); err != nil {
 		return err
 	}
 	if strings.TrimSpace(a.Pattern) == "" {
-		return fmt.Errorf("pattern must be set")
+		return errors.New("pattern must be set")
 	}
 	if err := validateNoControlCharacters("pattern", a.Pattern); err != nil {
 		return err
@@ -411,7 +418,7 @@ func (a Asset) ResolveName(version PackageVersion) (string, error) {
 func (b Binary) Validate() error {
 	binaryPath := strings.TrimSpace(b.Path)
 	if binaryPath == "" {
-		return fmt.Errorf("path must be set")
+		return errors.New("path must be set")
 	}
 	if err := validateNoControlCharacters("binary path", b.Path); err != nil {
 		return err
@@ -422,12 +429,10 @@ func (b Binary) Validate() error {
 	}
 	clean := path.Clean(normalized)
 	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
-		return fmt.Errorf("binary path %q must not contain ..", b.Path)
+		return fmt.Errorf("binary path %q must not contain parent directory segments", b.Path)
 	}
-	for _, part := range strings.Split(normalized, "/") {
-		if part == ".." {
-			return fmt.Errorf("binary path %q must not contain ..", b.Path)
-		}
+	if slices.Contains(strings.Split(normalized, "/"), "..") {
+		return fmt.Errorf("binary path %q must not contain parent directory segments", b.Path)
 	}
 	return nil
 }

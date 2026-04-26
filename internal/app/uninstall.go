@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/meigma/ghd/internal/state"
@@ -13,7 +13,12 @@ type InstalledStateRemoveStore interface {
 	// LoadInstalledState reads active installed package state from stateDir.
 	LoadInstalledState(ctx context.Context, stateDir string) (state.Index, error)
 	// RemoveInstalledRecord removes an active installed package record from stateDir.
-	RemoveInstalledRecord(ctx context.Context, stateDir string, repository string, packageName string) (state.Index, error)
+	RemoveInstalledRecord(
+		ctx context.Context,
+		stateDir string,
+		repository string,
+		packageName string,
+	) (state.Index, error)
 }
 
 // UninstallFileSystem owns uninstall-time filesystem cleanup.
@@ -76,10 +81,10 @@ type UninstallRequest struct {
 // NewPackageUninstaller creates an uninstall use case.
 func NewPackageUninstaller(deps PackageUninstallerDependencies) (*PackageUninstaller, error) {
 	if deps.StateStore == nil {
-		return nil, fmt.Errorf("installed state store must be set")
+		return nil, errors.New("installed state store must be set")
 	}
 	if deps.FileSystem == nil {
-		return nil, fmt.Errorf("uninstall filesystem must be set")
+		return nil, errors.New("uninstall filesystem must be set")
 	}
 	return &PackageUninstaller{state: deps.StateStore, files: deps.FileSystem}, nil
 }
@@ -116,16 +121,16 @@ func (u *PackageUninstaller) Uninstall(ctx context.Context, request UninstallReq
 
 func (r UninstallRequest) validate() error {
 	if strings.TrimSpace(r.Target) == "" {
-		return fmt.Errorf("uninstall target must be set")
+		return errors.New("uninstall target must be set")
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
-		return fmt.Errorf("store directory must be set")
+		return errors.New("store directory must be set")
 	}
 	if strings.TrimSpace(r.BinDir) == "" {
-		return fmt.Errorf("bin directory must be set")
+		return errors.New("bin directory must be set")
 	}
 	if strings.TrimSpace(r.StateDir) == "" {
-		return fmt.Errorf("state directory must be set")
+		return errors.New("state directory must be set")
 	}
 	return nil
 }

@@ -94,7 +94,11 @@ func TestCatalogStoreRemoveRepository(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	index, err := store.RemoveRepository(context.Background(), indexDir, verification.Repository{Owner: "owner", Name: "repo"})
+	index, err := store.RemoveRepository(
+		context.Background(),
+		indexDir,
+		verification.Repository{Owner: "owner", Name: "repo"},
+	)
 
 	require.NoError(t, err)
 	assert.Len(t, index.Repositories, 1)
@@ -103,7 +107,11 @@ func TestCatalogStoreRemoveRepository(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, index, loaded)
 
-	_, err = store.RemoveRepository(context.Background(), indexDir, verification.Repository{Owner: "owner", Name: "missing"})
+	_, err = store.RemoveRepository(
+		context.Background(),
+		indexDir,
+		verification.Repository{Owner: "owner", Name: "missing"},
+	)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not indexed")
 }

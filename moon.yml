@@ -12,6 +12,18 @@ workspace:
     include: []
 
 tasks:
+  lint:
+    command: 'go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.4 run ./... --show-stats=false'
+    toolchains: ['go']
+    inputs:
+      - '.golangci.yml'
+      - 'cmd/**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'internal/**/*.go'
+    options:
+      cache: false
+
   test:
     command: 'go test ./...'
     toolchains: ['go']

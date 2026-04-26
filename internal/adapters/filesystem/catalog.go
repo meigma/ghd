@@ -3,6 +3,7 @@ package filesystem
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -29,18 +30,22 @@ func (CatalogStore) LoadCatalog(ctx context.Context, indexDir string) (catalog.I
 		return catalog.Index{}, err
 	}
 	if strings.TrimSpace(indexDir) == "" {
-		return catalog.Index{}, fmt.Errorf("index directory must be set")
+		return catalog.Index{}, errors.New("index directory must be set")
 	}
 	return loadCatalogFile(indexDir)
 }
 
 // UpsertRepository adds or replaces an indexed repository under an index lock.
-func (CatalogStore) UpsertRepository(ctx context.Context, indexDir string, record catalog.RepositoryRecord) (catalog.Index, error) {
+func (CatalogStore) UpsertRepository(
+	ctx context.Context,
+	indexDir string,
+	record catalog.RepositoryRecord,
+) (catalog.Index, error) {
 	if err := ctx.Err(); err != nil {
 		return catalog.Index{}, err
 	}
 	if strings.TrimSpace(indexDir) == "" {
-		return catalog.Index{}, fmt.Errorf("index directory must be set")
+		return catalog.Index{}, errors.New("index directory must be set")
 	}
 	unlock, err := acquireCatalogLock(ctx, indexDir)
 	if err != nil {
@@ -63,12 +68,16 @@ func (CatalogStore) UpsertRepository(ctx context.Context, indexDir string, recor
 }
 
 // UpsertRepositories adds or replaces indexed repositories under one index lock.
-func (CatalogStore) UpsertRepositories(ctx context.Context, indexDir string, records []catalog.RepositoryRecord) (catalog.Index, error) {
+func (CatalogStore) UpsertRepositories(
+	ctx context.Context,
+	indexDir string,
+	records []catalog.RepositoryRecord,
+) (catalog.Index, error) {
 	if err := ctx.Err(); err != nil {
 		return catalog.Index{}, err
 	}
 	if strings.TrimSpace(indexDir) == "" {
-		return catalog.Index{}, fmt.Errorf("index directory must be set")
+		return catalog.Index{}, errors.New("index directory must be set")
 	}
 	unlock, err := acquireCatalogLock(ctx, indexDir)
 	if err != nil {
@@ -93,12 +102,16 @@ func (CatalogStore) UpsertRepositories(ctx context.Context, indexDir string, rec
 }
 
 // RemoveRepository removes an indexed repository under an index lock.
-func (CatalogStore) RemoveRepository(ctx context.Context, indexDir string, repository verification.Repository) (catalog.Index, error) {
+func (CatalogStore) RemoveRepository(
+	ctx context.Context,
+	indexDir string,
+	repository verification.Repository,
+) (catalog.Index, error) {
 	if err := ctx.Err(); err != nil {
 		return catalog.Index{}, err
 	}
 	if strings.TrimSpace(indexDir) == "" {
-		return catalog.Index{}, fmt.Errorf("index directory must be set")
+		return catalog.Index{}, errors.New("index directory must be set")
 	}
 	unlock, err := acquireCatalogLock(ctx, indexDir)
 	if err != nil {
@@ -129,6 +142,7 @@ func loadCatalogFile(indexDir string) (catalog.Index, error) {
 		return catalog.Index{}, fmt.Errorf("read catalog index: %w", err)
 	}
 	var index catalog.Index
+	//nolint:musttag // The persisted catalog schema intentionally preserves nested exported field names.
 	if err := json.Unmarshal(data, &index); err != nil {
 		return catalog.Index{}, fmt.Errorf("decode catalog index: %w", err)
 	}
@@ -143,12 +157,13 @@ func saveCatalogFile(indexDir string, index catalog.Index) error {
 	if err := index.Validate(); err != nil {
 		return err
 	}
+	//nolint:musttag // The persisted catalog schema intentionally preserves nested exported field names.
 	data, err := json.MarshalIndent(index, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode catalog index: %w", err)
 	}
 	data = append(data, '\n')
-	_, err = writeFileAtomic(indexDir, catalogIndexFile, data, 0o644)
+	_, err = writeFileAtomic(indexDir, catalogIndexFile, data, metadataMode)
 	return err
 }
 

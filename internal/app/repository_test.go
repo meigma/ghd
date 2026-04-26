@@ -35,7 +35,13 @@ func TestRepositoryCatalogRemoveOnlyUpdatesLocalIndex(t *testing.T) {
 	tc := newRepositoryCatalogTestContext(t)
 	tc.store.index = catalog.NewIndex()
 	var err error
-	tc.store.index, err = tc.store.index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "repo"}, singlePackageManifestConfig("foo", "")))
+	tc.store.index, err = tc.store.index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "repo"},
+			singlePackageManifestConfig("foo"),
+		),
+	)
 	require.NoError(t, err)
 
 	err = tc.subject.RemoveRepository(context.Background(), RepositoryRemoveRequest{
@@ -52,7 +58,13 @@ func TestRepositoryCatalogRefreshesOneRepository(t *testing.T) {
 	tc := newRepositoryCatalogTestContext(t)
 	tc.store.index = catalog.NewIndex()
 	var err error
-	tc.store.index, err = tc.store.index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "repo"}, singlePackageManifestConfig("old", "")))
+	tc.store.index, err = tc.store.index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "repo"},
+			singlePackageManifestConfig("old"),
+		),
+	)
 	require.NoError(t, err)
 	tc.manifests.data["owner/repo"] = []byte(testManifest())
 
@@ -70,9 +82,21 @@ func TestRepositoryCatalogRefreshesOneRepository(t *testing.T) {
 func TestRepositoryCatalogResolvesPackagesAndReportsAmbiguity(t *testing.T) {
 	index := catalog.NewIndex()
 	var err error
-	index, err = index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "one"}, singlePackageManifestConfig("foo", "")))
+	index, err = index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "one"},
+			singlePackageManifestConfig("foo"),
+		),
+	)
 	require.NoError(t, err)
-	index, err = index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "two"}, singlePackageManifestConfig("foo", "")))
+	index, err = index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "two"},
+			singlePackageManifestConfig("foo"),
+		),
+	)
 	require.NoError(t, err)
 
 	tc := newRepositoryCatalogTestContext(t)
@@ -91,9 +115,17 @@ func TestRepositoryCatalogResolvesPackagesAndReportsAmbiguity(t *testing.T) {
 func TestRepositoryCatalogListPackagesFromLocalIndex(t *testing.T) {
 	index := catalog.NewIndex()
 	var err error
-	index, err = index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "zeta"}, singlePackageManifestConfig("zap", "")))
+	index, err = index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "zeta"},
+			singlePackageManifestConfig("zap"),
+		),
+	)
 	require.NoError(t, err)
-	index, err = index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "alpha"}, multiPackageManifestConfig()))
+	index, err = index.UpsertRepository(
+		repositoryRecord(t, verification.Repository{Owner: "owner", Name: "alpha"}, multiPackageManifestConfig()),
+	)
 	require.NoError(t, err)
 
 	tc := newRepositoryCatalogTestContext(t)
@@ -105,9 +137,21 @@ func TestRepositoryCatalogListPackagesFromLocalIndex(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, []PackageListResult{
-		{Repository: verification.Repository{Owner: "owner", Name: "alpha"}, PackageName: "bar", Binaries: []string{"bar"}},
-		{Repository: verification.Repository{Owner: "owner", Name: "alpha"}, PackageName: "foo", Binaries: []string{"foo"}},
-		{Repository: verification.Repository{Owner: "owner", Name: "zeta"}, PackageName: "zap", Binaries: []string{"zap"}},
+		{
+			Repository:  verification.Repository{Owner: "owner", Name: "alpha"},
+			PackageName: "bar",
+			Binaries:    []string{"bar"},
+		},
+		{
+			Repository:  verification.Repository{Owner: "owner", Name: "alpha"},
+			PackageName: "foo",
+			Binaries:    []string{"foo"},
+		},
+		{
+			Repository:  verification.Repository{Owner: "owner", Name: "zeta"},
+			PackageName: "zap",
+			Binaries:    []string{"zap"},
+		},
 	}, results)
 }
 
@@ -121,8 +165,16 @@ func TestRepositoryCatalogListPackagesLiveRepositoryDoesNotPersist(t *testing.T)
 
 	require.NoError(t, err)
 	assert.Equal(t, []PackageListResult{
-		{Repository: verification.Repository{Owner: "owner", Name: "multi"}, PackageName: "bar", Binaries: []string{"bar"}},
-		{Repository: verification.Repository{Owner: "owner", Name: "multi"}, PackageName: "foo", Binaries: []string{"foo"}},
+		{
+			Repository:  verification.Repository{Owner: "owner", Name: "multi"},
+			PackageName: "bar",
+			Binaries:    []string{"bar"},
+		},
+		{
+			Repository:  verification.Repository{Owner: "owner", Name: "multi"},
+			PackageName: "foo",
+			Binaries:    []string{"foo"},
+		},
 	}, results)
 	assert.False(t, tc.store.saveCalled)
 }
@@ -130,9 +182,15 @@ func TestRepositoryCatalogListPackagesLiveRepositoryDoesNotPersist(t *testing.T)
 func TestRepositoryCatalogInfoPackageResolvesUnqualifiedName(t *testing.T) {
 	tc := newRepositoryCatalogTestContext(t)
 	var err error
-	tc.store.index, err = tc.store.index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "repo"}, singlePackageManifestConfig("foo", "")))
+	tc.store.index, err = tc.store.index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "repo"},
+			singlePackageManifestConfig("foo"),
+		),
+	)
 	require.NoError(t, err)
-	tc.manifests.data["owner/repo"] = mustMarshalManifest(t, singlePackageManifestConfig("foo", ""))
+	tc.manifests.data["owner/repo"] = mustMarshalManifest(t, singlePackageManifestConfig("foo"))
 
 	result, err := tc.subject.InfoPackage(context.Background(), PackageInfoRequest{
 		UnqualifiedName: "foo",
@@ -154,9 +212,21 @@ func TestRepositoryCatalogInfoPackageResolvesUnqualifiedName(t *testing.T) {
 func TestRepositoryCatalogInfoPackageReportsAmbiguousUnqualifiedName(t *testing.T) {
 	index := catalog.NewIndex()
 	var err error
-	index, err = index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "one"}, singlePackageManifestConfig("foo", "")))
+	index, err = index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "one"},
+			singlePackageManifestConfig("foo"),
+		),
+	)
 	require.NoError(t, err)
-	index, err = index.UpsertRepository(repositoryRecord(t, verification.Repository{Owner: "owner", Name: "two"}, singlePackageManifestConfig("foo", "")))
+	index, err = index.UpsertRepository(
+		repositoryRecord(
+			t,
+			verification.Repository{Owner: "owner", Name: "two"},
+			singlePackageManifestConfig("foo"),
+		),
+	)
 	require.NoError(t, err)
 
 	tc := newRepositoryCatalogTestContext(t)
@@ -174,7 +244,7 @@ func TestRepositoryCatalogInfoPackageReportsAmbiguousUnqualifiedName(t *testing.
 
 func TestRepositoryCatalogInfoPackageAutoSelectsSinglePackageRepository(t *testing.T) {
 	tc := newRepositoryCatalogTestContext(t)
-	tc.manifests.data["owner/repo"] = mustMarshalManifest(t, singlePackageManifestConfig("foo", ""))
+	tc.manifests.data["owner/repo"] = mustMarshalManifest(t, singlePackageManifestConfig("foo"))
 
 	result, err := tc.subject.InfoPackage(context.Background(), PackageInfoRequest{
 		Repository: verification.Repository{Owner: "owner", Name: "repo"},
@@ -249,7 +319,11 @@ func (f *fakeCatalogStore) LoadCatalog(context.Context, string) (catalog.Index, 
 	return f.index, nil
 }
 
-func (f *fakeCatalogStore) UpsertRepository(_ context.Context, _ string, record catalog.RepositoryRecord) (catalog.Index, error) {
+func (f *fakeCatalogStore) UpsertRepository(
+	_ context.Context,
+	_ string,
+	record catalog.RepositoryRecord,
+) (catalog.Index, error) {
 	if f.err != nil {
 		return catalog.Index{}, f.err
 	}
@@ -260,7 +334,11 @@ func (f *fakeCatalogStore) UpsertRepository(_ context.Context, _ string, record 
 	return f.save(index)
 }
 
-func (f *fakeCatalogStore) UpsertRepositories(_ context.Context, _ string, records []catalog.RepositoryRecord) (catalog.Index, error) {
+func (f *fakeCatalogStore) UpsertRepositories(
+	_ context.Context,
+	_ string,
+	records []catalog.RepositoryRecord,
+) (catalog.Index, error) {
 	if f.err != nil {
 		return catalog.Index{}, f.err
 	}
@@ -275,7 +353,11 @@ func (f *fakeCatalogStore) UpsertRepositories(_ context.Context, _ string, recor
 	return f.save(index)
 }
 
-func (f *fakeCatalogStore) RemoveRepository(_ context.Context, _ string, repository verification.Repository) (catalog.Index, error) {
+func (f *fakeCatalogStore) RemoveRepository(
+	_ context.Context,
+	_ string,
+	repository verification.Repository,
+) (catalog.Index, error) {
 	if f.err != nil {
 		return catalog.Index{}, f.err
 	}
@@ -303,7 +385,7 @@ func repositoryRecord(t *testing.T, repository verification.Repository, cfg mani
 	return record
 }
 
-func singlePackageManifestConfig(packageName string, tagPattern string) manifest.Config {
+func singlePackageManifestConfig(packageName string) manifest.Config {
 	pkg := manifest.Package{
 		Name:        manifest.PackageName(packageName),
 		Description: "Test package",
@@ -312,9 +394,6 @@ func singlePackageManifestConfig(packageName string, tagPattern string) manifest
 			{OS: "linux", Arch: "amd64", Pattern: packageName + "_${version}_linux_amd64.tar.gz"},
 		},
 		Binaries: []manifest.Binary{{Path: "bin/" + packageName}},
-	}
-	if tagPattern != "" {
-		pkg.TagPattern = tagPattern
 	}
 	return manifest.Config{
 		Version: manifest.SchemaVersion,

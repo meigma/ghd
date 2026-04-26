@@ -42,7 +42,6 @@ func TestNewPackageNameRejectsUnsafeValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewPackageName(tt.value)
 
@@ -74,7 +73,6 @@ func TestNewPackageVersionRejectsUnsafeValues(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := NewPackageVersion(tt.value)
 
@@ -148,7 +146,15 @@ signer_workflow = "owner/repo/.github/workflows/release.yml"
 }
 
 func TestDecodeRejectsInvalidSignerWorkflow(t *testing.T) {
-	_, err := Decode([]byte(strings.ReplaceAll(validConfig(), "owner/repo/.github/workflows/release.yml", "owner/repo/.github/actions/release.yml")))
+	_, err := Decode(
+		[]byte(
+			strings.ReplaceAll(
+				validConfig(),
+				"owner/repo/.github/workflows/release.yml",
+				"owner/repo/.github/actions/release.yml",
+			),
+		),
+	)
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "provenance.signer_workflow")
@@ -165,7 +171,6 @@ func TestDecodeRejectsUnsafeBinaryPaths(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Decode([]byte(validConfigWithBinaryPath(tt.path)))
 
@@ -188,18 +193,27 @@ func TestDecodeRejectsVersionPatternsWithoutExactlyOneToken(t *testing.T) {
 		},
 		{
 			name: "duplicate tag pattern token",
-			data: strings.Replace(validConfig(), `tag_pattern = "foo-v${version}"`, `tag_pattern = "foo-${version}-${version}"`, 1),
+			data: strings.Replace(
+				validConfig(),
+				`tag_pattern = "foo-v${version}"`,
+				`tag_pattern = "foo-${version}-${version}"`,
+				1,
+			),
 			want: "tag pattern",
 		},
 		{
 			name: "static asset pattern",
-			data: strings.Replace(validConfig(), `pattern = "foo_${version}_darwin_arm64.tar.gz"`, `pattern = "foo_1.2.3_darwin_arm64.tar.gz"`, 1),
+			data: strings.Replace(
+				validConfig(),
+				`pattern = "foo_${version}_darwin_arm64.tar.gz"`,
+				`pattern = "foo_1.2.3_darwin_arm64.tar.gz"`,
+				1,
+			),
 			want: "asset pattern",
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Decode([]byte(tt.data))
 
@@ -218,17 +232,32 @@ func TestDecodeRejectsControlCharactersInStructuralFields(t *testing.T) {
 	}{
 		{
 			name: "signer workflow",
-			data: strings.Replace(validConfig(), `signer_workflow = "owner/repo/.github/workflows/release.yml"`, `signer_workflow = "owner/repo/.github/workflows/release.yml\n"`, 1),
+			data: strings.Replace(
+				validConfig(),
+				`signer_workflow = "owner/repo/.github/workflows/release.yml"`,
+				`signer_workflow = "owner/repo/.github/workflows/release.yml\n"`,
+				1,
+			),
 			want: "provenance.signer_workflow",
 		},
 		{
 			name: "tag pattern",
-			data: strings.Replace(validConfig(), `tag_pattern = "foo-v${version}"`, `tag_pattern = "foo-v${version}\n"`, 1),
+			data: strings.Replace(
+				validConfig(),
+				`tag_pattern = "foo-v${version}"`,
+				`tag_pattern = "foo-v${version}\n"`,
+				1,
+			),
 			want: "tag pattern",
 		},
 		{
 			name: "asset pattern",
-			data: strings.Replace(validConfig(), `pattern = "foo_${version}_darwin_arm64.tar.gz"`, `pattern = "foo_${version}_darwin_arm64.tar.gz\n"`, 1),
+			data: strings.Replace(
+				validConfig(),
+				`pattern = "foo_${version}_darwin_arm64.tar.gz"`,
+				`pattern = "foo_${version}_darwin_arm64.tar.gz\n"`,
+				1,
+			),
 			want: "pattern",
 		},
 		{
@@ -239,7 +268,6 @@ func TestDecodeRejectsControlCharactersInStructuralFields(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := Decode([]byte(tt.data))
 

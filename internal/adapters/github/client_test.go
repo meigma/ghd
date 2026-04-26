@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,14 +35,18 @@ func TestClientResolveReleaseTagUsesGitHubRefObjectSHA(t *testing.T) {
 
 	client := newTestClient(t, server.URL, WithToken("token-123"), WithUserAgent("ghd-test"))
 
-	resolution, err := client.ResolveReleaseTag(context.Background(), verification.Repository{Owner: "OWNER", Name: "repo"}, "release/v1.2.3")
+	resolution, err := client.ResolveReleaseTag(
+		context.Background(),
+		verification.Repository{Owner: "OWNER", Name: "repo"},
+		"release/v1.2.3",
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "sha1", resolution.ReleaseTagDigest.Algorithm)
 	assert.Equal(t, repeatHex("aa", 20), resolution.ReleaseTagDigest.Hex)
 	assert.Equal(t, resolution.ReleaseTagDigest, resolution.SourceDigest)
 	assert.Equal(t, "application/vnd.github+json", gotHeader.Get("Accept"))
-	assert.Equal(t, DefaultAPIVersion, gotHeader.Get("X-GitHub-Api-Version"))
+	assert.Equal(t, DefaultAPIVersion, gotHeader.Get("X-Github-Api-Version"))
 	assert.Equal(t, "Bearer token-123", gotHeader.Get("Authorization"))
 	assert.Equal(t, "ghd-test", gotHeader.Get("User-Agent"))
 }
@@ -62,7 +68,11 @@ func TestClientResolveReleaseTagPeelsAnnotatedTagsToSourceCommit(t *testing.T) {
 
 	client := newTestClient(t, server.URL)
 
-	resolution, err := client.ResolveReleaseTag(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3")
+	resolution, err := client.ResolveReleaseTag(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		"v1.2.3",
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, tagObjectSHA, resolution.ReleaseTagDigest.Hex)
@@ -79,7 +89,11 @@ func TestClientResolveReleaseTagEscapesSpecialCharactersOnce(t *testing.T) {
 
 	client := newTestClient(t, server.URL)
 
-	resolution, err := client.ResolveReleaseTag(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v#1%1")
+	resolution, err := client.ResolveReleaseTag(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		"v#1%1",
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, repeatHex("ab", 20), resolution.ReleaseTagDigest.Hex)
@@ -109,7 +123,11 @@ func TestClientFetchReleaseAttestationsFetchesBundleURLs(t *testing.T) {
 	client := newTestClient(t, server.URL, WithToken("token-123"))
 	digest := mustDigest(t, "sha1", repeatHex("bb", 20))
 
-	attestations, err := client.FetchReleaseAttestations(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, digest)
+	attestations, err := client.FetchReleaseAttestations(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		digest,
+	)
 
 	require.NoError(t, err)
 	require.Len(t, attestations, 1)
@@ -137,7 +155,11 @@ func TestClientFetchProvenanceAttestationsUsesProvenancePredicate(t *testing.T) 
 	client := newTestClient(t, server.URL)
 	digest := mustDigest(t, "sha256", repeatHex("cc", 32))
 
-	attestations, err := client.FetchProvenanceAttestations(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, digest)
+	attestations, err := client.FetchProvenanceAttestations(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		digest,
+	)
 
 	require.NoError(t, err)
 	require.Len(t, attestations, 1)
@@ -173,7 +195,11 @@ func TestClientFetchManifestAtRefUsesContentsAPIRef(t *testing.T) {
 
 	client := newTestClient(t, server.URL)
 
-	data, err := client.FetchManifestAtRef(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "release/v1.2.3")
+	data, err := client.FetchManifestAtRef(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		"release/v1.2.3",
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "version = 1\n", string(data))
@@ -181,7 +207,7 @@ func TestClientFetchManifestAtRefUsesContentsAPIRef(t *testing.T) {
 
 func TestClientFetchManifestAcceptsContentsJSON(t *testing.T) {
 	encoded := base64.StdEncoding.EncodeToString([]byte("version = 1\n"))
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `{"encoding":"base64","content":%q}`, encoded)
 	}))
 	t.Cleanup(server.Close)
@@ -197,13 +223,23 @@ func TestClientFetchManifestAcceptsContentsJSON(t *testing.T) {
 func TestClientResolveReleaseAssetSelectsExactName(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "/repos/owner/repo/releases/tags/v1.2.3", r.URL.Path)
-		fmt.Fprintf(w, `{"assets":[{"name":"other.tar.gz","browser_download_url":"http://%s/other"},{"name":"foo.tar.gz","browser_download_url":"http://%s/foo"}]}`, r.Host, r.Host)
+		fmt.Fprintf(
+			w,
+			`{"assets":[{"name":"other.tar.gz","browser_download_url":"http://%s/other"},{"name":"foo.tar.gz","browser_download_url":"http://%s/foo"}]}`,
+			r.Host,
+			r.Host,
+		)
 	}))
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL)
 
-	asset, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+	asset, err := client.ResolveReleaseAsset(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		"v1.2.3",
+		"foo.tar.gz",
+	)
 
 	require.NoError(t, err)
 	assert.Equal(t, "foo.tar.gz", asset.Name)
@@ -217,18 +253,27 @@ func TestClientListRepositoryReleasesFollowsPagination(t *testing.T) {
 		assert.Equal(t, "/repos/owner/repo/releases", r.URL.Path)
 		assert.Equal(t, "100", r.URL.Query().Get("per_page"))
 		if r.URL.Query().Get("page") == "2" {
-			fmt.Fprint(w, `[{"tag_name":"foo-v1.3.0","prerelease":true,"assets":[{"name":"foo_1.3.0_darwin_arm64.tar.gz"}]}]`)
+			fmt.Fprint(
+				w,
+				`[{"tag_name":"foo-v1.3.0","prerelease":true,"assets":[{"name":"foo_1.3.0_darwin_arm64.tar.gz"}]}]`,
+			)
 			return
 		}
 		next := "http://" + r.Host + r.URL.Path + "?" + r.URL.RawQuery + "&page=2"
 		w.Header().Set("Link", fmt.Sprintf(`<%s>; rel="next"`, next))
-		fmt.Fprint(w, `[{"tag_name":"foo-v1.2.3","assets":[{"name":"foo_1.2.3_darwin_arm64.tar.gz"}]},{"tag_name":"foo-v1.2.4","draft":true,"assets":[{"name":"foo_1.2.4_darwin_arm64.tar.gz"}]}]`)
+		fmt.Fprint(
+			w,
+			`[{"tag_name":"foo-v1.2.3","assets":[{"name":"foo_1.2.3_darwin_arm64.tar.gz"}]},{"tag_name":"foo-v1.2.4","draft":true,"assets":[{"name":"foo_1.2.4_darwin_arm64.tar.gz"}]}]`,
+		)
 	}))
 	t.Cleanup(server.Close)
 
 	client := newTestClient(t, server.URL, WithToken("token-123"))
 
-	releases, err := client.ListRepositoryReleases(context.Background(), verification.Repository{Owner: "owner", Name: "repo"})
+	releases, err := client.ListRepositoryReleases(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+	)
 
 	require.NoError(t, err)
 	require.Len(t, releases, 3)
@@ -293,8 +338,8 @@ func TestClientDownloadReleaseAssetReportsProgress(t *testing.T) {
 	for i := range payload {
 		payload[i] = byte('a' + i%26)
 	}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Length", fmt.Sprint(len(payload)))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
 		_, _ = w.Write(payload)
 	}))
 	t.Cleanup(server.Close)
@@ -338,7 +383,7 @@ func TestClientDownloadReleaseAssetReportsProgress(t *testing.T) {
 }
 
 func TestClientDownloadReleaseAssetRejectsOversizedContentLength(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Length", "9")
 		fmt.Fprint(w, "too large")
 	}))
@@ -363,7 +408,7 @@ func TestClientDownloadReleaseAssetRejectsOversizedContentLength(t *testing.T) {
 }
 
 func TestClientDownloadReleaseAssetRejectsStreamsBeyondLimit(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.(http.Flusher).Flush()
 		fmt.Fprint(w, "123456789")
@@ -390,39 +435,52 @@ func TestClientDownloadReleaseAssetRejectsStreamsBeyondLimit(t *testing.T) {
 
 func TestClientReleaseAssetOperationsFailClosed(t *testing.T) {
 	t.Run("release asset API error", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "missing", http.StatusNotFound)
 		}))
 		t.Cleanup(server.Close)
 		client := newTestClient(t, server.URL)
 
-		_, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+		_, err := client.ResolveReleaseAsset(
+			context.Background(),
+			verification.Repository{Owner: "owner", Name: "repo"},
+			"v1.2.3",
+			"foo.tar.gz",
+		)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "HTTP 404")
 	})
 
 	t.Run("malformed release response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, "{")
 		}))
 		t.Cleanup(server.Close)
 		client := newTestClient(t, server.URL)
 
-		_, err := client.ResolveReleaseAsset(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, "v1.2.3", "foo.tar.gz")
+		_, err := client.ResolveReleaseAsset(
+			context.Background(),
+			verification.Repository{Owner: "owner", Name: "repo"},
+			"v1.2.3",
+			"foo.tar.gz",
+		)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decode GitHub response")
 	})
 
 	t.Run("list releases malformed response", func(t *testing.T) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, "{")
 		}))
 		t.Cleanup(server.Close)
 		client := newTestClient(t, server.URL)
 
-		_, err := client.ListRepositoryReleases(context.Background(), verification.Repository{Owner: "owner", Name: "repo"})
+		_, err := client.ListRepositoryReleases(
+			context.Background(),
+			verification.Repository{Owner: "owner", Name: "repo"},
+		)
 
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "decode GitHub response")
@@ -467,7 +525,11 @@ func TestClientFetchAttestationsFollowsPagination(t *testing.T) {
 	client := newTestClient(t, server.URL)
 	digest := mustDigest(t, "sha256", repeatHex("dd", 32))
 
-	attestations, err := client.FetchProvenanceAttestations(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, digest)
+	attestations, err := client.FetchProvenanceAttestations(
+		context.Background(),
+		verification.Repository{Owner: "owner", Name: "repo"},
+		digest,
+	)
 
 	require.NoError(t, err)
 	require.Len(t, attestations, 2)
@@ -483,15 +545,15 @@ func TestClientFetchAttestationsFailsClosed(t *testing.T) {
 	}{
 		{
 			name: "missing bundle URL",
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler: func(_ *testing.T, _ []byte) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					fmt.Fprint(w, `{"attestations":[{}]}`)
 				})
 			},
 		},
 		{
 			name: "bad snappy bundle",
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
+			handler: func(_ *testing.T, _ []byte) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/bundle" {
 						fmt.Fprint(w, "not-snappy")
@@ -503,7 +565,7 @@ func TestClientFetchAttestationsFailsClosed(t *testing.T) {
 		},
 		{
 			name: "malformed bundle JSON",
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
+			handler: func(_ *testing.T, _ []byte) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/bundle" {
 						w.Write(snappy.Encode(nil, []byte("{")))
@@ -516,7 +578,7 @@ func TestClientFetchAttestationsFailsClosed(t *testing.T) {
 		{
 			name:    "compressed bundle exceeds limit",
 			options: []Option{withMaxAttestationBundleCompressedBytes(1)},
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
+			handler: func(_ *testing.T, bundleBytes []byte) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/bundle" {
 						w.Write(bundleBytes)
@@ -529,7 +591,7 @@ func TestClientFetchAttestationsFailsClosed(t *testing.T) {
 		{
 			name:    "decompressed bundle exceeds limit",
 			options: []Option{withMaxAttestationBundleDecompressedBytes(1)},
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
+			handler: func(_ *testing.T, bundleBytes []byte) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/bundle" {
 						w.Write(bundleBytes)
@@ -542,20 +604,25 @@ func TestClientFetchAttestationsFailsClosed(t *testing.T) {
 		{
 			name:    "pagination exceeds max attestations",
 			options: []Option{WithMaxAttestations(1)},
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
+			handler: func(_ *testing.T, bundleBytes []byte) http.Handler {
 				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					if r.URL.Path == "/bundle/one" || r.URL.Path == "/bundle/two" {
 						w.Write(bundleBytes)
 						return
 					}
-					fmt.Fprintf(w, `{"attestations":[{"bundle_url":%q},{"bundle_url":%q}]}`, "http://"+r.Host+"/bundle/one", "http://"+r.Host+"/bundle/two")
+					fmt.Fprintf(
+						w,
+						`{"attestations":[{"bundle_url":%q},{"bundle_url":%q}]}`,
+						"http://"+r.Host+"/bundle/one",
+						"http://"+r.Host+"/bundle/two",
+					)
 				})
 			},
 		},
 		{
 			name: "API error",
-			handler: func(t *testing.T, bundleBytes []byte) http.Handler {
-				return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler: func(_ *testing.T, _ []byte) http.Handler {
+				return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 					http.Error(w, "server failed", http.StatusInternalServerError)
 				})
 			},
@@ -563,14 +630,17 @@ func TestClientFetchAttestationsFailsClosed(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			server := httptest.NewServer(tt.handler(t, compressedBundle(t)))
 			t.Cleanup(server.Close)
 			client := newTestClient(t, server.URL, tt.options...)
 			digest := mustDigest(t, "sha256", repeatHex("ee", 32))
 
-			_, err := client.FetchProvenanceAttestations(context.Background(), verification.Repository{Owner: "owner", Name: "repo"}, digest)
+			_, err := client.FetchProvenanceAttestations(
+				context.Background(),
+				verification.Repository{Owner: "owner", Name: "repo"},
+				digest,
+			)
 
 			require.Error(t, err)
 		})
@@ -593,7 +663,11 @@ func TestClientWiresIntoCoreVerifier(t *testing.T) {
 			fmt.Fprintf(w, `{"attestations":[{"id":"release","bundle_url":%q}]}`, "http://"+r.Host+"/bundle/release")
 		case "/repos/owner/repo/attestations/" + assetDigest.String():
 			assert.Equal(t, "provenance", r.URL.Query().Get("predicate_type"))
-			fmt.Fprintf(w, `{"attestations":[{"id":"provenance","bundle_url":%q}]}`, "http://"+r.Host+"/bundle/provenance")
+			fmt.Fprintf(
+				w,
+				`{"attestations":[{"id":"provenance","bundle_url":%q}]}`,
+				"http://"+r.Host+"/bundle/provenance",
+			)
 		case "/bundle/release", "/bundle/provenance":
 			w.Write(bundleBytes)
 		default:
@@ -639,7 +713,11 @@ type fakeBundleVerifier struct {
 	tag           verification.ReleaseTag
 }
 
-func (f fakeBundleVerifier) Verify(_ context.Context, attestation verification.Attestation, expectedSubject verification.Digest) (verification.VerifiedAttestation, error) {
+func (f fakeBundleVerifier) Verify(
+	_ context.Context,
+	attestation verification.Attestation,
+	expectedSubject verification.Digest,
+) (verification.VerifiedAttestation, error) {
 	requireBundle := func() {
 		if _, ok := attestation.Bundle.(*sigbundle.Bundle); !ok {
 			panic("adapter did not provide a Sigstore bundle")
@@ -656,8 +734,11 @@ func (f fakeBundleVerifier) Verify(_ context.Context, attestation verification.A
 			},
 			Statement: verification.Statement{
 				PredicateType: verification.ReleasePredicateV01,
-				Subjects:      []verification.Subject{{Name: "tag", Digest: f.releaseDigest}, {Name: "artifact", Digest: f.assetDigest}},
-				Predicate:     verification.Predicate{ReleaseTag: f.tag},
+				Subjects: []verification.Subject{
+					{Name: "tag", Digest: f.releaseDigest},
+					{Name: "artifact", Digest: f.assetDigest},
+				},
+				Predicate: verification.Predicate{ReleaseTag: f.tag},
 			},
 			VerifiedTimestamps: timestamps,
 		}, nil
@@ -714,8 +795,10 @@ func mustDigest(t *testing.T, algorithm string, value string) verification.Diges
 
 func repeatHex(value string, count int) string {
 	out := ""
+	var outSb717 strings.Builder
 	for range count {
-		out += value
+		outSb717.WriteString(value)
 	}
+	out += outSb717.String()
 	return out
 }

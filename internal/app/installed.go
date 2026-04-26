@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"strings"
 
 	"github.com/meigma/ghd/internal/state"
@@ -22,7 +22,7 @@ type InstalledPackages struct {
 // NewInstalledPackages creates an installed package query use case.
 func NewInstalledPackages(deps InstalledPackagesDependencies) (*InstalledPackages, error) {
 	if deps.StateStore == nil {
-		return nil, fmt.Errorf("installed state store must be set")
+		return nil, errors.New("installed state store must be set")
 	}
 	return &InstalledPackages{state: deps.StateStore}, nil
 }
@@ -30,7 +30,7 @@ func NewInstalledPackages(deps InstalledPackagesDependencies) (*InstalledPackage
 // ListInstalled returns active installed package records.
 func (p *InstalledPackages) ListInstalled(ctx context.Context, stateDir string) ([]state.Record, error) {
 	if strings.TrimSpace(stateDir) == "" {
-		return nil, fmt.Errorf("state directory must be set")
+		return nil, errors.New("state directory must be set")
 	}
 	index, err := p.state.LoadInstalledState(ctx, stateDir)
 	if err != nil {

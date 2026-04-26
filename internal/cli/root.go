@@ -110,7 +110,7 @@ func NewRootCommand(options Options) *cobra.Command {
 		Short:         "Securely download GitHub release assets",
 		SilenceUsage:  true,
 		SilenceErrors: true,
-		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 			return initializeConfig(cmd, options.Viper)
 		},
 	}
@@ -122,7 +122,8 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.PersistentFlags().String("index-dir", "", "local repository index directory")
 	root.PersistentFlags().String("state-dir", "", "local installed package state directory")
 	root.PersistentFlags().Bool("non-interactive", false, "disable prompts, colors, and transient terminal UI")
-	root.PersistentFlags().Bool("yes", false, "approve verified install actions and ordinary verified updates without prompting")
+	root.PersistentFlags().
+		Bool("yes", false, "approve verified install actions and ordinary verified updates without prompting")
 	root.AddCommand(newDownloadCommand(options))
 	root.AddCommand(newInstallCommand(options))
 	root.AddCommand(newListCommand(options))

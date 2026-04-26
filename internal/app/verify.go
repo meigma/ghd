@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"path/filepath"
@@ -102,19 +103,19 @@ type InstalledPackageVerifier struct {
 // NewInstalledPackageVerifier creates an installed package verifier use case.
 func NewInstalledPackageVerifier(deps InstalledPackageVerifierDependencies) (*InstalledPackageVerifier, error) {
 	if deps.StateStore == nil {
-		return nil, fmt.Errorf("installed state store must be set")
+		return nil, errors.New("installed state store must be set")
 	}
 	if deps.Verifier == nil {
-		return nil, fmt.Errorf("verifier must be set")
+		return nil, errors.New("verifier must be set")
 	}
 	if deps.EvidenceStore == nil {
-		return nil, fmt.Errorf("verification record store must be set")
+		return nil, errors.New("verification record store must be set")
 	}
 	if deps.Materializer == nil {
-		return nil, fmt.Errorf("artifact materializer must be set")
+		return nil, errors.New("artifact materializer must be set")
 	}
 	if deps.FileSystem == nil {
-		return nil, fmt.Errorf("verify filesystem must be set")
+		return nil, errors.New("verify filesystem must be set")
 	}
 	return &InstalledPackageVerifier{
 		state:        deps.StateStore,
@@ -126,7 +127,10 @@ func NewInstalledPackageVerifier(deps InstalledPackageVerifierDependencies) (*In
 }
 
 // Verify re-validates selected active installed packages and their managed binaries.
-func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyInstalledRequest) ([]VerifyInstalledResult, error) {
+func (v *InstalledPackageVerifier) Verify(
+	ctx context.Context,
+	request VerifyInstalledRequest,
+) ([]VerifyInstalledResult, error) {
 	if err := request.validate(); err != nil {
 		return nil, err
 	}
@@ -158,17 +162,23 @@ func (v *InstalledPackageVerifier) Verify(ctx context.Context, request VerifyIns
 	return results, nil
 }
 
+//nolint:funlen // Verification replay keeps evidence checks in one readable sequence.
 func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record state.Record) error {
 	verificationRecord, err := v.evidence.ReadVerificationRecord(ctx, record.VerificationPath)
 	if err != nil {
 		return err
 	}
-	if err := verifyInstalledRecordConsistency(record, verificationRecord); err != nil {
-		return err
+	if consistencyErr := verifyInstalledRecordConsistency(record, verificationRecord); consistencyErr != nil {
+		return consistencyErr
 	}
 	signerWorkflow := verificationRecord.Evidence.ProvenanceAttestation.SignerWorkflow
 	if strings.TrimSpace(string(signerWorkflow)) == "" {
-		return fmt.Errorf("verification evidence for %s/%s@%s has no trusted signer workflow", record.Repository, record.Package, record.Version)
+		return fmt.Errorf(
+			"verification evidence for %s/%s@%s has no trusted signer workflow",
+			record.Repository,
+			record.Package,
+			record.Version,
+		)
 	}
 
 	repository, err := parseRecordRepository(record.Repository)
@@ -177,7 +187,14 @@ func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record stat
 	}
 	tag, err := verification.NewReleaseTag(record.Tag)
 	if err != nil {
-		return fmt.Errorf("installed record for %s/%s@%s has invalid release tag %q: %w", record.Repository, record.Package, record.Version, record.Tag, err)
+		return fmt.Errorf(
+			"installed record for %s/%s@%s has invalid release tag %q: %w",
+			record.Repository,
+			record.Package,
+			record.Version,
+			record.Tag,
+			err,
+		)
 	}
 	evidence, err := v.verify.VerifyReleaseAsset(ctx, verification.Request{
 		Repository: repository,
@@ -191,10 +208,18 @@ func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record stat
 		return err
 	}
 	if evidence.AssetDigest.String() != record.AssetDigest {
-		return fmt.Errorf("re-verified artifact digest %s does not match installed digest %s", evidence.AssetDigest, record.AssetDigest)
+		return fmt.Errorf(
+			"re-verified artifact digest %s does not match installed digest %s",
+			evidence.AssetDigest,
+			record.AssetDigest,
+		)
 	}
 	if evidence.AssetDigest.String() != verificationRecord.Evidence.AssetDigest.String() {
-		return fmt.Errorf("re-verified artifact digest %s does not match persisted verification digest %s", evidence.AssetDigest, verificationRecord.Evidence.AssetDigest)
+		return fmt.Errorf(
+			"re-verified artifact digest %s does not match persisted verification digest %s",
+			evidence.AssetDigest,
+			verificationRecord.Evidence.AssetDigest,
+		)
 	}
 
 	declaredBinaries, installedByRelativePath, err := installedBinaryDeclarations(record)
@@ -225,9 +250,17 @@ func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record stat
 	for relativePath, installedBinary := range installedByRelativePath {
 		materializedBinary, ok := materializedByRelativePath[relativePath]
 		if !ok {
-			return fmt.Errorf("verified artifact did not prepare installed binary %q at %s", installedBinary.Name, relativePath)
+			return fmt.Errorf(
+				"verified artifact did not prepare installed binary %q at %s",
+				installedBinary.Name,
+				relativePath,
+			)
 		}
-		if err := v.files.VerifyManagedBinaryLink(ctx, installedBinary.LinkPath, installedBinary.TargetPath); err != nil {
+		if err := v.files.VerifyManagedBinaryLink(
+			ctx,
+			installedBinary.LinkPath,
+			installedBinary.TargetPath,
+		); err != nil {
 			return err
 		}
 		if err := v.files.CompareFiles(ctx, installedBinary.TargetPath, materializedBinary.Path); err != nil {
@@ -240,13 +273,13 @@ func (v *InstalledPackageVerifier) verifyRecord(ctx context.Context, record stat
 
 func (r VerifyInstalledRequest) validate() error {
 	if strings.TrimSpace(r.StateDir) == "" {
-		return fmt.Errorf("state directory must be set")
+		return errors.New("state directory must be set")
 	}
 	if r.All && strings.TrimSpace(r.Target) != "" {
-		return fmt.Errorf("verify accepts a target or --all, not both")
+		return errors.New("verify accepts a target or --all, not both")
 	}
 	if !r.All && strings.TrimSpace(r.Target) == "" {
-		return fmt.Errorf("verify target must be set")
+		return errors.New("verify target must be set")
 	}
 	return nil
 }
@@ -284,7 +317,13 @@ func verifyInstalledRecordConsistency(record state.Record, verificationRecord Ve
 	}
 	for _, field := range fields {
 		if field.installed != field.recorded {
-			return fmt.Errorf("installed %s %q does not match persisted verification %s %q", field.label, field.installed, field.label, field.recorded)
+			return fmt.Errorf(
+				"installed %s %q does not match persisted verification %s %q",
+				field.label,
+				field.installed,
+				field.label,
+				field.recorded,
+			)
 		}
 	}
 	return nil
@@ -292,7 +331,7 @@ func verifyInstalledRecordConsistency(record state.Record, verificationRecord Ve
 
 func installedBinaryDeclarations(record state.Record) ([]manifest.Binary, map[string]state.Binary, error) {
 	if strings.TrimSpace(record.ExtractedPath) == "" {
-		return nil, nil, fmt.Errorf("installed extracted path must be set")
+		return nil, nil, errors.New("installed extracted path must be set")
 	}
 	declared := make([]manifest.Binary, 0, len(record.Binaries))
 	byRelativePath := make(map[string]state.Binary, len(record.Binaries))
@@ -303,7 +342,12 @@ func installedBinaryDeclarations(record state.Record) ([]manifest.Binary, map[st
 		}
 		normalized := path.Clean(filepath.ToSlash(relativePath))
 		if normalized == "." || normalized == ".." || path.IsAbs(normalized) || strings.HasPrefix(normalized, "../") {
-			return nil, nil, fmt.Errorf("installed binary %q target %s escapes extracted path %s", binary.Name, binary.TargetPath, record.ExtractedPath)
+			return nil, nil, fmt.Errorf(
+				"installed binary %q target %s escapes extracted path %s",
+				binary.Name,
+				binary.TargetPath,
+				record.ExtractedPath,
+			)
 		}
 		decl := manifest.Binary{Path: normalized}
 		if err := decl.Validate(); err != nil {

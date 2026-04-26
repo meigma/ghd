@@ -16,7 +16,7 @@ func newInstalledCommand(options Options) *cobra.Command {
 		Use:   "installed",
 		Short: "List installed packages",
 		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg := config.Load(options.Viper)
 			runtime, err := options.RuntimeFactory(cmd.Context(), cfg)
 			if err != nil {
@@ -43,6 +43,13 @@ func writeInstalledList(options Options, records []state.Record) {
 		for _, binary := range record.Binaries {
 			binaries = append(binaries, terminalSafeText(binary.Name))
 		}
-		fmt.Fprintf(options.Out, "%s/%s %s %s\n", terminalSafeText(record.Repository), terminalSafeText(record.Package), terminalSafeText(record.Version), strings.Join(binaries, ","))
+		fmt.Fprintf(
+			options.Out,
+			"%s/%s %s %s\n",
+			terminalSafeText(record.Repository),
+			terminalSafeText(record.Package),
+			terminalSafeText(record.Version),
+			strings.Join(binaries, ","),
+		)
 	}
 }

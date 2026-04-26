@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/meigma/ghd/internal/config"
 )
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newCheckCommand(options Options) *cobra.Command {
 	var all bool
 	var jsonOutput bool
@@ -24,7 +26,7 @@ ghd --non-interactive check --all --state-dir ./state
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && len(args) > 0 {
-				return fmt.Errorf("check accepts a target or --all, not both")
+				return errors.New("check accepts a target or --all, not both")
 			}
 			target := ""
 			if len(args) == 1 {
@@ -83,7 +85,14 @@ func writeCheckResults(options Options, results []app.CheckResult) {
 	for _, result := range results {
 		target := terminalSafeText(result.Repository + "/" + result.Package)
 		if result.LatestVersion != "" {
-			fmt.Fprintf(options.Out, "%s %s %s %s\n", target, terminalSafeText(result.Version), result.Status, terminalSafeText(result.LatestVersion))
+			fmt.Fprintf(
+				options.Out,
+				"%s %s %s %s\n",
+				target,
+				terminalSafeText(result.Version),
+				result.Status,
+				terminalSafeText(result.LatestVersion),
+			)
 			continue
 		}
 		fmt.Fprintf(options.Out, "%s %s %s\n", target, terminalSafeText(result.Version), result.Status)

@@ -28,7 +28,7 @@ ghd doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir
 ghd --non-interactive doctor --index-dir ./index --state-dir ./state --store-dir ./store --bin-dir ./bin
 `),
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			mode := detectReadOnlyPresentationMode(options, jsonOutput)
 			var status *transientStatusLine
 			if mode.statusLine {
@@ -80,6 +80,12 @@ ghd --non-interactive doctor --index-dir ./index --state-dir ./state --store-dir
 
 func writeDoctorResults(options Options, results []app.DoctorResult) {
 	for _, result := range results {
-		fmt.Fprintf(options.Out, "%s %s %s\n", result.Status, terminalSafeText(result.ID), terminalSafeText(result.Message))
+		fmt.Fprintf(
+			options.Out,
+			"%s %s %s\n",
+			result.Status,
+			terminalSafeText(result.ID),
+			terminalSafeText(result.Message),
+		)
 	}
 }

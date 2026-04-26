@@ -28,37 +28,35 @@ type Config struct {
 
 // Load reads runtime settings from Viper and the process environment.
 func Load(vp *viper.Viper) Config {
-	token := strings.TrimSpace(vp.GetString("github-token"))
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
-	}
-	if token == "" {
-		token = strings.TrimSpace(os.Getenv("GH_TOKEN"))
-	}
-	storeDir := strings.TrimSpace(vp.GetString("store-dir"))
-	binDir := strings.TrimSpace(vp.GetString("bin-dir"))
-	indexDir := strings.TrimSpace(vp.GetString("index-dir"))
-	stateDir := strings.TrimSpace(vp.GetString("state-dir"))
 	home, _ := os.UserHomeDir()
-	if indexDir == "" && home != "" {
-		indexDir = filepath.Join(home, ".local", "share", "ghd", "index")
-	}
-	if storeDir == "" && home != "" {
-		storeDir = filepath.Join(home, ".local", "share", "ghd", "store")
-	}
-	if stateDir == "" && home != "" {
-		stateDir = filepath.Join(home, ".local", "state", "ghd")
-	}
-	if binDir == "" && home != "" {
-		binDir = filepath.Join(home, ".local", "bin")
-	}
 	return Config{
 		GitHubBaseURL:   strings.TrimSpace(vp.GetString("github-api-url")),
-		GitHubToken:     token,
+		GitHubToken:     githubToken(vp),
 		TrustedRootPath: strings.TrimSpace(vp.GetString("trusted-root")),
-		IndexDir:        indexDir,
-		StoreDir:        storeDir,
-		BinDir:          binDir,
-		StateDir:        stateDir,
+		IndexDir:        configDir(vp, "index-dir", home, ".local", "share", "ghd", "index"),
+		StoreDir:        configDir(vp, "store-dir", home, ".local", "share", "ghd", "store"),
+		BinDir:          configDir(vp, "bin-dir", home, ".local", "bin"),
+		StateDir:        configDir(vp, "state-dir", home, ".local", "state", "ghd"),
 	}
+}
+
+func githubToken(vp *viper.Viper) string {
+	for _, candidate := range []string{
+		vp.GetString("github-token"),
+		os.Getenv("GITHUB_TOKEN"),
+		os.Getenv("GH_TOKEN"),
+	} {
+		if token := strings.TrimSpace(candidate); token != "" {
+			return token
+		}
+	}
+	return ""
+}
+
+func configDir(vp *viper.Viper, key string, home string, defaultPath ...string) string {
+	value := strings.TrimSpace(vp.GetString(key))
+	if value != "" || home == "" {
+		return value
+	}
+	return filepath.Join(append([]string{home}, defaultPath...)...)
 }

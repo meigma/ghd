@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -142,10 +143,10 @@ type PackageInfoResult struct {
 // NewRepositoryCatalog creates a repository catalog use case.
 func NewRepositoryCatalog(deps RepositoryCatalogDependencies) (*RepositoryCatalog, error) {
 	if deps.Manifests == nil {
-		return nil, fmt.Errorf("manifest source must be set")
+		return nil, errors.New("manifest source must be set")
 	}
 	if deps.Store == nil {
-		return nil, fmt.Errorf("catalog store must be set")
+		return nil, errors.New("catalog store must be set")
 	}
 	now := deps.Now
 	if now == nil {
@@ -155,7 +156,10 @@ func NewRepositoryCatalog(deps RepositoryCatalogDependencies) (*RepositoryCatalo
 }
 
 // AddRepository fetches and indexes a repository manifest.
-func (c *RepositoryCatalog) AddRepository(ctx context.Context, request RepositoryAddRequest) (catalog.RepositoryRecord, error) {
+func (c *RepositoryCatalog) AddRepository(
+	ctx context.Context,
+	request RepositoryAddRequest,
+) (catalog.RepositoryRecord, error) {
 	if err := validateRepositoryRequest(request.Repository, request.IndexDir); err != nil {
 		return catalog.RepositoryRecord{}, err
 	}
@@ -172,7 +176,7 @@ func (c *RepositoryCatalog) AddRepository(ctx context.Context, request Repositor
 // ListRepositories returns indexed repository records.
 func (c *RepositoryCatalog) ListRepositories(ctx context.Context, indexDir string) ([]catalog.RepositoryRecord, error) {
 	if strings.TrimSpace(indexDir) == "" {
-		return nil, fmt.Errorf("index directory must be set")
+		return nil, errors.New("index directory must be set")
 	}
 	index, err := c.store.LoadCatalog(ctx, indexDir)
 	if err != nil {
@@ -191,16 +195,19 @@ func (c *RepositoryCatalog) RemoveRepository(ctx context.Context, request Reposi
 }
 
 // RefreshRepositories refreshes one repository or every indexed repository.
-func (c *RepositoryCatalog) RefreshRepositories(ctx context.Context, request RepositoryRefreshRequest) ([]catalog.RepositoryRecord, error) {
+func (c *RepositoryCatalog) RefreshRepositories(
+	ctx context.Context,
+	request RepositoryRefreshRequest,
+) ([]catalog.RepositoryRecord, error) {
 	if strings.TrimSpace(request.IndexDir) == "" {
-		return nil, fmt.Errorf("index directory must be set")
+		return nil, errors.New("index directory must be set")
 	}
 	index, err := c.store.LoadCatalog(ctx, request.IndexDir)
 	if err != nil {
 		return nil, err
 	}
 	if request.Repository.IsZero() && !request.All {
-		return nil, fmt.Errorf("refresh target must be owner/repo or --all")
+		return nil, errors.New("refresh target must be owner/repo or --all")
 	}
 
 	var repositories []verification.Repository
@@ -229,9 +236,12 @@ func (c *RepositoryCatalog) RefreshRepositories(ctx context.Context, request Rep
 }
 
 // ResolvePackage resolves an unqualified package name through the local catalog.
-func (c *RepositoryCatalog) ResolvePackage(ctx context.Context, request ResolvePackageRequest) (ResolvePackageResult, error) {
+func (c *RepositoryCatalog) ResolvePackage(
+	ctx context.Context,
+	request ResolvePackageRequest,
+) (ResolvePackageResult, error) {
 	if strings.TrimSpace(request.IndexDir) == "" {
-		return ResolvePackageResult{}, fmt.Errorf("index directory must be set")
+		return ResolvePackageResult{}, errors.New("index directory must be set")
 	}
 	index, err := c.store.LoadCatalog(ctx, request.IndexDir)
 	if err != nil {
@@ -248,7 +258,7 @@ func (c *RepositoryCatalog) ResolvePackage(ctx context.Context, request ResolveP
 func (c *RepositoryCatalog) ListPackages(ctx context.Context, request PackageListRequest) ([]PackageListResult, error) {
 	if request.Repository.IsZero() {
 		if strings.TrimSpace(request.IndexDir) == "" {
-			return nil, fmt.Errorf("index directory must be set")
+			return nil, errors.New("index directory must be set")
 		}
 		index, err := c.store.LoadCatalog(ctx, request.IndexDir)
 		if err != nil {
@@ -284,7 +294,7 @@ func (c *RepositoryCatalog) InfoPackage(ctx context.Context, request PackageInfo
 		packageName = resolved.PackageName
 	}
 	if repository.IsZero() {
-		return PackageInfoResult{}, fmt.Errorf("info target must identify a repository")
+		return PackageInfoResult{}, errors.New("info target must identify a repository")
 	}
 	if !packageName.IsZero() {
 		if err := packageName.Validate(); err != nil {
@@ -298,14 +308,21 @@ func (c *RepositoryCatalog) InfoPackage(ctx context.Context, request PackageInfo
 	}
 	if packageName.IsZero() {
 		if len(cfg.Packages) != 1 {
-			return PackageInfoResult{}, fmt.Errorf("repository %s declares multiple packages; use %s/package", repository, repository)
+			return PackageInfoResult{}, fmt.Errorf(
+				"repository %s declares multiple packages; use %s/package",
+				repository,
+				repository,
+			)
 		}
 		packageName = cfg.Packages[0].Name
 	}
 	return c.packageInfoResult(repository, cfg, packageName)
 }
 
-func (c *RepositoryCatalog) fetchConfig(ctx context.Context, repository verification.Repository) (manifest.Config, error) {
+func (c *RepositoryCatalog) fetchConfig(
+	ctx context.Context,
+	repository verification.Repository,
+) (manifest.Config, error) {
 	manifestBytes, err := c.manifests.FetchManifest(ctx, repository)
 	if err != nil {
 		return manifest.Config{}, fmt.Errorf("fetch ghd.toml: %w", err)
@@ -313,7 +330,10 @@ func (c *RepositoryCatalog) fetchConfig(ctx context.Context, repository verifica
 	return manifest.Decode(manifestBytes)
 }
 
-func (c *RepositoryCatalog) fetchRecord(ctx context.Context, repository verification.Repository) (catalog.RepositoryRecord, error) {
+func (c *RepositoryCatalog) fetchRecord(
+	ctx context.Context,
+	repository verification.Repository,
+) (catalog.RepositoryRecord, error) {
 	cfg, err := c.fetchConfig(ctx, repository)
 	if err != nil {
 		return catalog.RepositoryRecord{}, err
@@ -321,7 +341,11 @@ func (c *RepositoryCatalog) fetchRecord(ctx context.Context, repository verifica
 	return catalog.NewRepositoryRecord(repository, cfg, c.now())
 }
 
-func (c *RepositoryCatalog) packageInfoResult(repository verification.Repository, cfg manifest.Config, packageName manifest.PackageName) (PackageInfoResult, error) {
+func (c *RepositoryCatalog) packageInfoResult(
+	repository verification.Repository,
+	cfg manifest.Config,
+	packageName manifest.PackageName,
+) (PackageInfoResult, error) {
 	pkg, err := cfg.Package(packageName)
 	if err != nil {
 		return PackageInfoResult{}, err
@@ -339,7 +363,11 @@ func (c *RepositoryCatalog) packageInfoResult(repository verification.Repository
 		}
 	}
 	if len(binaries) == 0 {
-		return PackageInfoResult{}, fmt.Errorf("repository %s package %q has no exposed binaries", repository, packageName)
+		return PackageInfoResult{}, fmt.Errorf(
+			"repository %s package %q has no exposed binaries",
+			repository,
+			packageName,
+		)
 	}
 
 	assets := make([]PackageInfoAsset, 0, len(pkg.Assets))
@@ -391,7 +419,7 @@ func validateRepositoryRequest(repository verification.Repository, indexDir stri
 		return err
 	}
 	if strings.TrimSpace(indexDir) == "" {
-		return fmt.Errorf("index directory must be set")
+		return errors.New("index directory must be set")
 	}
 	return nil
 }

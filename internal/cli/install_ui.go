@@ -17,10 +17,16 @@ const (
 	installApprovalActionInstall = "install"
 	installApprovalActionDetails = "details"
 	installApprovalActionCancel  = "cancel"
+
+	installApprovalSummaryLabelWidth     = 9
+	installApprovalDescriptionLabelWidth = 10
+	installProgressBarWidth              = 24
+	percentMultiplier                    = 100
 )
 
 type installPresentationMode struct {
 	presentationMode
+
 	yes       bool
 	canPrompt bool
 }
@@ -54,7 +60,11 @@ func (s *statusLine) UpdateInstallDownload(progress app.DownloadProgress) {
 	s.UpdateLine(line)
 }
 
-func installApprovalCallback(options Options, mode installPresentationMode, status *statusLine) app.InstallApprovalFunc {
+func installApprovalCallback(
+	options Options,
+	mode installPresentationMode,
+	status *statusLine,
+) app.InstallApprovalFunc {
 	return func(ctx context.Context, approval app.InstallApproval) error {
 		if status != nil {
 			status.Clear()
@@ -63,7 +73,9 @@ func installApprovalCallback(options Options, mode installPresentationMode, stat
 			return nil
 		}
 		if !mode.canPrompt {
-			return fmt.Errorf("install requires approval after verification; rerun with --yes to approve non-interactively")
+			return errors.New(
+				"install requires approval after verification; rerun with --yes to approve non-interactively",
+			)
 		}
 		confirm := options.InstallConfirmation
 		if confirm == nil {
@@ -75,7 +87,12 @@ func installApprovalCallback(options Options, mode installPresentationMode, stat
 	}
 }
 
-func promptInstallApproval(ctx context.Context, options Options, mode installPresentationMode, approval app.InstallApproval) error {
+func promptInstallApproval(
+	ctx context.Context,
+	options Options,
+	mode installPresentationMode,
+	approval app.InstallApproval,
+) error {
 	for {
 		action := installApprovalActionInstall
 		selectAction := huh.NewSelect[string]().
@@ -103,7 +120,12 @@ func promptInstallApproval(ctx context.Context, options Options, mode installPre
 	}
 }
 
-func showInstallApprovalDetails(ctx context.Context, options Options, mode installPresentationMode, approval app.InstallApproval) error {
+func showInstallApprovalDetails(
+	ctx context.Context,
+	options Options,
+	mode installPresentationMode,
+	approval app.InstallApproval,
+) error {
 	note := huh.NewNote().
 		Title("Verified artifact details").
 		Description(escapeNoteDescription(installApprovalDescription(approval))).
@@ -139,7 +161,7 @@ func installApprovalSummary(approval app.InstallApproval) string {
 		{"To", installApprovalDestination(approval)},
 		{"Verified", trustRootVerificationLabel(approval.TrustRootPath)},
 		{"Trust root", approval.TrustRootPath},
-	}, 9)
+	}, installApprovalSummaryLabelWidth)
 }
 
 func installApprovalDestination(approval app.InstallApproval) string {
@@ -170,7 +192,7 @@ func installApprovalDescription(approval app.InstallApproval) string {
 		{"Trust root", approval.TrustRootPath},
 		{"Bin dir", approval.BinDir},
 		{"Binaries", strings.Join(approval.Binaries, ", ")},
-	}, 10)
+	}, installApprovalDescriptionLabelWidth)
 }
 
 func renderInstallDownloadProgress(progress app.DownloadProgress, frame string, styles uiStyles) string {
@@ -190,9 +212,9 @@ func renderInstallDownloadProgress(progress app.DownloadProgress, frame string, 
 	ratio := float64(downloaded) / float64(total)
 	return fmt.Sprintf(
 		"%s %s %.0f%% %s/%s",
-		renderProgressBar(ratio, 24, styles),
+		renderProgressBar(ratio, installProgressBarWidth, styles),
 		message,
-		ratio*100,
+		ratio*percentMultiplier,
 		formatByteCount(downloaded),
 		formatByteCount(total),
 	)
@@ -200,14 +222,30 @@ func renderInstallDownloadProgress(progress app.DownloadProgress, frame string, 
 
 func writeInstallSummary(w io.Writer, result app.VerifiedInstallResult, enhanced bool, color bool) {
 	if !enhanced {
-		fmt.Fprintf(w, "installed %s/%s@%s\n", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName.String()), terminalSafeText(result.Version.String()))
+		fmt.Fprintf(
+			w,
+			"installed %s/%s@%s\n",
+			terminalSafeText(result.Repository.String()),
+			terminalSafeText(result.PackageName.String()),
+			terminalSafeText(result.Version.String()),
+		)
 		if strings.TrimSpace(result.TrustRootPath) != "" {
 			fmt.Fprintf(w, "trust-root %s\n", terminalSafeText(result.TrustRootPath))
 		}
 		return
 	}
 	styles := newUIStyles(color)
-	fmt.Fprintln(w, styles.title.Render(fmt.Sprintf("installed %s/%s@%s", terminalSafeText(result.Repository.String()), terminalSafeText(result.PackageName.String()), terminalSafeText(result.Version.String()))))
+	fmt.Fprintln(
+		w,
+		styles.title.Render(
+			fmt.Sprintf(
+				"installed %s/%s@%s",
+				terminalSafeText(result.Repository.String()),
+				terminalSafeText(result.PackageName.String()),
+				terminalSafeText(result.Version.String()),
+			),
+		),
+	)
 	if result.AssetName != "" {
 		fmt.Fprintf(w, "%s %s\n", styles.label.Render("asset"), terminalSafeText(result.AssetName))
 	}

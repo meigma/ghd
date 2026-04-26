@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -20,7 +21,12 @@ type ManifestSource interface {
 // ReleaseAssetSource resolves release assets.
 type ReleaseAssetSource interface {
 	// ResolveReleaseAsset resolves a concrete release asset name for tag.
-	ResolveReleaseAsset(ctx context.Context, repository verification.Repository, tag verification.ReleaseTag, assetName string) (ReleaseAsset, error)
+	ResolveReleaseAsset(
+		ctx context.Context,
+		repository verification.Repository,
+		tag verification.ReleaseTag,
+		assetName string,
+	) (ReleaseAsset, error)
 }
 
 // ArtifactDownloader downloads release assets.
@@ -195,7 +201,7 @@ func (r VerificationRecord) Validate() error {
 		return fmt.Errorf("unsupported verification record version %d", r.SchemaVersion)
 	}
 	if _, err := parseRecordRepository(r.Repository); err != nil {
-		return fmt.Errorf("verification repository must be owner/repo")
+		return errors.New("verification repository must be owner/repo")
 	}
 	fields := []struct {
 		label string
@@ -216,10 +222,14 @@ func (r VerificationRecord) Validate() error {
 		return fmt.Errorf("verification tag %q is invalid: %w", r.Tag, err)
 	}
 	if r.Evidence.Repository.IsZero() {
-		return fmt.Errorf("verification evidence repository must be set")
+		return errors.New("verification evidence repository must be set")
 	}
 	if !strings.EqualFold(r.Evidence.Repository.String(), r.Repository) {
-		return fmt.Errorf("verification evidence repository %s does not match record repository %s", r.Evidence.Repository, r.Repository)
+		return fmt.Errorf(
+			"verification evidence repository %s does not match record repository %s",
+			r.Evidence.Repository,
+			r.Repository,
+		)
 	}
 	if err := r.Evidence.Tag.Validate(); err != nil {
 		return fmt.Errorf("verification evidence tag is invalid: %w", err)
@@ -228,7 +238,7 @@ func (r VerificationRecord) Validate() error {
 		return fmt.Errorf("verification evidence tag %s does not match record tag %s", r.Evidence.Tag, r.Tag)
 	}
 	if r.Evidence.AssetDigest.IsZero() {
-		return fmt.Errorf("verification evidence asset digest must be set")
+		return errors.New("verification evidence asset digest must be set")
 	}
 	return nil
 }
@@ -236,22 +246,22 @@ func (r VerificationRecord) Validate() error {
 // NewVerifiedDownloader creates a verified download use case.
 func NewVerifiedDownloader(deps VerifiedDownloadDependencies) (*VerifiedDownloader, error) {
 	if deps.Manifests == nil {
-		return nil, fmt.Errorf("manifest source must be set")
+		return nil, errors.New("manifest source must be set")
 	}
 	if deps.Assets == nil {
-		return nil, fmt.Errorf("release asset source must be set")
+		return nil, errors.New("release asset source must be set")
 	}
 	if deps.Downloader == nil {
-		return nil, fmt.Errorf("artifact downloader must be set")
+		return nil, errors.New("artifact downloader must be set")
 	}
 	if deps.Verifier == nil {
-		return nil, fmt.Errorf("verifier must be set")
+		return nil, errors.New("verifier must be set")
 	}
 	if deps.EvidenceWriter == nil {
-		return nil, fmt.Errorf("evidence writer must be set")
+		return nil, errors.New("evidence writer must be set")
 	}
 	if deps.FileSystem == nil {
-		return nil, fmt.Errorf("download filesystem must be set")
+		return nil, errors.New("download filesystem must be set")
 	}
 	return &VerifiedDownloader{
 		manifests: deps.Manifests,
@@ -264,7 +274,12 @@ func NewVerifiedDownloader(deps VerifiedDownloadDependencies) (*VerifiedDownload
 }
 
 // Download fetches, verifies, and records one release asset.
-func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownloadRequest) (VerifiedDownloadResult, error) {
+//
+//nolint:funlen // The use case intentionally reads as one audited verification workflow.
+func (d *VerifiedDownloader) Download(
+	ctx context.Context,
+	request VerifiedDownloadRequest,
+) (VerifiedDownloadResult, error) {
 	if err := request.validate(); err != nil {
 		return VerifiedDownloadResult{}, err
 	}
@@ -287,7 +302,14 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
-	cfg, pkg, err := fetchPackageManifestForVersionAtTag(ctx, d.manifests, request.Repository, request.PackageName, request.Version, tag)
+	cfg, pkg, err := fetchPackageManifestForVersionAtTag(
+		ctx,
+		d.manifests,
+		request.Repository,
+		request.PackageName,
+		request.Version,
+		tag,
+	)
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
@@ -331,7 +353,12 @@ func (d *VerifiedDownloader) Download(ctx context.Context, request VerifiedDownl
 	if err != nil {
 		return VerifiedDownloadResult{}, err
 	}
-	publishedArtifactPath, err := d.files.PublishVerifiedArtifact(ctx, artifactPath, request.OutputDir, releaseAsset.Name)
+	publishedArtifactPath, err := d.files.PublishVerifiedArtifact(
+		ctx,
+		artifactPath,
+		request.OutputDir,
+		releaseAsset.Name,
+	)
 	if err != nil {
 		return VerifiedDownloadResult{}, fmt.Errorf("publish verified artifact %q: %w", releaseAsset.Name, err)
 	}
@@ -374,7 +401,7 @@ func (r VerifiedDownloadRequest) validate() error {
 		return err
 	}
 	if strings.TrimSpace(r.OutputDir) == "" {
-		return fmt.Errorf("output directory must be set")
+		return errors.New("output directory must be set")
 	}
 	return nil
 }
@@ -401,7 +428,14 @@ func (r VerifiedDownloadRequest) reportDownload(progress DownloadProgress) {
 	})
 }
 
-func fetchPackageManifestForVersionAtTag(ctx context.Context, manifests ManifestSource, repository verification.Repository, packageName manifest.PackageName, version manifest.PackageVersion, tag verification.ReleaseTag) (manifest.Config, manifest.Package, error) {
+func fetchPackageManifestForVersionAtTag(
+	ctx context.Context,
+	manifests ManifestSource,
+	repository verification.Repository,
+	packageName manifest.PackageName,
+	version manifest.PackageVersion,
+	tag verification.ReleaseTag,
+) (manifest.Config, manifest.Package, error) {
 	manifestBytes, err := manifests.FetchManifestAtRef(ctx, repository, string(tag))
 	if err != nil {
 		return manifest.Config{}, manifest.Package{}, fmt.Errorf("fetch ghd.toml at %s: %w", tag, err)
@@ -419,7 +453,13 @@ func fetchPackageManifestForVersionAtTag(ctx context.Context, manifests Manifest
 		return manifest.Config{}, manifest.Package{}, err
 	}
 	if resolvedTag != tag {
-		return manifest.Config{}, manifest.Package{}, fmt.Errorf("ghd.toml at %s maps %s@%s to %s", tag, packageName, version, resolvedTag)
+		return manifest.Config{}, manifest.Package{}, fmt.Errorf(
+			"ghd.toml at %s maps %s@%s to %s",
+			tag,
+			packageName,
+			version,
+			resolvedTag,
+		)
 	}
 	return cfg, pkg, nil
 }

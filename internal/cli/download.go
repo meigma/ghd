@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -35,7 +36,7 @@ ghd --non-interactive download owner/repo/package@version --output ./out
 				return err
 			}
 			if strings.TrimSpace(outputDir) == "" {
-				return fmt.Errorf("--output must be set")
+				return errors.New("--output must be set")
 			}
 
 			cfg := config.Load(options.Viper)
@@ -66,6 +67,7 @@ ghd --non-interactive download owner/repo/package@version --output ./out
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&outputDir, "output", "o", "", "directory for the downloaded artifact and verification evidence")
+	cmd.Flags().
+		StringVarP(&outputDir, "output", "o", "", "directory for the downloaded artifact and verification evidence")
 	return cmd
 }

@@ -2,7 +2,7 @@ package app
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -24,7 +24,7 @@ func TestEnvironmentDoctor(t *testing.T) {
 
 	t.Run("invalid custom trusted root fails", func(t *testing.T) {
 		tc := newEnvironmentDoctorTestContext(t)
-		tc.trustedRoot.err = fmt.Errorf("parse trusted root: bad root")
+		tc.trustedRoot.err = errors.New("parse trusted root: bad root")
 		tc.request.TrustedRootPath = filepath.Join(t.TempDir(), "invalid-root.json")
 
 		results, err := tc.subject.Doctor(context.Background(), tc.request)
@@ -45,7 +45,7 @@ func TestEnvironmentDoctor(t *testing.T) {
 
 	t.Run("GitHub API failure fails", func(t *testing.T) {
 		tc := newEnvironmentDoctorTestContext(t)
-		tc.github.err = fmt.Errorf("GET /rate_limit returned HTTP 401")
+		tc.github.err = errors.New("GET /rate_limit returned HTTP 401")
 
 		results, err := tc.subject.Doctor(context.Background(), tc.request)
 

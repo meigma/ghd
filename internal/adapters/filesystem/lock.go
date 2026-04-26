@@ -10,19 +10,27 @@ import (
 	"time"
 )
 
-func acquireFileLock(ctx context.Context, dir string, lockFile string, dirLabel string, lockLabel string) (func(), error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+const lockRetryDelay = 50 * time.Millisecond
+
+func acquireFileLock(
+	ctx context.Context,
+	dir string,
+	lockFile string,
+	dirLabel string,
+	lockLabel string,
+) (func(), error) {
+	if err := os.MkdirAll(dir, privateDirMode); err != nil {
 		return nil, fmt.Errorf("create %s directory: %w", dirLabel, err)
 	}
 	lockPath := filepath.Join(dir, lockFile)
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, privateFileMode)
 	if err != nil {
 		return nil, fmt.Errorf("open %s lock: %w", lockLabel, err)
 	}
 	for {
-		if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
+		if err := flock(file, syscall.LOCK_EX|syscall.LOCK_NB); err == nil {
 			unlock := func() {
-				_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+				_ = flock(file, syscall.LOCK_UN)
 				_ = file.Close()
 			}
 			return unlock, nil
@@ -30,7 +38,7 @@ func acquireFileLock(ctx context.Context, dir string, lockFile string, dirLabel 
 			_ = file.Close()
 			return nil, fmt.Errorf("lock %s: %w", lockLabel, err)
 		}
-		timer := time.NewTimer(50 * time.Millisecond)
+		timer := time.NewTimer(lockRetryDelay)
 		select {
 		case <-ctx.Done():
 			timer.Stop()
@@ -39,4 +47,9 @@ func acquireFileLock(ctx context.Context, dir string, lockFile string, dirLabel 
 		case <-timer.C:
 		}
 	}
+}
+
+func flock(file *os.File, operation int) error {
+	//nolint:gosec // syscall.Flock requires an int file descriptor.
+	return syscall.Flock(int(file.Fd()), operation)
 }

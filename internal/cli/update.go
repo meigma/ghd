@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -14,6 +15,7 @@ type updateOptions struct {
 	binDir   string
 }
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newUpdateCommand(options Options) *cobra.Command {
 	var all bool
 	var jsonOutput bool
@@ -26,10 +28,10 @@ func newUpdateCommand(options Options) *cobra.Command {
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if all && len(args) > 0 {
-				return fmt.Errorf("update accepts a target or --all, not both")
+				return errors.New("update accepts a target or --all, not both")
 			}
 			if !all && len(args) == 0 {
-				return fmt.Errorf("update target must be set")
+				return errors.New("update target must be set")
 			}
 			target := ""
 			if len(args) == 1 {
@@ -85,7 +87,8 @@ func newUpdateCommand(options Options) *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&all, "all", false, "update all installed packages")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "write update results as JSON")
-	cmd.Flags().BoolVar(&allowSignerChange, "approve-signer-change", false, "allow update to rotate the trusted release signer; combine with --yes for non-interactive approval")
+	cmd.Flags().
+		BoolVar(&allowSignerChange, "approve-signer-change", false, "allow update to rotate the trusted release signer; combine with --yes for non-interactive approval")
 	cmd.Flags().StringVar(&update.storeDir, "store-dir", "", "managed store directory")
 	cmd.Flags().StringVar(&update.binDir, "bin-dir", "", "managed binary link directory")
 	return cmd
@@ -95,9 +98,24 @@ func writeUpdateResults(options Options, results []app.UpdateInstalledResult) {
 	for _, result := range results {
 		target := terminalSafeText(result.Repository + "/" + result.Package)
 		if result.Reason != "" {
-			fmt.Fprintf(options.Out, "%s %s %s %s %s\n", target, terminalSafeText(result.PreviousVersion), terminalSafeText(result.CurrentVersion), result.Status, terminalSafeText(result.Reason))
+			fmt.Fprintf(
+				options.Out,
+				"%s %s %s %s %s\n",
+				target,
+				terminalSafeText(result.PreviousVersion),
+				terminalSafeText(result.CurrentVersion),
+				result.Status,
+				terminalSafeText(result.Reason),
+			)
 			continue
 		}
-		fmt.Fprintf(options.Out, "%s %s %s %s\n", target, terminalSafeText(result.PreviousVersion), terminalSafeText(result.CurrentVersion), result.Status)
+		fmt.Fprintf(
+			options.Out,
+			"%s %s %s %s\n",
+			target,
+			terminalSafeText(result.PreviousVersion),
+			terminalSafeText(result.CurrentVersion),
+			result.Status,
+		)
 	}
 }

@@ -37,22 +37,28 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 	t.Run("success direct binary asset", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		tc.record.Asset = "foo_1.2.3_darwin_arm64"
-		verificationPath, err := fakeVerificationRecordStore{}.WriteVerificationRecord(context.Background(), filepath.Dir(tc.record.VerificationPath), VerificationRecord{
-			SchemaVersion: 1,
-			Repository:    tc.record.Repository,
-			Package:       tc.record.Package,
-			Version:       tc.record.Version,
-			Tag:           tc.record.Tag,
-			Asset:         tc.record.Asset,
-			Evidence: verification.Evidence{
-				Repository:  verification.Repository{Owner: "owner", Name: "repo"},
-				Tag:         verification.ReleaseTag(tc.record.Tag),
-				AssetDigest: mustTestDigest(t, "aa"),
-				ProvenanceAttestation: verification.AttestationEvidence{
-					SignerWorkflow: verification.WorkflowIdentity(tc.record.Repository + "/.github/workflows/release.yml"),
+		verificationPath, err := fakeVerificationRecordStore{}.WriteVerificationRecord(
+			context.Background(),
+			filepath.Dir(tc.record.VerificationPath),
+			VerificationRecord{
+				SchemaVersion: 1,
+				Repository:    tc.record.Repository,
+				Package:       tc.record.Package,
+				Version:       tc.record.Version,
+				Tag:           tc.record.Tag,
+				Asset:         tc.record.Asset,
+				Evidence: verification.Evidence{
+					Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+					Tag:         verification.ReleaseTag(tc.record.Tag),
+					AssetDigest: mustTestDigest(t, "aa"),
+					ProvenanceAttestation: verification.AttestationEvidence{
+						SignerWorkflow: verification.WorkflowIdentity(
+							tc.record.Repository + "/.github/workflows/release.yml",
+						),
+					},
 				},
 			},
-		})
+		)
 		require.NoError(t, err)
 		tc.record.VerificationPath = verificationPath
 		tc.state.index = mustStateIndex(t, tc.record)
@@ -94,19 +100,23 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 	t.Run("invalid persisted release tag", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		tc.record.Tag = ".bad"
-		verificationPath, err := fakeVerificationRecordStore{}.WriteVerificationRecord(context.Background(), filepath.Dir(tc.record.VerificationPath), VerificationRecord{
-			SchemaVersion: 1,
-			Repository:    tc.record.Repository,
-			Package:       tc.record.Package,
-			Version:       tc.record.Version,
-			Tag:           tc.record.Tag,
-			Asset:         tc.record.Asset,
-			Evidence: verification.Evidence{
-				Repository:  verification.Repository{Owner: "owner", Name: "repo"},
-				Tag:         verification.ReleaseTag(tc.record.Tag),
-				AssetDigest: mustTestDigest(t, "aa"),
+		verificationPath, err := fakeVerificationRecordStore{}.WriteVerificationRecord(
+			context.Background(),
+			filepath.Dir(tc.record.VerificationPath),
+			VerificationRecord{
+				SchemaVersion: 1,
+				Repository:    tc.record.Repository,
+				Package:       tc.record.Package,
+				Version:       tc.record.Version,
+				Tag:           tc.record.Tag,
+				Asset:         tc.record.Asset,
+				Evidence: verification.Evidence{
+					Repository:  verification.Repository{Owner: "owner", Name: "repo"},
+					Tag:         verification.ReleaseTag(tc.record.Tag),
+					AssetDigest: mustTestDigest(t, "aa"),
+				},
 			},
-		})
+		)
 		require.NoError(t, err)
 		tc.record.VerificationPath = verificationPath
 		tc.state.index = mustStateIndex(t, tc.record)
@@ -180,7 +190,12 @@ func TestInstalledPackageVerifierVerify(t *testing.T) {
 func TestInstalledPackageVerifierVerifyAll(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
-		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "alpha"}, "bar", "1.0.0")
+		second := newInstalledPackageVerifierRecordFixture(
+			t,
+			verification.Repository{Owner: "owner", Name: "alpha"},
+			"bar",
+			"1.0.0",
+		)
 		tc.state.index = mustStateIndex(t, tc.record, second)
 
 		results, err := tc.subject.Verify(context.Background(), VerifyInstalledRequest{
@@ -206,7 +221,12 @@ func TestInstalledPackageVerifierVerifyAll(t *testing.T) {
 
 	t.Run("mixed failure", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
-		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "alpha"}, "bar", "1.0.0")
+		second := newInstalledPackageVerifierRecordFixture(
+			t,
+			verification.Repository{Owner: "owner", Name: "alpha"},
+			"bar",
+			"1.0.0",
+		)
 		tc.state.index = mustStateIndex(t, tc.record, second)
 		require.NoError(t, os.WriteFile(tc.record.Binaries[0].TargetPath, []byte("tampered"), 0o755))
 
@@ -267,7 +287,12 @@ func TestInstalledPackageVerifierVerifyReturnsPreflightErrorsWithoutResults(t *t
 	t.Run("ambiguous target", func(t *testing.T) {
 		tc := newInstalledPackageVerifierTestContext(t)
 		tc.record.Binaries[0].Name = "repo"
-		second := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "two"}, "bar", "1.0.0")
+		second := newInstalledPackageVerifierRecordFixture(
+			t,
+			verification.Repository{Owner: "owner", Name: "two"},
+			"bar",
+			"1.0.0",
+		)
 		second.Binaries[0].Name = "foo"
 		tc.state.index = mustStateIndex(t, tc.record, second)
 
@@ -291,7 +316,12 @@ type installedPackageVerifierTestContext struct {
 func newInstalledPackageVerifierTestContext(t *testing.T) *installedPackageVerifierTestContext {
 	t.Helper()
 
-	record := newInstalledPackageVerifierRecordFixture(t, verification.Repository{Owner: "owner", Name: "repo"}, "foo", "1.2.3")
+	record := newInstalledPackageVerifierRecordFixture(
+		t,
+		verification.Repository{Owner: "owner", Name: "repo"},
+		"foo",
+		"1.2.3",
+	)
 	stateReader := &fakeInstalledStateReader{index: mustStateIndex(t, record)}
 	artifactVerifier := &fakeInstalledArtifactVerifier{
 		evidence: verification.Evidence{
@@ -324,7 +354,12 @@ func newInstalledPackageVerifierTestContext(t *testing.T) *installedPackageVerif
 	}
 }
 
-func newInstalledPackageVerifierRecordFixture(t *testing.T, repository verification.Repository, packageName string, version string) state.Record {
+func newInstalledPackageVerifierRecordFixture(
+	t *testing.T,
+	repository verification.Repository,
+	packageName string,
+	version string,
+) state.Record {
 	t.Helper()
 
 	storePath := filepath.Join(t.TempDir(), "store")
@@ -409,7 +444,10 @@ type fakeInstalledArtifactVerifier struct {
 	evidence verification.Evidence
 }
 
-func (f *fakeInstalledArtifactVerifier) VerifyReleaseAsset(_ context.Context, request verification.Request) (verification.Evidence, error) {
+func (f *fakeInstalledArtifactVerifier) VerifyReleaseAsset(
+	_ context.Context,
+	request verification.Request,
+) (verification.Evidence, error) {
 	if _, err := os.Stat(request.AssetPath); err != nil {
 		return verification.Evidence{}, fmt.Errorf("missing artifact: %w", err)
 	}
@@ -428,6 +466,7 @@ func (fakeVerificationRecordStore) ReadVerificationRecord(_ context.Context, pat
 		return VerificationRecord{}, fmt.Errorf("read verification record: %w", err)
 	}
 	var record VerificationRecord
+	//nolint:musttag // verification.json intentionally preserves nested evidence field names.
 	if err := json.Unmarshal(data, &record); err != nil {
 		return VerificationRecord{}, fmt.Errorf("decode verification record: %w", err)
 	}
@@ -437,10 +476,15 @@ func (fakeVerificationRecordStore) ReadVerificationRecord(_ context.Context, pat
 	return record, nil
 }
 
-func (fakeVerificationRecordStore) WriteVerificationRecord(_ context.Context, outputDir string, record VerificationRecord) (string, error) {
+func (fakeVerificationRecordStore) WriteVerificationRecord(
+	_ context.Context,
+	outputDir string,
+	record VerificationRecord,
+) (string, error) {
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		return "", err
 	}
+	//nolint:musttag // verification.json intentionally preserves nested evidence field names.
 	data, err := json.MarshalIndent(record, "", "  ")
 	if err != nil {
 		return "", err
@@ -457,7 +501,10 @@ type fakeVerifyArchiveExtractor struct {
 	contents map[string][]byte
 }
 
-func (f fakeVerifyArchiveExtractor) MaterializeBinaries(_ context.Context, request ArtifactMaterializationRequest) ([]MaterializedBinary, error) {
+func (f fakeVerifyArchiveExtractor) MaterializeBinaries(
+	_ context.Context,
+	request ArtifactMaterializationRequest,
+) ([]MaterializedBinary, error) {
 	if err := os.MkdirAll(request.DestinationDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -493,7 +540,11 @@ func (fakeInstalledVerificationFileSystem) CreateDownloadDir(context.Context) (s
 	return dir, func() { _ = os.RemoveAll(dir) }, nil
 }
 
-func (fakeInstalledVerificationFileSystem) VerifyManagedBinaryLink(_ context.Context, linkPath string, expectedTargetPath string) error {
+func (fakeInstalledVerificationFileSystem) VerifyManagedBinaryLink(
+	_ context.Context,
+	linkPath string,
+	expectedTargetPath string,
+) error {
 	info, err := os.Lstat(linkPath)
 	if err != nil {
 		return fmt.Errorf("inspect managed binary link %s: %w", linkPath, err)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -23,6 +24,9 @@ const (
 	PublicGoodIssuerOrg = "sigstore.dev"
 	// GitHubIssuerOrg is the Fulcio issuer organization for GitHub Sigstore bundles.
 	GitHubIssuerOrg = "GitHub, Inc."
+
+	sha1HexLength   = 40
+	sha256HexLength = 64
 )
 
 type signedEntityVerifier interface {
@@ -130,7 +134,7 @@ func NewVerifier(options ...Option) (*Verifier, error) {
 	}
 
 	if v.github == nil && v.publicGood == nil && len(v.custom) == 0 {
-		return nil, fmt.Errorf("trusted Sigstore material must be configured")
+		return nil, errors.New("trusted Sigstore material must be configured")
 	}
 	return v, nil
 }
@@ -144,14 +148,21 @@ func newVerifierWithCore(verifier signedEntityVerifier) *Verifier {
 }
 
 // Verify verifies a Sigstore bundle and returns trusted verification evidence.
-func (v *Verifier) Verify(ctx context.Context, attestation verification.Attestation, expectedSubject verification.Digest) (verification.VerifiedAttestation, error) {
+func (v *Verifier) Verify(
+	ctx context.Context,
+	attestation verification.Attestation,
+	expectedSubject verification.Digest,
+) (verification.VerifiedAttestation, error) {
 	if err := ctx.Err(); err != nil {
 		return verification.VerifiedAttestation{}, err
 	}
 
 	bundle, ok := attestation.Bundle.(*sigbundle.Bundle)
 	if !ok {
-		return verification.VerifiedAttestation{}, fmt.Errorf("attestation %s does not contain a Sigstore bundle", attestation.ID)
+		return verification.VerifiedAttestation{}, fmt.Errorf(
+			"attestation %s does not contain a Sigstore bundle",
+			attestation.ID,
+		)
 	}
 
 	digestBytes, err := hex.DecodeString(expectedSubject.Hex)
@@ -196,7 +207,7 @@ func trustedMaterial(opts verifierOptions) (root.TrustedMaterial, error) {
 		data = file
 	}
 	if len(data) == 0 {
-		return nil, fmt.Errorf("trusted Sigstore material must be configured")
+		return nil, errors.New("trusted Sigstore material must be configured")
 	}
 
 	trustedRoot, err := root.NewTrustedRootFromJSON(data)
@@ -209,14 +220,14 @@ func trustedMaterial(opts verifierOptions) (root.TrustedMaterial, error) {
 func (v *Verifier) registerTrustedMaterial(trustedMaterial root.TrustedMaterial, signedTimestampThreshold int) error {
 	cas := trustedMaterial.FulcioCertificateAuthorities()
 	if len(cas) == 0 {
-		return fmt.Errorf("trusted material has no Fulcio certificate authorities")
+		return errors.New("trusted material has no Fulcio certificate authorities")
 	}
 
 	var registered bool
 	for _, authority := range cas {
 		fulcio, ok := authority.(*root.FulcioCertificateAuthority)
 		if !ok {
-			return fmt.Errorf("trusted material certificate authority is not Fulcio-backed")
+			return errors.New("trusted material certificate authority is not Fulcio-backed")
 		}
 		cert, err := lowestFulcioCertificate(fulcio)
 		if err != nil {
@@ -249,7 +260,7 @@ func (v *Verifier) registerTrustedMaterial(trustedMaterial root.TrustedMaterial,
 		registered = true
 	}
 	if !registered {
-		return fmt.Errorf("trusted material has no Fulcio issuer organization")
+		return errors.New("trusted material has no Fulcio issuer organization")
 	}
 	return nil
 }
@@ -258,12 +269,12 @@ func (v *Verifier) chooseVerifier(issuer string) (signedEntityVerifier, error) {
 	switch issuer {
 	case GitHubIssuerOrg:
 		if v.github == nil {
-			return nil, fmt.Errorf("GitHub Sigstore verifier is not configured")
+			return nil, errors.New("github Sigstore verifier is not configured")
 		}
 		return v.github, nil
 	case PublicGoodIssuerOrg:
 		if v.publicGood == nil {
-			return nil, fmt.Errorf("Sigstore Public Good verifier is not configured")
+			return nil, errors.New("sigstore Public Good verifier is not configured")
 		}
 		return v.publicGood, nil
 	default:
@@ -275,7 +286,10 @@ func (v *Verifier) chooseVerifier(issuer string) (signedEntityVerifier, error) {
 	}
 }
 
-func newGitHubVerifier(trustedMaterial root.TrustedMaterial, signedTimestampThreshold int) (*sigverify.Verifier, error) {
+func newGitHubVerifier(
+	trustedMaterial root.TrustedMaterial,
+	signedTimestampThreshold int,
+) (*sigverify.Verifier, error) {
 	threshold := signedTimestampThreshold
 	if threshold == 0 {
 		threshold = 1
@@ -323,10 +337,13 @@ func bundleIssuer(bundle *sigbundle.Bundle) (string, error) {
 	}
 	cert := content.Certificate()
 	if cert == nil {
-		return "", fmt.Errorf("bundle has no leaf certificate")
+		return "", errors.New("bundle has no leaf certificate")
 	}
 	if len(cert.Issuer.Organization) != 1 {
-		return "", fmt.Errorf("expected one leaf certificate issuer organization, got %d", len(cert.Issuer.Organization))
+		return "", fmt.Errorf(
+			"expected one leaf certificate issuer organization, got %d",
+			len(cert.Issuer.Organization),
+		)
 	}
 	return cert.Issuer.Organization[0], nil
 }
@@ -338,21 +355,24 @@ func lowestFulcioCertificate(ca *root.FulcioCertificateAuthority) (*x509.Certifi
 	if ca.Root != nil {
 		return ca.Root, nil
 	}
-	return nil, fmt.Errorf("Fulcio certificate authority has no certificates")
+	return nil, errors.New("fulcio certificate authority has no certificates")
 }
 
-func verifiedAttestation(attestation verification.Attestation, result *sigverify.VerificationResult) (verification.VerifiedAttestation, error) {
+func verifiedAttestation(
+	attestation verification.Attestation,
+	result *sigverify.VerificationResult,
+) (verification.VerifiedAttestation, error) {
 	if result == nil {
-		return verification.VerifiedAttestation{}, fmt.Errorf("Sigstore verification returned no result")
+		return verification.VerifiedAttestation{}, errors.New("sigstore verification returned no result")
 	}
 	if len(result.VerifiedTimestamps) == 0 {
-		return verification.VerifiedAttestation{}, fmt.Errorf("Sigstore verification returned no trusted timestamps")
+		return verification.VerifiedAttestation{}, errors.New("sigstore verification returned no trusted timestamps")
 	}
 	if result.Signature == nil || result.Signature.Certificate == nil {
-		return verification.VerifiedAttestation{}, fmt.Errorf("Sigstore verification returned no certificate evidence")
+		return verification.VerifiedAttestation{}, errors.New("sigstore verification returned no certificate evidence")
 	}
 	if result.Statement == nil {
-		return verification.VerifiedAttestation{}, fmt.Errorf("Sigstore verification returned no in-toto statement")
+		return verification.VerifiedAttestation{}, errors.New("sigstore verification returned no in-toto statement")
 	}
 
 	statement, err := verificationStatement(result.Statement)
@@ -490,9 +510,9 @@ func optionalDigest(value string) (verification.Digest, error) {
 		return verification.NewDigest(algorithm, digest)
 	}
 	switch len(value) {
-	case 40:
+	case sha1HexLength:
 		return verification.NewDigest("sha1", value)
-	case 64:
+	case sha256HexLength:
 		return verification.NewDigest("sha256", value)
 	default:
 		return verification.Digest{}, fmt.Errorf("unsupported digest length %d for %q", len(value), value)

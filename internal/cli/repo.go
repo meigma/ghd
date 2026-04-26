@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -85,7 +86,7 @@ ghd repo list --index-dir ./index --json
 ghd --non-interactive repo list --index-dir ./index
 `),
 		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			mode := detectReadOnlyPresentationMode(options, jsonOutput)
 			var status *transientStatusLine
 			if mode.statusLine {
@@ -165,6 +166,7 @@ ghd --non-interactive repo remove owner/repo --index-dir ./index
 	}
 }
 
+//nolint:gocognit // Cobra command construction is mostly declarative CLI wiring.
 func newRepositoryRefreshCommand(options Options) *cobra.Command {
 	var all bool
 	cmd := &cobra.Command{
@@ -184,7 +186,7 @@ ghd --non-interactive repo refresh --index-dir ./index --all
 				defer status.Clear()
 			}
 			if all && len(args) > 0 {
-				return fmt.Errorf("repo refresh accepts owner/repo or --all, not both")
+				return errors.New("repo refresh accepts owner/repo or --all, not both")
 			}
 			var repository verification.Repository
 			if len(args) == 1 {

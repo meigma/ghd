@@ -92,7 +92,9 @@ const (
 var ErrUpdateNotApproved = errors.New("update was not approved")
 
 // ErrUpdateSignerChangeNotApproved means update stopped because it would rotate the trusted release signer.
-var ErrUpdateSignerChangeNotApproved = errors.New("update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive")
+var ErrUpdateSignerChangeNotApproved = errors.New(
+	"update would change the trusted release signer; review interactively or rerun with --yes --approve-signer-change --non-interactive",
+)
 
 // UpdateProgressStage identifies one user-visible update step.
 type UpdateProgressStage string
@@ -272,34 +274,34 @@ type updateRecordResult struct {
 // NewPackageUpdater creates a package updater use case.
 func NewPackageUpdater(deps PackageUpdaterDependencies) (*PackageUpdater, error) {
 	if deps.Manifests == nil {
-		return nil, fmt.Errorf("manifest source must be set")
+		return nil, errors.New("manifest source must be set")
 	}
 	if deps.Releases == nil {
-		return nil, fmt.Errorf("release source must be set")
+		return nil, errors.New("release source must be set")
 	}
 	if deps.Assets == nil {
-		return nil, fmt.Errorf("release asset source must be set")
+		return nil, errors.New("release asset source must be set")
 	}
 	if deps.Downloader == nil {
-		return nil, fmt.Errorf("artifact downloader must be set")
+		return nil, errors.New("artifact downloader must be set")
 	}
 	if deps.Verifier == nil {
-		return nil, fmt.Errorf("verifier must be set")
+		return nil, errors.New("verifier must be set")
 	}
 	if deps.EvidenceWriter == nil {
-		return nil, fmt.Errorf("evidence writer must be set")
+		return nil, errors.New("evidence writer must be set")
 	}
 	if deps.EvidenceStore == nil {
-		return nil, fmt.Errorf("verification record store must be set")
+		return nil, errors.New("verification record store must be set")
 	}
 	if deps.Materializer == nil {
-		return nil, fmt.Errorf("artifact materializer must be set")
+		return nil, errors.New("artifact materializer must be set")
 	}
 	if deps.FileSystem == nil {
-		return nil, fmt.Errorf("update filesystem must be set")
+		return nil, errors.New("update filesystem must be set")
 	}
 	if deps.StateStore == nil {
-		return nil, fmt.Errorf("installed state store must be set")
+		return nil, errors.New("installed state store must be set")
 	}
 	now := deps.Now
 	if now == nil {
@@ -350,6 +352,7 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) ([]U
 			failed++
 		case UpdateStatusUpdatedWithWarning:
 			warned++
+		case UpdateStatusUpdated, UpdateStatusAlreadyUpToDate:
 		}
 	}
 	if failed != 0 || warned != 0 {
@@ -358,7 +361,12 @@ func (u *PackageUpdater) Update(ctx context.Context, request UpdateRequest) ([]U
 	return results, nil
 }
 
-func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest, previous state.Record) (updateRecordResult, error) {
+//nolint:gocognit,funlen // The update workflow keeps state, signer, and rollback decisions in one audited path.
+func (u *PackageUpdater) updateRecord(
+	ctx context.Context,
+	request UpdateRequest,
+	previous state.Record,
+) (updateRecordResult, error) {
 	result := updateRecordResult{
 		Previous: previous,
 		Current:  previous,
@@ -385,21 +393,36 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	if err != nil {
 		return result, err
 	}
-	if err := verifyInstalledRecordConsistency(previous, previousVerification); err != nil {
-		return result, err
+	if consistencyErr := verifyInstalledRecordConsistency(previous, previousVerification); consistencyErr != nil {
+		return result, consistencyErr
 	}
 	trustedSignerWorkflow := previousVerification.Evidence.ProvenanceAttestation.SignerWorkflow
 	if strings.TrimSpace(string(trustedSignerWorkflow)) == "" {
-		return result, fmt.Errorf("verification evidence for %s/%s@%s has no trusted signer workflow", previous.Repository, previous.Package, previous.Version)
+		return result, fmt.Errorf(
+			"verification evidence for %s/%s@%s has no trusted signer workflow",
+			previous.Repository,
+			previous.Package,
+			previous.Version,
+		)
 	}
 	candidateSignerWorkflow := candidate.Config.Provenance.TrustedSignerWorkflow()
 	if strings.TrimSpace(string(candidateSignerWorkflow)) == "" {
-		return result, fmt.Errorf("candidate manifest for %s/%s@%s has no trusted signer workflow", previous.Repository, previous.Package, candidate.LatestVersion)
+		return result, fmt.Errorf(
+			"candidate manifest for %s/%s@%s has no trusted signer workflow",
+			previous.Repository,
+			previous.Package,
+			candidate.LatestVersion,
+		)
 	}
 	signerChanged := !trustedSignerWorkflow.SameWorkflowPath(candidateSignerWorkflow)
 	request.report(UpdateProgressCheckingBinaries, fmt.Sprintf("Checking %s binary ownership", target))
-	if err := u.checkBinaryOwnership(ctx, request.StateDir, previous, candidate.Package.Binaries); err != nil {
-		return result, err
+	if ownershipErr := u.checkBinaryOwnership(
+		ctx,
+		request.StateDir,
+		previous,
+		candidate.Package.Binaries,
+	); ownershipErr != nil {
+		return result, ownershipErr
 	}
 
 	tag := candidate.Tag
@@ -448,7 +471,7 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	}
 
 	request.report(UpdateProgressAwaitingApproval, fmt.Sprintf("Reviewing verified update for %s", target))
-	if err := request.approve(ctx, UpdateApproval{
+	if approvalErr := request.approve(ctx, UpdateApproval{
 		Repository:              candidate.Repository,
 		PackageName:             packageName,
 		PreviousVersion:         previousVersion,
@@ -464,8 +487,8 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 		TrustRootPath:           request.TrustRootPath,
 		BinDir:                  request.BinDir,
 		Binaries:                manifestBinaryNames(candidate.Package.Binaries),
-	}); err != nil {
-		return result, err
+	}); approvalErr != nil {
+		return result, approvalErr
 	}
 
 	request.report(UpdateProgressPreparingStore, "Preparing managed store")
@@ -504,7 +527,12 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	request.report(UpdateProgressWritingEvidence, "Writing verification evidence")
 	evidencePath, err := u.evidence.WriteVerificationEvidence(ctx, layout.StorePath, verificationRecord)
 	if err != nil {
-		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write verification evidence: %w", err))
+		return result, u.cleanupStagedUpdate(
+			ctx,
+			request,
+			layout.StorePath,
+			fmt.Errorf("write verification evidence: %w", err),
+		)
 	}
 
 	nextBinaries, err := plannedInstalledBinaries(request.BinDir, materialized)
@@ -528,7 +556,12 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	}
 	request.report(UpdateProgressWritingMetadata, "Writing install metadata")
 	if _, err := u.files.WriteInstallMetadata(ctx, layout.StorePath, installRecord); err != nil {
-		return result, u.cleanupStagedUpdate(ctx, request, layout.StorePath, fmt.Errorf("write install metadata: %w", err))
+		return result, u.cleanupStagedUpdate(
+			ctx,
+			request,
+			layout.StorePath,
+			fmt.Errorf("write install metadata: %w", err),
+		)
 	}
 
 	previousBinaries := installedBinaries(previous.Binaries)
@@ -601,7 +634,12 @@ func (u *PackageUpdater) updateRecord(ctx context.Context, request UpdateRequest
 	return result, nil
 }
 
-func (u *PackageUpdater) checkBinaryOwnership(ctx context.Context, stateDir string, previous state.Record, binaries []manifest.Binary) error {
+func (u *PackageUpdater) checkBinaryOwnership(
+	ctx context.Context,
+	stateDir string,
+	previous state.Record,
+	binaries []manifest.Binary,
+) error {
 	index, err := u.state.LoadInstalledState(ctx, stateDir)
 	if err != nil {
 		return err
@@ -612,19 +650,19 @@ func (u *PackageUpdater) checkBinaryOwnership(ctx context.Context, stateDir stri
 
 func (r UpdateRequest) validate() error {
 	if r.All && strings.TrimSpace(r.Target) != "" {
-		return fmt.Errorf("update accepts a target or --all, not both")
+		return errors.New("update accepts a target or --all, not both")
 	}
 	if !r.All && strings.TrimSpace(r.Target) == "" {
-		return fmt.Errorf("update target must be set")
+		return errors.New("update target must be set")
 	}
 	if strings.TrimSpace(r.StoreDir) == "" {
-		return fmt.Errorf("store directory must be set")
+		return errors.New("store directory must be set")
 	}
 	if strings.TrimSpace(r.BinDir) == "" {
-		return fmt.Errorf("bin directory must be set")
+		return errors.New("bin directory must be set")
 	}
 	if strings.TrimSpace(r.StateDir) == "" {
-		return fmt.Errorf("state directory must be set")
+		return errors.New("state directory must be set")
 	}
 	return nil
 }
@@ -690,7 +728,12 @@ func (r UpdateRequest) approve(ctx context.Context, approval UpdateApproval) err
 	return r.Approve(ctx, approval)
 }
 
-func (u *PackageUpdater) cleanupStagedUpdate(ctx context.Context, request UpdateRequest, storePath string, err error) error {
+func (u *PackageUpdater) cleanupStagedUpdate(
+	ctx context.Context,
+	request UpdateRequest,
+	storePath string,
+	err error,
+) error {
 	cleanupErr := u.files.RemoveManagedInstall(context.WithoutCancel(ctx), RemoveManagedInstallRequest{
 		StoreRoot: request.StoreDir,
 		BinRoot:   request.BinDir,
@@ -705,7 +748,7 @@ func (u *PackageUpdater) cleanupStagedUpdate(ctx context.Context, request Update
 func plannedInstalledBinaries(binDir string, binaries []MaterializedBinary) ([]InstalledBinary, error) {
 	binDir = strings.TrimSpace(binDir)
 	if binDir == "" {
-		return nil, fmt.Errorf("bin directory must be set")
+		return nil, errors.New("bin directory must be set")
 	}
 	binRoot, err := filepath.Abs(filepath.Clean(binDir))
 	if err != nil {
@@ -715,13 +758,13 @@ func plannedInstalledBinaries(binDir string, binaries []MaterializedBinary) ([]I
 		return nil, fmt.Errorf("refusing to use unsafe bin directory %s", binDir)
 	}
 	if len(binaries) == 0 {
-		return nil, fmt.Errorf("at least one binary must be linked")
+		return nil, errors.New("at least one binary must be linked")
 	}
 	planned := make([]InstalledBinary, 0, len(binaries))
 	for _, binary := range binaries {
 		name := strings.TrimSpace(binary.Name)
 		if name == "" {
-			return nil, fmt.Errorf("binary name must be set")
+			return nil, errors.New("binary name must be set")
 		}
 		if strings.ContainsAny(name, `/\`) {
 			return nil, fmt.Errorf("binary name %q must not contain path separators", binary.Name)
