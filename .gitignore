@@ -12,7 +12,7 @@
 # Environment
 .env
 .env.*
-.envrc
+.envrc.*
 
 # Go
 bin/
