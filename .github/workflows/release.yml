@@ -1,0 +1,130 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "example-v*"
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: false
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Resolve release version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${GITHUB_REF_NAME}"
+          version="${tag#example-v}"
+          if [[ "${version}" == "${tag}" || -z "${version}" ]]; then
+            echo "expected an example-v* tag, got ${tag}" >&2
+            exit 1
+          fi
+
+          echo "version=${version}" >>"${GITHUB_OUTPUT}"
+
+      - name: Wait for Release Please draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            if draft="$(gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" --json isDraft --jq .isDraft 2>/dev/null)"; then
+              if [[ "${draft}" == "true" ]]; then
+                exit 0
+              fi
+              echo "release ${GITHUB_REF_NAME} exists but is not a draft" >&2
+              exit 1
+            fi
+            sleep 5
+          done
+
+          echo "timed out waiting for Release Please draft ${GITHUB_REF_NAME}" >&2
+          exit 1
+
+      - name: Build release artifacts
+        uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
+        with:
+          distribution: goreleaser-pro
+          version: v2.15.4
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+
+      - name: Smoke test released binary version metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          host_os="$(go env GOHOSTOS)"
+          host_arch="$(go env GOHOSTARCH)"
+          expected_version="${{ steps.version.outputs.version }}"
+          bin="$(find dist -type f -name ghd-example | grep "/ghd-example_${host_os}_${host_arch}_" | head -n 1 || true)"
+
+          if [[ -z "${bin}" || ! -f "${bin}" ]]; then
+            echo "failed to locate host binary in dist/" >&2
+            find dist -maxdepth 2 -type f | sort >&2
+            exit 1
+          fi
+
+          version_output="$("${bin}" version)"
+          flag_output="$("${bin}" --version)"
+
+          printf 'version output: %s\n' "${version_output}"
+          printf 'flag output: %s\n' "${flag_output}"
+
+          [[ "${version_output}" == *"${expected_version}"* ]]
+          [[ "${flag_output}" == *"${expected_version}"* ]]
+
+          for output in "${version_output}" "${flag_output}"; do
+            [[ "${output}" =~ \([[:xdigit:]]{7,40}\)\ built\ [0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
+            [[ "${output}" != *"(none)"* ]]
+            [[ "${output}" != *"built unknown"* ]]
+          done
+
+      - name: Attest released files listed in checksums.txt
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-checksums: ./dist/checksums.txt
+
+      - name: Publish immutable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh release edit "${GITHUB_REF_NAME}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --draft=false \
+            --latest=false
