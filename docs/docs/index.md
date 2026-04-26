@@ -23,6 +23,8 @@ it downloads or installs a release asset.
   repository indexing, discovery, install, check, update, verify, and uninstall.
 - [Security model](security-model.md) explains what `ghd` verifies and what it
   intentionally does not claim to solve.
+- [Publisher guide](publisher-guide.md) explains how maintainers can publish
+  GitHub releases that `ghd` can verify and install.
 - [Reference](reference.md) lists command targets, flags, output modes, local
   paths, and `ghd.toml` fields.
 
@@ -34,4 +36,4 @@ once it is published, put the `ghd` binary on your `PATH`, and run `ghd --help`
 to confirm it is available.
 
 The current documentation reflects the implemented command surface and the live
-`meigma/ghd-test` fixture used for release-readiness testing.
+first-party example release `meigma/ghd/ghd-example@1.1.1`.

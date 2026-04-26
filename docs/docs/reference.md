@@ -114,16 +114,19 @@ tag_pattern = "foo-v${version}"
 [[packages.assets]]
 os = "darwin"
 arch = "arm64"
-pattern = "foo_${version}_darwin_arm64.tar.gz"
+pattern = "foo_${version}_darwin_arm64"
 
 [[packages.assets]]
 os = "linux"
 arch = "amd64"
-pattern = "foo_${version}_linux_amd64.tar.gz"
+pattern = "foo_${version}_linux_amd64"
 
 [[packages.binaries]]
-path = "bin/foo"
+path = "foo"
 ```
+
+Archive assets are also supported. In that case, `packages.binaries.path`
+points to the relative path inside the extracted archive, such as `bin/foo`.
 
 Rules enforced by the current implementation:
 
