@@ -107,11 +107,13 @@ jobs:
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 
       - name: Materialize named release assets
+        env:
+          ASSET_PREFIX: ${{ steps.component.outputs.asset_prefix }}
         shell: bash
         run: |
           set -euo pipefail
 
-          jq -r --arg asset_prefix "${{ steps.component.outputs.asset_prefix }}" '
+          jq -r --arg asset_prefix "${ASSET_PREFIX}" '
             .[]
             | select(.type == "Binary")
             | select(.name | startswith($asset_prefix))
@@ -125,14 +127,17 @@ jobs:
           (cd dist && shasum -a 256 -c checksums.txt)
 
       - name: Smoke test released binary version metadata
+        env:
+          BINARY_NAME: ${{ steps.component.outputs.binary_name }}
+          EXPECTED_VERSION: ${{ steps.component.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
 
           host_os="$(go env GOHOSTOS)"
           host_arch="$(go env GOHOSTARCH)"
-          expected_version="${{ steps.component.outputs.version }}"
-          binary_name="${{ steps.component.outputs.binary_name }}"
+          expected_version="${EXPECTED_VERSION}"
+          binary_name="${BINARY_NAME}"
           bin="$(find dist -type f -name "${binary_name}" | grep "/${binary_name}_${host_os}_${host_arch}_" | head -n 1 || true)"
 
           if [[ -z "${bin}" || ! -f "${bin}" ]]; then
@@ -165,12 +170,13 @@ jobs:
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ASSET_PREFIX: ${{ steps.component.outputs.asset_prefix }}
         shell: bash
         run: |
           set -euo pipefail
 
           mapfile -t assets < <(
-            jq -r --arg asset_prefix "${{ steps.component.outputs.asset_prefix }}" '
+            jq -r --arg asset_prefix "${ASSET_PREFIX}" '
               .[]
               | select(
                   (.type == "Binary" and (.name | startswith($asset_prefix))) or
@@ -200,6 +206,9 @@ jobs:
       - name: Mark draft release ready for human inspection
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BINARY_NAME: ${{ steps.component.outputs.binary_name }}
+          PACKAGE_NAME: ${{ steps.component.outputs.package_name }}
+          VERSION: ${{ steps.component.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -250,7 +259,7 @@ jobs:
             echo
             echo "- Repository: \`${GITHUB_REPOSITORY}\`"
             echo "- Tag: \`${GITHUB_REF_NAME}\`"
-            echo "- Package: \`${{ steps.component.outputs.package_name }}\`"
+            echo "- Package: \`${PACKAGE_NAME}\`"
             echo "- Target commit: \`${target_commitish}\`"
             echo "- Draft release: ${release_url}"
             echo "- Uploaded assets: ${total_count} total (${expected_count} checksum-covered assets plus \`checksums.txt\`)"
@@ -274,7 +283,7 @@ jobs:
             echo 'gh release view "${tag}" -R "${repo}" --json isDraft,isImmutable,tagName,targetCommitish,assets'
             echo 'gh release download "${tag}" -R "${repo}" -D "${tmp}" --pattern "*"'
             echo '(cd "${tmp}" && shasum -a 256 -c checksums.txt)'
-            echo "asset=\"${{ steps.component.outputs.binary_name }}_${{ steps.component.outputs.version }}_\$(go env GOOS)_\$(go env GOARCH)\""
+            echo "asset=\"${BINARY_NAME}_${VERSION}_\$(go env GOOS)_\$(go env GOARCH)\""
             echo 'gh attestation verify "${tmp}/${asset}" --repo "${repo}" --signer-workflow "${repo}/.github/workflows/release.yml" --source-ref "refs/tags/${tag}" --deny-self-hosted-runners'
             echo '```'
             echo
@@ -291,4 +300,114 @@ jobs:
             echo '```'
             echo
             echo "Rejected drafts may leave stale GitHub-native artifact attestations. That is expected and tolerated because consumers still require immutable release attestation plus provenance."
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+      - name: Mint Homebrew tap token
+        if: steps.component.outputs.package_name == 'ghd'
+        id: tap-token
+        uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+        with:
+          client-id: ${{ vars.PACKAGING_APP_CLIENT_ID }}
+          private-key: ${{ secrets.PACKAGING_APP_PRIVATE_KEY }}
+          owner: meigma
+          repositories: homebrew-tap
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Checkout Homebrew tap
+        if: steps.component.outputs.package_name == 'ghd'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: meigma/homebrew-tap
+          ref: main
+          path: homebrew-tap
+          token: ${{ steps.tap-token.outputs.token }}
+          persist-credentials: true
+
+      - name: Open Homebrew tap pull request
+        if: steps.component.outputs.package_name == 'ghd'
+        id: homebrew-tap-pr
+        env:
+          GH_TOKEN: ${{ steps.tap-token.outputs.token }}
+          PACKAGING_APP_ID: ${{ vars.PACKAGING_APP_ID }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cask_source="${GITHUB_WORKSPACE}/dist/homebrew/Casks/ghd.rb"
+          tap_dir="${GITHUB_WORKSPACE}/homebrew-tap"
+
+          if [[ ! -f "${cask_source}" ]]; then
+            echo "expected generated cask at ${cask_source}" >&2
+            exit 1
+          fi
+
+          safe_tag="$(tr -c '[:alnum:]._-' '-' <<<"${RELEASE_TAG}" | sed 's/-$//')"
+          branch="ghd-${safe_tag}"
+
+          cd "${tap_dir}"
+          git config user.name "meigma-packaging-app[bot]"
+          git config user.email "${PACKAGING_APP_ID}+meigma-packaging-app[bot]@users.noreply.github.com"
+          git switch -C "${branch}" origin/main
+
+          mkdir -p Casks
+          cp "${cask_source}" Casks/ghd.rb
+
+          if git diff --quiet -- Casks/ghd.rb; then
+            echo "No Homebrew cask changes to publish"
+            echo "url=" >>"${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          git add Casks/ghd.rb
+          git commit -m "ghd ${RELEASE_TAG}"
+          git push --force-with-lease --set-upstream origin "${branch}"
+
+          body_file="$(mktemp)"
+          {
+            echo "Updates the generated \`ghd\` cask for \`${RELEASE_TAG}\`."
+            echo
+            echo "Do not merge this PR until the corresponding \`meigma/ghd\` draft release has been published."
+            echo
+            echo "Release: https://github.com/meigma/ghd/releases/tag/${RELEASE_TAG}"
+          } >"${body_file}"
+
+          pr_json="$(gh pr list \
+            --repo meigma/homebrew-tap \
+            --head "${branch}" \
+            --base main \
+            --state open \
+            --json number,url \
+            --jq '.[0] // empty')"
+
+          if [[ -n "${pr_json}" ]]; then
+            pr_number="$(jq -r '.number' <<<"${pr_json}")"
+            pr_url="$(jq -r '.url' <<<"${pr_json}")"
+            gh pr edit "${pr_number}" \
+              --repo meigma/homebrew-tap \
+              --title "ghd ${RELEASE_TAG}" \
+              --body-file "${body_file}"
+          else
+            pr_url="$(gh pr create \
+              --repo meigma/homebrew-tap \
+              --base main \
+              --head "${branch}" \
+              --title "ghd ${RELEASE_TAG}" \
+              --body-file "${body_file}")"
+          fi
+
+          echo "url=${pr_url}" >>"${GITHUB_OUTPUT}"
+
+      - name: Summarize Homebrew tap pull request
+        if: steps.component.outputs.package_name == 'ghd' && steps.homebrew-tap-pr.outputs.url != ''
+        env:
+          HOMEBREW_TAP_PR_URL: ${{ steps.homebrew-tap-pr.outputs.url }}
+        shell: bash
+        run: |
+          {
+            echo
+            echo "## Homebrew tap PR"
+            echo
+            echo "Merge after publishing the draft release: ${HOMEBREW_TAP_PR_URL}"
           } >>"${GITHUB_STEP_SUMMARY}"

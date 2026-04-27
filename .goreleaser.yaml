@@ -26,7 +26,8 @@ builds:
       - -s -w -buildid=
       - -X main.version={{ .Version }}
       - -X main.commit={{ .FullCommit }}
-      - -X main.date={{ .Date }}
+      - -X main.date={{ .CommitDate }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - id: ghd
@@ -48,6 +49,23 @@ release:
   replace_existing_artifacts: true
   make_latest: false
   mode: keep-existing
+
+homebrew_casks:
+  - name: ghd
+    ids:
+      - ghd
+    repository:
+      owner: meigma
+      name: homebrew-tap
+      branch: main
+    url:
+      template: "https://github.com/meigma/ghd/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    commit_msg_template: "brew cask update for {{ .ProjectName }} {{ .Tag }}"
+    homepage: "https://github.com/meigma/ghd"
+    description: "Verified GitHub release asset downloader"
+    binaries:
+      - ghd
+    skip_upload: true
 
 changelog:
   disable: true
