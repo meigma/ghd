@@ -4,6 +4,7 @@
   "draft": true,
   "force-tag-creation": true,
   "release-type": "simple",
+  "separate-pull-requests": true,
   "packages": {
     ".": {
       "component": "ghd",
