@@ -41,6 +41,29 @@ func TestCLI(t *testing.T) {
 	})
 }
 
+func TestVersionFlagPrintsBuildMetadata(t *testing.T) {
+	t.Helper()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	root := NewRootCommand(Options{
+		Out: &stdout,
+		Err: &stderr,
+		Build: BuildInfo{
+			Version: "0.1.0",
+			Commit:  "abc1234",
+			Date:    "2026-04-26T13:00:00Z",
+		},
+	})
+	root.SetArgs([]string{"--version"})
+
+	err := root.ExecuteContext(context.Background())
+
+	require.NoError(t, err)
+	assert.Equal(t, "ghd 0.1.0 (abc1234) built 2026-04-26T13:00:00Z\n", stdout.String())
+	assert.Empty(t, stderr.String())
+}
+
 func TestVerifyWithoutTargetFailsBeforeRuntimeSetup(t *testing.T) {
 	t.Helper()
 

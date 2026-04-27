@@ -78,7 +78,7 @@ GitHub recommends a draft-first publish flow for immutable releases:
 
 1. Create the release as a draft.
 2. Attach all release assets to the draft.
-3. Publish the draft release.
+3. Publish the draft release after final inspection.
 
 Enable release immutability in GitHub before relying on `ghd` compatibility.
 For a repository, GitHub documents this under `Settings` -> `Releases` ->
@@ -98,11 +98,12 @@ build tool is up to you, but the release workflow needs to:
 3. optionally generate SBOM files;
 4. upload all assets to the draft release;
 5. attest the shipped subjects with `actions/attest`;
-6. publish the draft release after assets and attestations are in place.
+6. stop while the release is still a draft so a human can inspect it;
+7. publish the draft release manually after inspection.
 
 This example shows the minimum GitHub Actions shape. It assumes the pushed tag
 already exists and that the workflow either creates or reuses a draft release
-for that tag.
+for that tag. The workflow prepares the release, but it does not publish it.
 
 ```yaml
 name: Release
@@ -168,13 +169,21 @@ jobs:
         with:
           subject-checksums: ./dist/checksums.txt
 
-      - name: Publish immutable release
+      - name: Summarize draft release for inspection
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release edit "${GITHUB_REF_NAME}" \
+          release="$(gh release view "${GITHUB_REF_NAME}" \
             --repo "${GITHUB_REPOSITORY}" \
-            --draft=false
+            --json isDraft,url,assets)"
+
+          if [[ "$(jq -r .isDraft <<<"${release}")" != "true" ]]; then
+            echo "release ${GITHUB_REF_NAME} is not a draft" >&2
+            exit 1
+          fi
+
+          echo "Draft release is ready for inspection:" >>"${GITHUB_STEP_SUMMARY}"
+          jq -r .url <<<"${release}" >>"${GITHUB_STEP_SUMMARY}"
 ```
 
 Notes:
@@ -186,6 +195,63 @@ Notes:
 - SBOM assets are optional for `ghd`, but shipping them alongside binaries is a
   reasonable default. If you publish them, add those files to the
   `gh release upload` step too.
+- GitHub-native artifact attestations are stored in GitHub's attestations API,
+  not as normal release assets. If a draft is rejected and deleted, stale
+  attestations for those bytes may remain. That is acceptable for `ghd` because
+  consumers must also verify the immutable release attestation.
+
+## Inspect and Publish the Draft
+
+Inspect the draft release before publishing it. At minimum, confirm that the
+draft contains the expected assets and that the checksums file matches the
+downloaded bytes:
+
+```sh
+tag="tool-v1.2.3"
+repo="owner/repo"
+tmp="$(mktemp -d)"
+
+gh release view "${tag}" \
+  -R "${repo}" \
+  --json isDraft,isImmutable,tagName,targetCommitish,assets
+
+gh release download "${tag}" \
+  -R "${repo}" \
+  -D "${tmp}" \
+  --pattern "*"
+
+(cd "${tmp}" && shasum -a 256 -c checksums.txt)
+```
+
+Verify GitHub Actions provenance for one downloaded asset before publishing:
+
+```sh
+gh attestation verify "${tmp}/tool_1.2.3_darwin_arm64" \
+  --repo "${repo}" \
+  --signer-workflow owner/repo/.github/workflows/release.yml \
+  --source-ref refs/tags/tool-v1.2.3 \
+  --deny-self-hosted-runners
+```
+
+If inspection passes, publish the draft. This is the point where immutable
+release protections start applying:
+
+```sh
+gh release edit "${tag}" \
+  -R "${repo}" \
+  --draft=false \
+  --latest=false
+```
+
+If inspection fails before publication, delete the draft and tag, then recreate
+the release from corrected inputs:
+
+```sh
+gh release delete "${tag}" -R "${repo}" --cleanup-tag
+```
+
+Do not publish and then delete an immutable release as a correction path.
+Published immutable release tags cannot be reused.
 
 ## Verify the Published Release
 

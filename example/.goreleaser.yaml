@@ -2,16 +2,19 @@
 version: 2
 pro: true
 
-project_name: ghd
+project_name: ghd-example
+
+monorepo:
+  tag_prefix: example-
 
 before:
   hooks:
     - go test ./...
 
 builds:
-  - id: ghd
-    main: ./cmd/ghd
-    binary: ghd
+  - id: ghd-example
+    main: ./example/cmd/ghd-example
+    binary: ghd-example
     env:
       - CGO_ENABLED=0
     goos:
@@ -29,9 +32,9 @@ builds:
       - -X main.date={{ .Date }}
 
 archives:
-  - id: ghd
+  - id: ghd-example
     ids:
-      - ghd
+      - ghd-example
     formats:
       - binary
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"

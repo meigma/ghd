@@ -39,7 +39,7 @@ jobs:
         with:
           distribution: goreleaser-pro
           version: v2.15.4
-          args: check
+          args: check .goreleaser.yaml example/.goreleaser.yaml
         env:
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
 

@@ -3,12 +3,21 @@
   "bootstrap-sha": "60d595c76c53c9db510ad0e801dcc890846ad227",
   "draft": true,
   "force-tag-creation": true,
-  "include-component-in-tag": true,
   "release-type": "simple",
   "packages": {
     ".": {
+      "component": "ghd",
+      "package-name": "ghd",
+      "include-component-in-tag": false,
+      "initial-version": "0.1.0",
+      "exclude-paths": [
+        "example/**"
+      ]
+    },
+    "example": {
       "component": "example",
-      "package-name": "ghd-example"
+      "package-name": "ghd-example",
+      "include-component-in-tag": true
     }
   }
 }
