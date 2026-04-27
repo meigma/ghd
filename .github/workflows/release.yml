@@ -128,7 +128,27 @@ jobs:
 
           echo "Apple signing and notarization secrets are configured."
 
-      - name: Build signed release artifacts
+      - name: Set up uv
+        if: steps.component.outputs.package_name == 'ghd'
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.0"
+          enable-cache: false
+
+      - name: Install Quill
+        if: steps.component.outputs.package_name == 'ghd'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          quill_bin="$(go env GOPATH)/bin"
+          echo "${quill_bin}" >>"${GITHUB_PATH}"
+          export PATH="${quill_bin}:${PATH}"
+
+          go install github.com/anchore/quill/cmd/quill@v0.7.1
+          quill version
+
+      - name: Build release artifacts with signed Darwin binaries
         if: steps.component.outputs.package_name == 'ghd'
         uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
         with:
@@ -152,6 +172,18 @@ jobs:
           args: release --clean --skip=publish --config ${{ steps.component.outputs.goreleaser_config }}
         env:
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+
+      - name: Notarize signed Darwin binaries
+        if: steps.component.outputs.package_name == 'ghd'
+        env:
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+          ARTIFACT_NAME_PREFIX: ${{ steps.component.outputs.asset_prefix }}
+          NOTARY_TIMEOUT_SECONDS: "3600"
+          NOTARY_POLL_SECONDS: "60"
+        shell: bash
+        run: uv run --script ./.github/scripts/quill-macos.py notarize-dist
 
       - name: Materialize named release assets
         env:
