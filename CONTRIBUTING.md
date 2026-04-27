@@ -74,5 +74,5 @@ This repository does not currently declare a separate Code of Conduct.
 
 ## License and Ownership
 
-No contribution license agreement, DCO, or CLA is currently declared. No project
-license has been declared yet.
+No contribution license agreement, DCO, or CLA is currently declared.
+Contributions are accepted under the project's dual license: Apache-2.0 OR MIT.

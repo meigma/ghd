@@ -5,11 +5,9 @@ to report vulnerabilities privately.
 
 ## Supported Versions
 
-`ghd` has no public releases yet. Until the first release exists, security fixes
-apply to the default branch only.
-
-After releases begin, this policy should be updated to state which released
-versions receive security fixes.
+Before `ghd` reaches 1.0, security fixes target the default branch and the
+latest released version. Older pre-1.0 releases may not receive backported
+fixes unless a specific advisory says otherwise.
 
 ## Reporting a Vulnerability
 

@@ -1,98 +1,137 @@
 # ghd
 
-`ghd` is an experimental CLI for installing GitHub release assets only after the
-selected artifact passes strict release integrity and provenance checks.
+`ghd` is a secure installer for programs distributed through GitHub Releases.
+Before installing anything, it confirms that the binary you are about to run is
+the exact artifact a project's maintainers published, built by the workflow
+they declared, and recorded in GitHub's immutable release log.
 
-It is built for repositories that publish binaries through GitHub Releases,
-enable immutable releases, and generate GitHub artifact attestations with SLSA
-provenance.
+That protects you against tampered downloads, swapped assets, and releases
+built by an unexpected pipeline. To make those guarantees, `ghd` uses GitHub's
+immutable releases, artifact attestations, and SLSA provenance, all checked
+locally before any binary is exposed on your system.
 
-## Status
+## Installation
 
-`ghd` does not have a public release yet. When the first release is available,
-install it by manually downloading the matching asset from
-[GitHub Releases](https://github.com/meigma/ghd/releases) and placing the `ghd`
-binary on your `PATH`. A dogfood self-update path is planned later.
+On macOS, install `ghd` from the Homebrew tap:
 
-## Usage
+```sh
+brew install --cask meigma/tap/ghd
+```
+
+You can also download the binary for your operating system and architecture
+from [GitHub Releases](https://github.com/meigma/ghd/releases) and place `ghd`
+on your `PATH`.
+
+Confirm the binary runs:
+
+```sh
+ghd --help
+```
+
+For higher GitHub API rate limits, export an authenticated token:
+
+```sh
+export GITHUB_TOKEN="$(gh auth token)"
+```
+
+## Quick Start
 
 Verify and download one release asset without installing it:
 
 ```sh
-ghd --non-interactive download owner/repo/package@version --output ./out
+ghd download owner/repo/package@version --output ./out
 ```
 
-Index a repository and install one package:
+Index a repository and install one of its packages:
 
 ```sh
-ghd --non-interactive repo add owner/repo
-ghd --yes --non-interactive install package
+ghd repo add owner/repo
+ghd install package
 ```
 
 Check, update, and re-verify installed packages:
 
 ```sh
 ghd check package
-ghd --yes --non-interactive update package
+ghd update package
 ghd verify package
 ```
 
-Commands with stable result data support `--json`: `list`, `info`, `installed`,
+The [getting started guide](docs/docs/getting-started.md) walks through the same
+flow against a live release end to end.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `ghd download` | Verify and download one release asset. |
+| `ghd repo add`, `list`, `refresh`, `remove` | Manage indexed repositories. |
+| `ghd list`, `ghd info` | Discover packages from the index or directly from a repository. |
+| `ghd install`, `ghd uninstall` | Install or remove a package. |
+| `ghd installed` | List installed packages. |
+| `ghd check`, `ghd update`, `ghd verify` | Detect updates, apply them, or re-verify installed packages. |
+| `ghd doctor` | Check local environment readiness. |
+
+Commands with stable result data accept `--json`: `list`, `info`, `installed`,
 `check`, `verify`, `update`, `doctor`, and `repo list`.
+
+Use `--non-interactive` for plain output suitable for scripts. Use `--yes` to
+approve verified install actions and ordinary verified updates without prompts.
+
+## Configuration
+
+A compatible repository declares its packages in a root `ghd.toml`:
+
+```toml
+version = 1
+
+[provenance]
+signer_workflow = "owner/repo/.github/workflows/release.yml"
+
+[[packages]]
+name = "foo"
+description = "Foo CLI"
+tag_pattern = "foo-v${version}"
+
+[[packages.assets]]
+os = "darwin"
+arch = "arm64"
+pattern = "foo_${version}_darwin_arm64"
+
+[[packages.binaries]]
+path = "foo"
+```
+
+Archive assets are also supported. See the [reference](docs/docs/reference.md)
+for the full schema and the [publisher guide](docs/docs/publisher-guide.md) for
+how to ship a `ghd`-compatible release.
+
+## Verification
+
+For every download, install, update, or `verify` run, `ghd` checks that:
+
+1. The selected asset is part of an immutable GitHub release attestation for the
+   requested tag.
+2. The local artifact digest has SLSA provenance.
+3. The provenance signer workflow matches the workflow declared in `ghd.toml`.
+4. The source repository and source ref match the selected package and release.
+
+Installed binaries are exposed only from `ghd`-managed directories. The
+[security model](docs/docs/security-model.md) explains what `ghd` does and does
+not claim to prove.
 
 ## Documentation
 
-The user-facing docs site is planned for <https://ghd.meigma.dev>.
+Full documentation is published at <https://ghd.meigma.dev>.
 
 Local source:
 
 - [Get started](docs/docs/getting-started.md)
 - [Manage packages](docs/docs/manage-packages.md)
 - [Security model](docs/docs/security-model.md)
+- [Publisher guide](docs/docs/publisher-guide.md)
 - [Reference](docs/docs/reference.md)
 - [Design history](docs/docs/design.md)
-
-## Development
-
-Prerequisites:
-
-- Go
-- Node.js 20 or newer for the documentation site
-- npm
-- Moon, when running the same task graph used by CI
-
-Install documentation dependencies:
-
-```sh
-cd docs
-npm ci
-```
-
-Build and typecheck the docs:
-
-```sh
-moon run docs:build
-moon run docs:typecheck
-```
-
-Run the Go tests:
-
-```sh
-go test ./...
-```
-
-Cloudflare Pages should use:
-
-- project name `ghd`
-- custom domain `ghd.meigma.dev`
-- production branch `master`
-- `docs` as the root directory
-- `npm run build` as the build command
-- `build` as the build output directory
-
-The checked-in [docs/wrangler.jsonc](docs/wrangler.jsonc) records the
-Pages-side build output directory for Wrangler-based local development or
-deployments.
 
 ## Support
 
@@ -100,21 +139,20 @@ Use [GitHub Discussions](https://github.com/meigma/ghd/discussions) for usage
 questions and design discussion.
 
 Use [GitHub Issues](https://github.com/meigma/ghd/issues) for non-security bug
-reports and implementation tasks.
+reports.
 
-Do not report vulnerabilities in public channels. See [SECURITY.md](SECURITY.md).
+For private vulnerability reporting, see [SECURITY.md](SECURITY.md).
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup, testing expectations,
 and pull request workflow.
 
-## Security
-
-See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability
-reporting.
-
 ## License
 
-No license has been declared yet. Unless a license file is added, all rights are
-reserved by the repository owner.
+`ghd` is dual-licensed under either of:
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option. See [LICENSE](LICENSE) for the dual-license notice.
