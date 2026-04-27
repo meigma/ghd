@@ -1,6 +1,9 @@
 name: Release Dry Run
 
 on:
+  pull_request:
+    branches:
+      - master
   push:
     branches:
       - master
@@ -14,6 +17,7 @@ concurrency:
 
 jobs:
   release-dry-run:
+    if: ${{ github.event_name != 'pull_request' || (startsWith(github.head_ref, 'release-please--branches--') && github.event.pull_request.head.repo.full_name == github.repository) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -159,4 +163,34 @@ jobs:
             [[ "${version_output}" == *"${expected_version}"* ]]
             [[ "${version_output}" =~ \([[:xdigit:]]{7,40}\)\ built\ [0-9]{4}-[0-9]{2}-[0-9]{2}T ]]
             [[ "${hello_output}" == "hello from ghd-example" ]]
+          fi
+
+  release-dry-run-required:
+    name: release-dry-run-required
+    needs:
+      - release-dry-run
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce dry run only for Release Please PRs
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          REPOSITORY: ${{ github.repository }}
+          RELEASE_DRY_RUN_RESULT: ${{ needs.release-dry-run.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${EVENT_NAME}" == "pull_request" ]]; then
+            if [[ "${HEAD_REF}" != release-please--branches--* || "${HEAD_REPOSITORY}" != "${REPOSITORY}" ]]; then
+              echo "Release dry run is not required for this pull request."
+              exit 0
+            fi
+          fi
+
+          if [[ "${RELEASE_DRY_RUN_RESULT}" != "success" ]]; then
+            echo "Release dry run did not complete successfully: ${RELEASE_DRY_RUN_RESULT}" >&2
+            exit 1
           fi
