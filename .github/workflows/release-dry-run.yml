@@ -59,6 +59,13 @@ jobs:
         if: env.RELEASE_DRY_RUN_REQUIRED == 'true'
         uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
 
+      - name: Set up uv
+        if: env.RELEASE_DRY_RUN_REQUIRED == 'true' && matrix.component == 'ghd'
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.0"
+          enable-cache: false
+
       - name: Create local dry-run component tag
         if: env.RELEASE_DRY_RUN_REQUIRED == 'true'
         id: version

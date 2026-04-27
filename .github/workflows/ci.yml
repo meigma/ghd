@@ -35,6 +35,25 @@ jobs:
           cache-base: ${{ github.event.repository.default_branch }}
           proto-version: 0.56.4
 
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: "0.11.0"
+          enable-cache: false
+
+      - name: Sanity check Quill macOS helper
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          uv run --script .github/scripts/quill-macos.py sign-build --target linux_amd64 --path /does/not/matter
+          uv run --script .github/scripts/quill-macos.py sign-build --target darwin_amd64 --path /does/not/matter
+
+          if MACOS_SIGN_P12=dummy uv run --script .github/scripts/quill-macos.py sign-build --target darwin_amd64 --path /does/not/matter; then
+            echo "partial signing secret check unexpectedly succeeded" >&2
+            exit 1
+          fi
+
       - name: Check GoReleaser config
         uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
         with:

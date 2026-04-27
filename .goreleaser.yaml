@@ -30,7 +30,7 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     hooks:
       post:
-        - cmd: ./.github/scripts/quill-sign-darwin.sh "{{ .Target }}" "{{ .Path }}"
+        - cmd: uv run --script ./.github/scripts/quill-macos.py sign-build --target "{{ .Target }}" --path "{{ .Path }}"
 
 archives:
   - id: ghd
