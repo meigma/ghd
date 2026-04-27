@@ -97,7 +97,54 @@ jobs:
           echo "timed out waiting for Release Please draft ${GITHUB_REF_NAME}" >&2
           exit 1
 
+      - name: Verify Apple signing secrets
+        if: steps.component.outputs.package_name == 'ghd'
+        env:
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=()
+          for name in \
+            MACOS_SIGN_P12 \
+            MACOS_SIGN_PASSWORD \
+            MACOS_NOTARY_KEY \
+            MACOS_NOTARY_KEY_ID \
+            MACOS_NOTARY_ISSUER_ID; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("${name}")
+            fi
+          done
+
+          if [[ "${#missing[@]}" -gt 0 ]]; then
+            printf 'missing required Apple signing secrets: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
+          echo "Apple signing and notarization secrets are configured."
+
+      - name: Build signed release artifacts
+        if: steps.component.outputs.package_name == 'ghd'
+        uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
+        with:
+          distribution: goreleaser-pro
+          version: v2.15.4
+          args: release --clean --skip=publish --config ${{ steps.component.outputs.goreleaser_config }}
+        env:
+          GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
+          MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
+          MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
+          MACOS_NOTARY_ISSUER_ID: ${{ secrets.MACOS_NOTARY_ISSUER_ID }}
+
       - name: Build release artifacts
+        if: steps.component.outputs.package_name != 'ghd'
         uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
         with:
           distribution: goreleaser-pro
