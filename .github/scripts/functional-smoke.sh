@@ -4,8 +4,8 @@ set -euo pipefail
 
 repo="meigma/ghd"
 package="ghd-example"
-version="1.1.1"
-tag="example-v1.1.1"
+version="1.2.0"
+tag="example-v1.2.0"
 target="${repo}/${package}"
 versioned_target="${target}@${version}"
 signer_workflow="meigma/ghd/.github/workflows/release.yml"
@@ -50,7 +50,12 @@ assert_output_contains() {
 assert_json() {
   local file="$1"
   shift
-  jq -e "$@" "$file" >/dev/null
+  if ! jq -e "$@" "$file" >/dev/null; then
+    echo "expected JSON assertion to pass for ${file}: $*" >&2
+    echo "--- ${file} ---" >&2
+    cat "$file" >&2
+    exit 1
+  fi
 }
 
 run_expect_failure() {
