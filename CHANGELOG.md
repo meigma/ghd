@@ -1,12 +1,5 @@
 # Changelog
 
-## [0.1.2](https://github.com/meigma/ghd/compare/v0.1.1...v0.1.2) (2026-04-27)
-
-
-### Bug Fixes
-
-* **release:** ship notarized macos binaries ([#58](https://github.com/meigma/ghd/issues/58)) ([bff6abb](https://github.com/meigma/ghd/commit/bff6abbe60c6c151806beeadeed8d63a114d496a))
-
 ## [0.1.1](https://github.com/meigma/ghd/compare/v0.1.0...v0.1.1) (2026-04-27)
 
 
