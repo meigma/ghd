@@ -353,14 +353,14 @@ jobs:
 
           mkdir -p Casks
           cp "${cask_source}" Casks/ghd.rb
+          git add Casks/ghd.rb
 
-          if git diff --quiet -- Casks/ghd.rb; then
+          if git diff --cached --quiet -- Casks/ghd.rb; then
             echo "No Homebrew cask changes to publish"
             echo "url=" >>"${GITHUB_OUTPUT}"
             exit 0
           fi
 
-          git add Casks/ghd.rb
           git commit -m "ghd ${RELEASE_TAG}"
           git push --force-with-lease --set-upstream origin "${branch}"
 
