@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/meigma/ghd/compare/example-v1.1.1...example-v1.2.0) (2026-04-27)
+
+
+### Features
+
+* **release:** prepare first-party ghd releases ([#46](https://github.com/meigma/ghd/issues/46)) ([8be540f](https://github.com/meigma/ghd/commit/8be540f0f07a654f26eb4d5046fafadecaf951a0))
+
 ## [1.1.1](https://github.com/meigma/ghd/compare/example-v1.1.0...example-v1.1.1) (2026-04-26)
 
 
