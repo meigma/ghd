@@ -144,5 +144,9 @@ and pull request workflow.
 
 ## License
 
-No license has been declared yet. Until a license file is added, all rights are
-reserved by the repository owner.
+`ghd` is dual-licensed under either of:
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option. See [LICENSE](LICENSE) for the dual-license notice.
