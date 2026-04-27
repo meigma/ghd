@@ -12,9 +12,15 @@ locally before any binary is exposed on your system.
 
 ## Installation
 
-Download the binary for your operating system and architecture from
-[GitHub Releases](https://github.com/meigma/ghd/releases) and place `ghd` on
-your `PATH`.
+On macOS, install `ghd` from the Homebrew tap:
+
+```sh
+brew install --cask meigma/tap/ghd
+```
+
+You can also download the binary for your operating system and architecture
+from [GitHub Releases](https://github.com/meigma/ghd/releases) and place `ghd`
+on your `PATH`.
 
 Confirm the binary runs:
 
@@ -144,5 +150,9 @@ and pull request workflow.
 
 ## License
 
-No license has been declared yet. Until a license file is added, all rights are
-reserved by the repository owner.
+`ghd` is dual-licensed under either of:
+
+- [Apache License, Version 2.0](LICENSE-APACHE)
+- [MIT License](LICENSE-MIT)
+
+at your option. See [LICENSE](LICENSE) for the dual-license notice.
