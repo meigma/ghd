@@ -18,6 +18,9 @@ On macOS, install `ghd` from the Homebrew tap:
 brew install --cask meigma/tap/ghd
 ```
 
+The macOS release binaries distributed through the tap are signed and
+notarized.
+
 You can also download the binary for your operating system and architecture
 from [GitHub Releases](https://github.com/meigma/ghd/releases) and place `ghd`
 on your `PATH`.
