@@ -33,6 +33,7 @@ jobs:
         with:
           auto-setup: true
           cache-base: ${{ github.event.repository.default_branch }}
+          proto-version: 0.56.4
 
       - name: Check GoReleaser config
         uses: goreleaser/goreleaser-action@e24998b8b67b290c2fa8b7c14fcfa7de2c5c9b8c # v7.1.0
