@@ -82,8 +82,24 @@ jobs:
 
           tag_names_json="[]"
           for attempt in {1..12}; do
-            releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
-            tag_names_json="$(jq -c --arg sha "${RELEASE_SHA}" '[.[] | select(.draft == true and .target_commitish == $sha) | .tag_name]' <<<"${releases}")"
+            tag_names_json="[]"
+            releases="$(gh release list \
+              --repo "${GITHUB_REPOSITORY}" \
+              --limit 100 \
+              --json tagName,isDraft)"
+
+            while IFS= read -r tag_name; do
+              if ! release_json="$(gh release view "${tag_name}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --json isDraft,tagName,targetCommitish 2>/dev/null)"; then
+                echo "Unable to inspect draft release ${tag_name}; skipping" >&2
+                continue
+              fi
+
+              if jq -e --arg sha "${RELEASE_SHA}" '.isDraft == true and .targetCommitish == $sha' <<<"${release_json}" >/dev/null; then
+                tag_names_json="$(jq -c --arg tag "$(jq -r '.tagName' <<<"${release_json}")" '. + [$tag]' <<<"${tag_names_json}")"
+              fi
+            done < <(jq -r '.[] | select(.isDraft == true) | .tagName' <<<"${releases}")
 
             if [[ "$(jq 'length' <<<"${tag_names_json}")" -gt 0 ]]; then
               break
