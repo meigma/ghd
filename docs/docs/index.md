@@ -30,10 +30,15 @@ it downloads or installs a release asset.
 
 ## Current Status
 
-`ghd` does not have a public release yet. Until the first release exists,
-installation is manual: download the matching release asset from GitHub Releases
-once it is published, put the `ghd` binary on your `PATH`, and run `ghd --help`
-to confirm it is available.
+`ghd` is preparing its first public release. The primary install path is the
+Homebrew cask published from `meigma/homebrew-tap`:
+
+```sh
+brew install --cask meigma/tap/ghd
+```
+
+Manual binaries are also published through
+[GitHub Releases](https://github.com/meigma/ghd/releases).
 
 The current documentation reflects the implemented command surface and the live
 first-party example release `meigma/ghd/ghd-example@1.1.1`.

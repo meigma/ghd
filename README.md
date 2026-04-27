@@ -12,9 +12,15 @@ locally before any binary is exposed on your system.
 
 ## Installation
 
-Download the binary for your operating system and architecture from
-[GitHub Releases](https://github.com/meigma/ghd/releases) and place `ghd` on
-your `PATH`.
+On macOS, install `ghd` from the Homebrew tap:
+
+```sh
+brew install --cask meigma/tap/ghd
+```
+
+You can also download the binary for your operating system and architecture
+from [GitHub Releases](https://github.com/meigma/ghd/releases) and place `ghd`
+on your `PATH`.
 
 Confirm the binary runs:
 

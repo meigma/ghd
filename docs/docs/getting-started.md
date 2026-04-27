@@ -10,10 +10,15 @@ release published from this repository. It is a small direct-binary package
 used to validate `ghd` against real GitHub releases, release attestations, and
 SLSA provenance.
 
-## Before You Start
+## Install `ghd`
 
-`ghd` does not have a public release yet. When the first release is published,
-download the asset for your operating system and architecture from
+On macOS, install `ghd` from the Homebrew tap:
+
+```sh
+brew install --cask meigma/tap/ghd
+```
+
+You can also download the asset for your operating system and architecture from
 [GitHub Releases](https://github.com/meigma/ghd/releases), place the `ghd`
 binary somewhere on your `PATH`, and confirm it runs:
 
