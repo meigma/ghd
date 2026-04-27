@@ -66,6 +66,19 @@ jobs:
           version: "0.11.0"
           enable-cache: false
 
+      - name: Install Quill
+        if: env.RELEASE_DRY_RUN_REQUIRED == 'true' && matrix.component == 'ghd'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          quill_bin="$(go env GOPATH)/bin"
+          echo "${quill_bin}" >>"${GITHUB_PATH}"
+          export PATH="${quill_bin}:${PATH}"
+
+          go install github.com/anchore/quill/cmd/quill@v0.7.1
+          quill version
+
       - name: Create local dry-run component tag
         if: env.RELEASE_DRY_RUN_REQUIRED == 'true'
         id: version
@@ -94,6 +107,8 @@ jobs:
           args: release --clean --skip=publish --config ${{ matrix.config }}
         env:
           GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
+          MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
+          MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
 
       - name: Validate dry-run artifact metadata
         if: env.RELEASE_DRY_RUN_REQUIRED == 'true'

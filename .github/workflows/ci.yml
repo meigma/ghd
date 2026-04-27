@@ -47,7 +47,11 @@ jobs:
           set -euo pipefail
 
           uv run --script .github/scripts/quill-macos.py sign-build --target linux_amd64 --path /does/not/matter
-          uv run --script .github/scripts/quill-macos.py sign-build --target darwin_amd64 --path /does/not/matter
+
+          if uv run --script .github/scripts/quill-macos.py sign-build --target darwin_amd64 --path /does/not/matter; then
+            echo "missing signing secret check unexpectedly succeeded" >&2
+            exit 1
+          fi
 
           if MACOS_SIGN_P12=dummy uv run --script .github/scripts/quill-macos.py sign-build --target darwin_amd64 --path /does/not/matter; then
             echo "partial signing secret check unexpectedly succeeded" >&2

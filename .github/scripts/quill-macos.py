@@ -50,6 +50,15 @@ def require_env(names: tuple[str, ...]) -> None:
         fail(f"missing required Apple notarization secrets: {' '.join(missing)}")
 
 
+def require_signing_env(target: str) -> None:
+    missing = [name for name in SIGN_ENV if not os.environ.get(name)]
+    if missing:
+        fail(
+            f"missing required Apple signing secrets for {target}: {' '.join(missing)}; "
+            "Darwin release binaries must be signed"
+        )
+
+
 def quill_notary_args() -> list[str]:
     return [
         "--notary-key",
@@ -177,17 +186,7 @@ def sign_build(args: argparse.Namespace) -> int:
     if not target.startswith("darwin_"):
         return 0
 
-    configured = [name for name in SIGN_ENV if os.environ.get(name)]
-    if not configured:
-        log(f"Skipping Quill signing for {target}: Apple signing secrets are not configured.")
-        return 0
-
-    if len(configured) != len(SIGN_ENV):
-        fail(
-            f"partial Apple signing secret configuration for {target}; "
-            "MACOS_SIGN_P12 and MACOS_SIGN_PASSWORD must both be set"
-        )
-
+    require_signing_env(target)
     require_command("quill")
     if not binary_path.is_file():
         fail(f"cannot sign {target}: binary path does not exist: {binary_path}")
