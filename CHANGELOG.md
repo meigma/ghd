@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/meigma/ghd/compare/v0.1.0...v0.1.1) (2026-04-27)
+
+
+### Bug Fixes
+
+* **ci:** update functional smoke fixture ([#55](https://github.com/meigma/ghd/issues/55)) ([d526253](https://github.com/meigma/ghd/commit/d52625386288beb8c5e971d00ff57b0dcaec5fc8))
+
 ## 0.1.0 (2026-04-27)
 
 
